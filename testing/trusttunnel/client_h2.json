@@ -1,0 +1,40 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "socks-in-h2",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-out-h2",
+      "protocol": "trusttunnel",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": 9443,
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.lab.local",
+        "transport": "http2",
+        "skipVerification": true,
+        "udp": false
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.lab.local",
+          "allowInsecure": true,
+          "alpn": ["h2"]
+        }
+      }
+    }
+  ]
+}
