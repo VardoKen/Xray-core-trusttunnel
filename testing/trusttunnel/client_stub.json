@@ -1,0 +1,31 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-out",
+      "protocol": "trusttunnel",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": 8443,
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.lab.local",
+        "transport": "http2",
+        "skipVerification": true,
+        "udp": false
+      }
+    }
+  ]
+}
