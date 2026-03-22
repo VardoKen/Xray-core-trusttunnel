@@ -3,6 +3,7 @@ package trusttunnel
 import (
 	"bufio"
 	"context"
+	"crypto/x509"
 	"io"
 	"net/http"
 	"time"
@@ -95,26 +96,26 @@ func connectHTTP2(rawConn stat.Connection, req *http.Request) (io.ReadWriteClose
 	t := http2.Transport{}
 	h2clientConn, err := t.NewClientConn(rawConn)
 	if err != nil {
-		pr.Close()
-		pw.Close()
-		rawConn.Close()
+		_ = pr.Close()
+		_ = pw.Close()
+		_ = rawConn.Close()
 		return nil, err
 	}
 
 	resp, err := h2clientConn.RoundTrip(req)
 	if err != nil {
-		pr.Close()
-		pw.Close()
-		rawConn.Close()
+		_ = pr.Close()
+		_ = pw.Close()
+		_ = rawConn.Close()
 		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		pr.Close()
-		pw.Close()
-		rawConn.Close()
+		_ = resp.Body.Close()
+		_ = pr.Close()
+		_ = pw.Close()
+		_ = rawConn.Close()
 		return nil, errors.New("trusttunnel CONNECT failed with status ", resp.StatusCode, ": ", string(body))
 	}
 
@@ -145,6 +146,46 @@ func (h *http2Conn) Close() error {
 	return h.Connection.Close()
 }
 
+func verifyTrustTunnelTLS(peerCerts []*x509.Certificate, cfg *ClientConfig) error {
+	if cfg.GetSkipVerification() {
+		return nil
+	}
+
+	if cfg.GetHostname() == "" && cfg.GetCertificatePem() == "" {
+		return nil
+	}
+
+	if len(peerCerts) == 0 {
+		return errors.New("peer certificate is missing")
+	}
+
+	opts := x509.VerifyOptions{
+		Intermediates: x509.NewCertPool(),
+	}
+
+	for _, cert := range peerCerts[1:] {
+		opts.Intermediates.AddCert(cert)
+	}
+
+	if cfg.GetHostname() != "" {
+		opts.DNSName = cfg.GetHostname()
+	}
+
+	if pemData := cfg.GetCertificatePem(); pemData != "" {
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM([]byte(pemData)) {
+			return errors.New("failed to parse certificate_pem")
+		}
+		opts.Roots = roots
+	}
+
+	if _, err := peerCerts[0].Verify(opts); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (c *Client) Process(ctx context.Context, link *transport.Link, dialer internet.Dialer) error {
 	outbounds := session.OutboundsFromContext(ctx)
 	ob := outbounds[len(outbounds)-1]
@@ -166,41 +207,52 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	user := c.server.User
 	account, ok := user.Account.(*MemoryAccount)
 	if !ok {
-		conn.Close()
+		_ = conn.Close()
 		return errors.New("trusttunnel user account is not valid")
 	}
 
 	host := ob.Target.NetAddr()
 	if host == "" {
-		conn.Close()
+		_ = conn.Close()
 		return errors.New("invalid target address")
 	}
 
 	req, err := buildConnectRequest(host, account)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return errors.New("failed to create CONNECT request").Base(err)
 	}
 
 	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return errors.New("failed to set deadline").Base(err).AtWarning()
 	}
 
 	nextProto := ""
+	var peerCerts []*x509.Certificate
+
 	iConn := stat.TryUnwrapStatsConn(conn)
 	if tlsConn, ok := iConn.(*xtlstls.Conn); ok {
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return errors.New("failed TLS handshake").Base(err).AtWarning()
 		}
-		nextProto = tlsConn.ConnectionState().NegotiatedProtocol
+		state := tlsConn.ConnectionState()
+		nextProto = state.NegotiatedProtocol
+		peerCerts = state.PeerCertificates
 	} else if tlsConn, ok := iConn.(*xtlstls.UConn); ok {
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return errors.New("failed uTLS handshake").Base(err).AtWarning()
 		}
-		nextProto = tlsConn.ConnectionState().NegotiatedProtocol
+		state := tlsConn.ConnectionState()
+		nextProto = state.NegotiatedProtocol
+		peerCerts = state.PeerCertificates
+	}
+
+	if err := verifyTrustTunnelTLS(peerCerts, c.config); err != nil {
+		_ = conn.Close()
+		return errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
 	}
 
 	var tunnelConn io.ReadWriteCloser
@@ -216,7 +268,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	}
 
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return errors.New("failed to establish trusttunnel CONNECT").Base(err).AtWarning()
 	}
 	defer tunnelConn.Close()

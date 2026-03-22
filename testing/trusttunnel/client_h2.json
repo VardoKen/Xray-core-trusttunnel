@@ -23,7 +23,8 @@
         "password": "p1",
         "hostname": "vpn.lab.local",
         "transport": "http2",
-        "skipVerification": true,
+        "skipVerification": false,
+        "certificatePemFile": "/opt/lab/xray-tt/certs/server.crt",
         "udp": false
       },
       "streamSettings": {
