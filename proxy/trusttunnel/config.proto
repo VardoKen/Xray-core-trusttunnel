@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package xray.proxy.trusttunnel;
+
+option csharp_namespace = "Xray.Proxy.TrustTunnel";
+option go_package = "github.com/xtls/xray-core/proxy/trusttunnel";
+option java_package = "com.xray.proxy.trusttunnel";
+option java_multiple_files = true;
+
+import "common/protocol/user.proto";
+import "common/protocol/server_spec.proto";
+
+message Account {
+  string username = 1;
+  string password = 2;
+}
+
+enum TransportProtocol {
+  HTTP2 = 0;
+  HTTP3 = 1;
+}
+
+message Rule {
+  string cidr = 1;
+  string client_random = 2;
+  bool allow = 3;
+}
+
+message ServerHost {
+  string hostname = 1;
+  string certificate_path = 2;
+  string key_path = 3;
+}
+
+message ClientConfig {
+  xray.common.protocol.ServerEndpoint server = 1;
+  string hostname = 2;
+  TransportProtocol transport = 3;
+  bool has_ipv6 = 4;
+  bool skip_verification = 5;
+  string certificate_pem = 6;
+  string client_random = 7;
+  bool anti_dpi = 8;
+  bool enable_udp = 9;
+}
+
+message ServerConfig {
+  repeated xray.common.protocol.User users = 1;
+  repeated ServerHost hosts = 2;
+  repeated TransportProtocol transports = 3;
+  repeated Rule rules = 4;
+  bool ipv6_available = 5;
+  uint32 auth_failure_status_code = 6;
+  bool enable_udp = 7;
+}
