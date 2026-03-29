@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"io"
 	"net/http"
 
 	"github.com/apernet/quic-go"
@@ -39,6 +40,38 @@ func isH3Stream(mss *internet.MemoryStreamConfig) bool {
 		return false
 	}
 	return len(tlsCfg.NextProtos) == 1 && tlsCfg.NextProtos[0] == "h3"
+}
+
+type trustTunnelH3CountReadCloser struct {
+	io.ReadCloser
+	counter stats.Counter
+}
+
+func (r *trustTunnelH3CountReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 && r.counter != nil {
+		r.counter.Add(int64(n))
+	}
+	return n, err
+}
+
+type trustTunnelH3CountResponseWriter struct {
+	http.ResponseWriter
+	counter stats.Counter
+}
+
+func (w *trustTunnelH3CountResponseWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if n > 0 && w.counter != nil {
+		w.counter.Add(int64(n))
+	}
+	return n, err
+}
+
+func (w *trustTunnelH3CountResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 type trustTunnelH3Worker struct {
@@ -137,7 +170,22 @@ func (w *trustTunnelH3Worker) Start() error {
 		}
 		ctxReq = session.ContextWithContent(ctxReq, content)
 
-		h3proxy.ServeHTTP3(ctxReq, rw, req.WithContext(ctxReq), w.dispatcher, inbound)
+		var rwCounted http.ResponseWriter = rw
+		if w.downlinkCounter != nil {
+			rwCounted = &trustTunnelH3CountResponseWriter{
+				ResponseWriter: rw,
+				counter:        w.downlinkCounter,
+			}
+		}
+
+		if req.Body != nil && w.uplinkCounter != nil {
+			req.Body = &trustTunnelH3CountReadCloser{
+				ReadCloser: req.Body,
+				counter:    w.uplinkCounter,
+			}
+		}
+
+		h3proxy.ServeHTTP3(ctxReq, rwCounted, req.WithContext(ctxReq), w.dispatcher, inbound)
 	})
 
 	w.server = &http3.Server{
