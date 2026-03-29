@@ -358,6 +358,15 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 		return
 	}
 
+	if isTrustTunnelUDPHost(req.Host) {
+		if !s.config.GetEnableUdp() {
+			writeH2Response(w, http.StatusForbidden, "udp is disabled\n", nil)
+			return
+		}
+		s.serveUDPMuxRequest(proto, ctx, w, req, dispatcher)
+		return
+	}
+
 	dest, err := http_proto.ParseHost(req.Host, net.Port(443))
 	if err != nil {
 		writeH2Response(w, http.StatusBadRequest, "invalid CONNECT host\n", nil)

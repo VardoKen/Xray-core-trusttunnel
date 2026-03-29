@@ -11,6 +11,7 @@ import (
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/buf"
 	"github.com/xtls/xray-core/common/errors"
+	xnet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/session"
 	"github.com/xtls/xray-core/common/task"
@@ -203,6 +204,10 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	host := ob.Target.NetAddr()
 	if host == "" {
 		return errors.New("invalid target address")
+	}
+
+	if ob.Target.Network == xnet.Network_UDP {
+		return c.processUDP(ctx, link, dialer, account, ob.Target)
 	}
 
 	if c.config.GetTransport() == TransportProtocol_HTTP3 {

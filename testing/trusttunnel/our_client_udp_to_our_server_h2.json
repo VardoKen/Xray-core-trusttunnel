@@ -1,0 +1,54 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "dns-in",
+      "listen": "127.0.0.1",
+      "port": 5301,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "1.1.1.1",
+        "port": 53,
+        "network": "udp"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-out",
+      "protocol": "trusttunnel",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": 9443,
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.lab.local",
+        "transport": "http2",
+        "hasIpv6": true,
+        "skipVerification": false,
+        "certificatePemFile": "/opt/lab/xray-tt/certs/server.crt",
+        "clientRandom": "",
+        "antiDpi": false,
+        "udp": true
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.lab.local",
+          "allowInsecure": true,
+          "alpn": ["h2"]
+        }
+      }
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["dns-in"],
+        "outboundTag": "tt-out"
+      }
+    ]
+  }
+}
