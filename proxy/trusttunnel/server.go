@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	appdispatcher "github.com/xtls/xray-core/app/dispatcher"
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/buf"
 	"github.com/xtls/xray-core/common/errors"
@@ -18,7 +19,10 @@ import (
 	"github.com/xtls/xray-core/common/protocol"
 	http_proto "github.com/xtls/xray-core/common/protocol/http"
 	"github.com/xtls/xray-core/common/session"
+	core "github.com/xtls/xray-core/core"
+	"github.com/xtls/xray-core/features/policy"
 	"github.com/xtls/xray-core/features/routing"
+	"github.com/xtls/xray-core/features/stats"
 	"github.com/xtls/xray-core/transport"
 	"github.com/xtls/xray-core/transport/internet/stat"
 	"golang.org/x/net/http2"
@@ -33,8 +37,10 @@ func init() {
 }
 
 type Server struct {
-	config *ServerConfig
-	users  *UserStore
+	config        *ServerConfig
+	users         *UserStore
+	policyManager policy.Manager
+	statsManager  stats.Manager
 }
 
 type bufferedConn struct {
@@ -60,7 +66,7 @@ func (fw *flushWriter) Write(p []byte) (int, error) {
 }
 
 func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
-	_ = ctx
+	v := core.MustFromContext(ctx)
 
 	store := &UserStore{}
 
@@ -75,8 +81,10 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	}
 
 	return &Server{
-		config: config,
-		users:  store,
+		config:        config,
+		users:         store,
+		policyManager: v.GetFeature(policy.ManagerType()).(policy.Manager),
+		statsManager:  v.GetFeature(stats.ManagerType()).(stats.Manager),
 	}, nil
 }
 
@@ -256,10 +264,11 @@ Start:
 		inbound.CanSpliceCopy = 1
 	}
 
-	if err := dispatcher.DispatchLink(ctx, dest, &transport.Link{
+	wrappedLink := appdispatcher.WrapLink(ctx, s.policyManager, s.statsManager, &transport.Link{
 		Reader: linkReader,
 		Writer: buf.NewWriter(conn),
-	}); err != nil {
+	})
+	if err := dispatcher.DispatchLink(ctx, dest, wrappedLink); err != nil {
 		return errors.New("failed to dispatch trusttunnel CONNECT").Base(err).AtWarning()
 	}
 
@@ -399,10 +408,11 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 		f: flusher,
 	}
 
-	if err := dispatcher.DispatchLink(ctx, dest, &transport.Link{
+	wrappedLink := appdispatcher.WrapLink(ctx, s.policyManager, s.statsManager, &transport.Link{
 		Reader: buf.NewReader(req.Body),
 		Writer: buf.NewWriter(writer),
-	}); err != nil {
+	})
+	if err := dispatcher.DispatchLink(ctx, dest, wrappedLink); err != nil {
 		errors.LogWarningInner(ctx, err, "failed to dispatch trusttunnel "+strings.ToLower(proto)+" CONNECT")
 	}
 }

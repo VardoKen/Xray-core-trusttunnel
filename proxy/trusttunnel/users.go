@@ -32,6 +32,10 @@ func (s *UserStore) Add(u *protocol.MemoryUser) error {
 		return errors.New("trusttunnel user account is not valid")
 	}
 
+	if u.Email == "" {
+		u.Email = acc.Username
+	}
+
 	usernameKey := normalizeUsername(acc.Username)
 	if usernameKey == "" {
 		return errors.New("trusttunnel username must not be empty")
