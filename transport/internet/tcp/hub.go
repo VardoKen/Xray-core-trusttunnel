@@ -115,6 +115,7 @@ func (v *Listener) keepAccepting() {
 
 		go func() {
 			if v.tlsConfig != nil {
+				conn = wrapTrustTunnelClientRandomConn(conn)
 				conn = tls.Server(conn, v.tlsConfig)
 			} else if v.realityConfig != nil {
 				if conn, err = reality.Server(conn, v.realityConfig); err != nil {

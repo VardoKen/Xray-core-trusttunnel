@@ -115,6 +115,7 @@ func isTimeout(err error) bool {
 }
 
 func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Connection, dispatcher routing.Dispatcher) error {
+	clientRandom := trustTunnelClientRandomFromConn(conn)
 	inbound := session.InboundFromContext(ctx)
 	if inbound != nil {
 		inbound.Name = "trusttunnel"
@@ -135,13 +136,13 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		if err := conn.SetReadDeadline(time.Time{}); err != nil {
 			errors.LogDebugInner(ctx, err, "failed to clear read deadline")
 		}
-		return s.processHTTP2(ctx, &bufferedConn{Connection: conn, reader: reader}, dispatcher, inbound)
+		return s.processHTTP2(ctx, &bufferedConn{Connection: conn, reader: reader}, dispatcher, inbound, clientRandom)
 	}
 
-	return s.processHTTP1(ctx, conn, reader, dispatcher, inbound)
+	return s.processHTTP1(ctx, conn, reader, dispatcher, inbound, clientRandom)
 }
 
-func (s *Server) processHTTP1(ctx context.Context, conn stat.Connection, reader *bufio.Reader, dispatcher routing.Dispatcher, inbound *session.Inbound) error {
+func (s *Server) processHTTP1(ctx context.Context, conn stat.Connection, reader *bufio.Reader, dispatcher routing.Dispatcher, inbound *session.Inbound, clientRandom string) error {
 Start:
 	req, err := http.ReadRequest(reader)
 	if err != nil {
@@ -192,6 +193,29 @@ Start:
 
 	if inbound != nil {
 		inbound.User = user
+	}
+
+	ctx = attachTrustTunnelClientRandom(ctx, clientRandom)
+	if clientRandom != "" {
+		errors.LogDebug(ctx, "trusttunnel client_random=", clientRandom)
+	}
+
+	allow, reason := isTrustTunnelAllowed(s.config.GetRules(), conn.RemoteAddr().String(), clientRandom)
+	if reason != "" {
+		errors.LogDebug(ctx, reason)
+	}
+	if !allow {
+		writePlainResponse(conn, http.StatusForbidden, "Forbidden", "connection rejected by rule\n", map[string]string{
+			"Connection": "close",
+		})
+		log.Record(&log.AccessMessage{
+			From:   conn.RemoteAddr(),
+			To:     req.Host,
+			Status: log.AccessRejected,
+			Reason: errors.New(reason),
+			Email:  user.Email,
+		})
+		return errors.New(reason).AtInfo()
 	}
 
 	dest, err := http_proto.ParseHost(req.Host, net.Port(443))
@@ -246,11 +270,11 @@ Start:
 	return nil
 }
 
-func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) error {
+func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) error {
 	done := make(chan struct{})
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		s.serveHTTP2Request(w, req, dispatcher, inboundTemplate)
+		s.serveHTTP2Request(w, req, dispatcher, inboundTemplate, clientRandom)
 	})
 
 	go func() {
@@ -267,7 +291,7 @@ func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatche
 	return nil
 }
 
-func (s *Server) serveHTTP2Request(w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) {
+func (s *Server) serveHTTP2Request(w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) {
 	ctx := req.Context()
 
 	if !strings.EqualFold(req.Method, http.MethodConnect) {
@@ -305,6 +329,27 @@ func (s *Server) serveHTTP2Request(w http.ResponseWriter, req *http.Request, dis
 		inbound.Name = "trusttunnel"
 		inbound.CanSpliceCopy = 0
 		ctx = session.ContextWithInbound(ctx, &inbound)
+	}
+
+	ctx = attachTrustTunnelClientRandom(ctx, clientRandom)
+	if clientRandom != "" {
+		errors.LogDebug(ctx, "trusttunnel client_random=", clientRandom)
+	}
+
+	allow, reason := isTrustTunnelAllowed(s.config.GetRules(), req.RemoteAddr, clientRandom)
+	if reason != "" {
+		errors.LogDebug(ctx, reason)
+	}
+	if !allow {
+		writeH2Response(w, http.StatusForbidden, "connection rejected by rule\n", nil)
+		log.Record(&log.AccessMessage{
+			From:   req.RemoteAddr,
+			To:     req.Host,
+			Status: log.AccessRejected,
+			Reason: errors.New(reason),
+			Email:  user.Email,
+		})
+		return
 	}
 
 	dest, err := http_proto.ParseHost(req.Host, net.Port(443))
