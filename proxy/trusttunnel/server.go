@@ -292,8 +292,14 @@ func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatche
 }
 
 func (s *Server) serveHTTP2Request(w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) {
-	ctx := req.Context()
+	s.serveHTTPConnectRequest("H2", req.Context(), w, req, dispatcher, inboundTemplate, clientRandom)
+}
 
+func (s *Server) ServeHTTP3(ctx context.Context, w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) {
+	s.serveHTTPConnectRequest("H3", ctx, w, req.WithContext(ctx), dispatcher, inboundTemplate, "")
+}
+
+func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) {
 	if !strings.EqualFold(req.Method, http.MethodConnect) {
 		writeH2Response(w, http.StatusMethodNotAllowed, "trusttunnel supports CONNECT only\n", nil)
 		return
@@ -355,7 +361,7 @@ func (s *Server) serveHTTP2Request(w http.ResponseWriter, req *http.Request, dis
 	dest, err := http_proto.ParseHost(req.Host, net.Port(443))
 	if err != nil {
 		writeH2Response(w, http.StatusBadRequest, "invalid CONNECT host\n", nil)
-		errors.LogWarningInner(ctx, err, "malformed trusttunnel h2 target")
+		errors.LogWarningInner(ctx, err, "malformed trusttunnel "+strings.ToLower(proto)+" target")
 		return
 	}
 
@@ -367,7 +373,7 @@ func (s *Server) serveHTTP2Request(w http.ResponseWriter, req *http.Request, dis
 		Email:  user.Email,
 	})
 
-	errors.LogInfo(ctx, "trusttunnel H2 CONNECT accepted for ", dest)
+	errors.LogInfo(ctx, "trusttunnel ", proto, " CONNECT accepted for ", dest)
 
 	w.WriteHeader(http.StatusOK)
 	if fl, ok := w.(http.Flusher); ok {
@@ -388,7 +394,7 @@ func (s *Server) serveHTTP2Request(w http.ResponseWriter, req *http.Request, dis
 		Reader: buf.NewReader(req.Body),
 		Writer: buf.NewWriter(writer),
 	}); err != nil {
-		errors.LogWarningInner(ctx, err, "failed to dispatch trusttunnel h2 CONNECT")
+		errors.LogWarningInner(ctx, err, "failed to dispatch trusttunnel "+strings.ToLower(proto)+" CONNECT")
 	}
 }
 

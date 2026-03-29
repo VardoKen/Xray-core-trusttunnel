@@ -18,8 +18,8 @@ import (
 	"github.com/xtls/xray-core/features/policy"
 	"github.com/xtls/xray-core/transport"
 	"github.com/xtls/xray-core/transport/internet"
-	xtlstls "github.com/xtls/xray-core/transport/internet/tls"
 	"github.com/xtls/xray-core/transport/internet/stat"
+	xtlstls "github.com/xtls/xray-core/transport/internet/tls"
 	"golang.org/x/net/http2"
 )
 
@@ -194,8 +194,43 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	}
 	ob.Name = "trusttunnel"
 
+	user := c.server.User
+	account, ok := user.Account.(*MemoryAccount)
+	if !ok {
+		return errors.New("trusttunnel user account is not valid")
+	}
+
+	host := ob.Target.NetAddr()
+	if host == "" {
+		return errors.New("invalid target address")
+	}
+
 	if c.config.GetTransport() == TransportProtocol_HTTP3 {
-		return errors.New("trusttunnel http3 is not implemented yet").AtWarning()
+		serverAddr := c.server.Destination.NetAddr()
+		if serverAddr == "" {
+			return errors.New("invalid trusttunnel server address")
+		}
+
+		tunnelConn, err := connectHTTP3(ctx, serverAddr, host, account, c.config)
+		if err != nil {
+			return errors.New("failed to establish trusttunnel HTTP/3 CONNECT").Base(err).AtWarning()
+		}
+		defer tunnelConn.Close()
+
+		requestDone := func() error {
+			return buf.Copy(link.Reader, buf.NewWriter(tunnelConn))
+		}
+
+		responseDone := func() error {
+			return buf.Copy(buf.NewReader(tunnelConn), link.Writer)
+		}
+
+		requestDonePost := task.OnSuccess(requestDone, task.Close(link.Writer))
+		if err := task.Run(ctx, requestDonePost, responseDone); err != nil {
+			return errors.New("trusttunnel connection ends").Base(err).AtInfo()
+		}
+
+		return nil
 	}
 
 	rawConn, err := dialer.Dial(ctx, c.server.Destination)
@@ -203,19 +238,6 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		return errors.New("failed to dial trusttunnel server").Base(err).AtWarning()
 	}
 	conn := rawConn.(stat.Connection)
-
-	user := c.server.User
-	account, ok := user.Account.(*MemoryAccount)
-	if !ok {
-		_ = conn.Close()
-		return errors.New("trusttunnel user account is not valid")
-	}
-
-	host := ob.Target.NetAddr()
-	if host == "" {
-		_ = conn.Close()
-		return errors.New("invalid target address")
-	}
 
 	req, err := buildConnectRequest(host, account)
 	if err != nil {
