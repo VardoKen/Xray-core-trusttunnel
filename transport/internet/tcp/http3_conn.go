@@ -15,32 +15,35 @@ type HTTP3RequestConn interface {
 	H3Method() string
 	H3Host() string
 	H3Header() http.Header
+	H3ClientRandom() string
 }
 
 type http3RequestConn struct {
-	body   io.ReadCloser
-	rw     http.ResponseWriter
-	method string
-	host   string
-	header http.Header
-	remote net.Addr
-	local  net.Addr
+	body         io.ReadCloser
+	rw           http.ResponseWriter
+	method       string
+	host         string
+	header       http.Header
+	clientRandom string
+	remote       net.Addr
+	local        net.Addr
 }
 
-func newHTTP3RequestConn(req *http.Request, rw http.ResponseWriter, remote net.Addr, local net.Addr) *http3RequestConn {
+func newHTTP3RequestConn(req *http.Request, rw http.ResponseWriter, remote net.Addr, local net.Addr, clientRandom string) *http3RequestConn {
 	header := make(http.Header, len(req.Header))
 	for k, v := range req.Header {
 		header[k] = append([]string(nil), v...)
 	}
 
 	return &http3RequestConn{
-		body:   req.Body,
-		rw:     rw,
-		method: req.Method,
-		host:   req.Host,
-		header: header,
-		remote: remote,
-		local:  local,
+		body:         req.Body,
+		rw:           rw,
+		method:       req.Method,
+		host:         req.Host,
+		header:       header,
+		clientRandom: clientRandom,
+		remote:       remote,
+		local:        local,
 	}
 }
 
@@ -54,6 +57,10 @@ func (c *http3RequestConn) H3Host() string {
 
 func (c *http3RequestConn) H3Header() http.Header {
 	return c.header.Clone()
+}
+
+func (c *http3RequestConn) H3ClientRandom() string {
+	return c.clientRandom
 }
 
 func (c *http3RequestConn) Read(p []byte) (int, error) {

@@ -83,7 +83,13 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSe
 		}
 		errors.LogInfo(ctx, "listening H3/QUIC on ", address, ":", port)
 
-		h3listener, err := quic.ListenEarly(packetConn, l.tlsConfig, &quic.Config{})
+		clientRandomTracker := newH3ClientRandomTracker()
+		wrappedPacketConn := &h3ClientRandomPacketConn{
+			PacketConn: packetConn,
+			tracker:    clientRandomTracker,
+		}
+
+		h3listener, err := quic.ListenEarly(wrappedPacketConn, l.tlsConfig, &quic.Config{})
 		if err != nil {
 			_ = packetConn.Close()
 			return nil, errors.New("failed to listen QUIC on ", address, ":", port).Base(err)
@@ -103,7 +109,8 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSe
 					}
 				}
 
-				l.addConn(stat.Connection(newHTTP3RequestConn(req, w, remoteAddr, localAddr)))
+				clientRandom := clientRandomTracker.Get(remoteAddr.String())
+				l.addConn(stat.Connection(newHTTP3RequestConn(req, w, remoteAddr, localAddr, clientRandom)))
 			}),
 		}
 

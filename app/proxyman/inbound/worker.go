@@ -148,7 +148,7 @@ func (w *tcpWorker) Start() error {
 	}
 
 	hub, err := internet.ListenTCP(ctx, w.address, w.port, w.stream, func(conn stat.Connection) {
-		go w.callback(conn)
+		w.callback(conn)
 	})
 	if err != nil {
 		return errors.New("failed to listen TCP on ", w.port).AtWarning().Base(err)

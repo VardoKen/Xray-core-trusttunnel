@@ -165,11 +165,18 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		inbound.CanSpliceCopy = 2
 	}
 
-	if _, ok := stat.TryUnwrapStatsConn(conn).(tcptransport.HTTP3RequestConn); ok {
+	if h3conn, ok := any(conn).(tcptransport.HTTP3RequestConn); ok {
 		if err := conn.SetReadDeadline(time.Time{}); err != nil {
 			errors.LogDebugInner(ctx, err, "failed to clear read deadline")
 		}
-		return s.processHTTP3(ctx, conn, dispatcher, inbound)
+		return s.processHTTP3(ctx, h3conn, conn, dispatcher, inbound)
+	}
+
+	if h3conn, ok := stat.TryUnwrapStatsConn(conn).(tcptransport.HTTP3RequestConn); ok {
+		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+			errors.LogDebugInner(ctx, err, "failed to clear read deadline")
+		}
+		return s.processHTTP3(ctx, h3conn, conn, dispatcher, inbound)
 	}
 
 	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
@@ -192,25 +199,20 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 	return s.processHTTP1(ctx, conn, reader, dispatcher, inbound, clientRandom)
 }
 
-func (s *Server) processHTTP3(ctx context.Context, conn stat.Connection, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) error {
-	h3conn, ok := stat.TryUnwrapStatsConn(conn).(tcptransport.HTTP3RequestConn)
-	if !ok {
-		return errors.New("invalid trusttunnel h3 connection").AtWarning()
-	}
-
+func (s *Server) processHTTP3(ctx context.Context, h3conn tcptransport.HTTP3RequestConn, conn stat.Connection, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) error {
 	req := &http.Request{
 		Method:     h3conn.H3Method(),
 		Host:       h3conn.H3Host(),
 		Header:     h3conn.H3Header(),
-		Body:       &countedReadCloser{Reader: conn, Closer: conn},
-		RemoteAddr: conn.RemoteAddr().String(),
+		Body:       &countedReadCloser{Reader: conn, Closer: h3conn},
+		RemoteAddr: h3conn.RemoteAddr().String(),
 	}
 	rw := &countedH3ResponseWriter{
 		base:   h3conn,
 		writer: conn,
 	}
 
-	s.serveHTTPConnectRequest("H3", ctx, rw, req.WithContext(ctx), dispatcher, inboundTemplate, "")
+	s.serveHTTPConnectRequest("H3", ctx, rw, req.WithContext(ctx), dispatcher, inboundTemplate, h3conn.H3ClientRandom())
 	return nil
 }
 
