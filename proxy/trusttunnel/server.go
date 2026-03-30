@@ -25,6 +25,7 @@ import (
 	"github.com/xtls/xray-core/features/stats"
 	"github.com/xtls/xray-core/transport"
 	"github.com/xtls/xray-core/transport/internet/stat"
+	tcptransport "github.com/xtls/xray-core/transport/internet/tcp"
 	"golang.org/x/net/http2"
 )
 
@@ -63,6 +64,40 @@ func (fw *flushWriter) Write(p []byte) (int, error) {
 		fw.f.Flush()
 	}
 	return n, err
+}
+
+type countedReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+type countedH3ResponseWriter struct {
+	base   http.ResponseWriter
+	writer io.Writer
+}
+
+func (w *countedH3ResponseWriter) Header() http.Header {
+	return w.base.Header()
+}
+
+func (w *countedH3ResponseWriter) WriteHeader(statusCode int) {
+	w.base.WriteHeader(statusCode)
+}
+
+func (w *countedH3ResponseWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if err == nil {
+		if fl, ok := w.base.(http.Flusher); ok {
+			fl.Flush()
+		}
+	}
+	return n, err
+}
+
+func (w *countedH3ResponseWriter) Flush() {
+	if fl, ok := w.base.(http.Flusher); ok {
+		fl.Flush()
+	}
 }
 
 func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
@@ -130,6 +165,13 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		inbound.CanSpliceCopy = 2
 	}
 
+	if _, ok := stat.TryUnwrapStatsConn(conn).(tcptransport.HTTP3RequestConn); ok {
+		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+			errors.LogDebugInner(ctx, err, "failed to clear read deadline")
+		}
+		return s.processHTTP3(ctx, conn, dispatcher, inbound)
+	}
+
 	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		errors.LogInfoInner(ctx, err, "failed to set read deadline")
 	}
@@ -148,6 +190,28 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 	}
 
 	return s.processHTTP1(ctx, conn, reader, dispatcher, inbound, clientRandom)
+}
+
+func (s *Server) processHTTP3(ctx context.Context, conn stat.Connection, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) error {
+	h3conn, ok := stat.TryUnwrapStatsConn(conn).(tcptransport.HTTP3RequestConn)
+	if !ok {
+		return errors.New("invalid trusttunnel h3 connection").AtWarning()
+	}
+
+	req := &http.Request{
+		Method:     h3conn.H3Method(),
+		Host:       h3conn.H3Host(),
+		Header:     h3conn.H3Header(),
+		Body:       &countedReadCloser{Reader: conn, Closer: conn},
+		RemoteAddr: conn.RemoteAddr().String(),
+	}
+	rw := &countedH3ResponseWriter{
+		base:   h3conn,
+		writer: conn,
+	}
+
+	s.serveHTTPConnectRequest("H3", ctx, rw, req.WithContext(ctx), dispatcher, inboundTemplate, "")
+	return nil
 }
 
 func (s *Server) processHTTP1(ctx context.Context, conn stat.Connection, reader *bufio.Reader, dispatcher routing.Dispatcher, inbound *session.Inbound, clientRandom string) error {
@@ -308,6 +372,24 @@ func (s *Server) ServeHTTP3(ctx context.Context, w http.ResponseWriter, req *htt
 	s.serveHTTPConnectRequest("H3", ctx, w, req.WithContext(ctx), dispatcher, inboundTemplate, "")
 }
 
+func isTrustTunnelHealthcheckHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "_check", "_check:443":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasTrustTunnelClientRandomRules(rules []*Rule) bool {
+	for _, rule := range rules {
+		if rule != nil && rule.GetClientRandom() != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) {
 	if !strings.EqualFold(req.Method, http.MethodConnect) {
 		writeH2Response(w, http.StatusMethodNotAllowed, "trusttunnel supports CONNECT only\n", nil)
@@ -346,6 +428,20 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 		ctx = session.ContextWithInbound(ctx, &inbound)
 	}
 
+	if proto == "H3" && hasTrustTunnelClientRandomRules(s.config.GetRules()) {
+		reason := "trusttunnel h3 does not support client_random rules"
+		errors.LogWarning(ctx, reason)
+		writeH2Response(w, http.StatusForbidden, "connection rejected: client_random rules are not supported on h3\n", nil)
+		log.Record(&log.AccessMessage{
+			From:   req.RemoteAddr,
+			To:     req.Host,
+			Status: log.AccessRejected,
+			Reason: errors.New(reason),
+			Email:  user.Email,
+		})
+		return
+	}
+
 	ctx = attachTrustTunnelClientRandom(ctx, clientRandom)
 	if clientRandom != "" {
 		errors.LogDebug(ctx, "trusttunnel client_random=", clientRandom)
@@ -364,6 +460,15 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 			Reason: errors.New(reason),
 			Email:  user.Email,
 		})
+		return
+	}
+
+	if proto == "H3" && isTrustTunnelHealthcheckHost(req.Host) {
+		errors.LogInfo(ctx, "trusttunnel H3 health-check accepted")
+		w.WriteHeader(http.StatusOK)
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
 		return
 	}
 

@@ -131,36 +131,20 @@ func NewAlwaysOnInboundHandler(ctx context.Context, tag string, receiverConfig *
 				if net.HasNetwork(nl, net.Network_TCP) {
 					errors.LogDebug(ctx, "creating stream worker on ", address, ":", port)
 
-					if isHTTP3Capable(p) && isH3Stream(mss) {
-						worker := &http3Worker{
-							address:         address,
-							port:            net.Port(port),
-							proxy:           p,
-							stream:          mss,
-							tag:             tag,
-							dispatcher:      h.mux,
-							sniffingConfig:  receiverConfig.SniffingSettings,
-							uplinkCounter:   uplinkCounter,
-							downlinkCounter: downlinkCounter,
-							ctx:             ctx,
-						}
-						h.workers = append(h.workers, worker)
-					} else {
-						worker := &tcpWorker{
-							address:         address,
-							port:            net.Port(port),
-							proxy:           p,
-							stream:          mss,
-							recvOrigDest:    receiverConfig.ReceiveOriginalDestination,
-							tag:             tag,
-							dispatcher:      h.mux,
-							sniffingConfig:  receiverConfig.SniffingSettings,
-							uplinkCounter:   uplinkCounter,
-							downlinkCounter: downlinkCounter,
-							ctx:             ctx,
-						}
-						h.workers = append(h.workers, worker)
+					worker := &tcpWorker{
+						address:         address,
+						port:            net.Port(port),
+						proxy:           p,
+						stream:          mss,
+						recvOrigDest:    receiverConfig.ReceiveOriginalDestination,
+						tag:             tag,
+						dispatcher:      h.mux,
+						sniffingConfig:  receiverConfig.SniffingSettings,
+						uplinkCounter:   uplinkCounter,
+						downlinkCounter: downlinkCounter,
+						ctx:             ctx,
 					}
+					h.workers = append(h.workers, worker)
 				}
 				if net.HasNetwork(nl, net.Network_UDP) {
 					worker := &udpWorker{
