@@ -131,8 +131,8 @@ func NewAlwaysOnInboundHandler(ctx context.Context, tag string, receiverConfig *
 				if net.HasNetwork(nl, net.Network_TCP) {
 					errors.LogDebug(ctx, "creating stream worker on ", address, ":", port)
 
-					if isTrustTunnelH3Capable(p) && isH3Stream(mss) {
-						worker := &trustTunnelH3Worker{
+					if isHTTP3Capable(p) && isH3Stream(mss) {
+						worker := &http3Worker{
 							address:         address,
 							port:            net.Port(port),
 							proxy:           p,
