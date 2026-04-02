@@ -430,20 +430,6 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 		ctx = session.ContextWithInbound(ctx, &inbound)
 	}
 
-	if proto == "H3" && hasTrustTunnelClientRandomRules(s.config.GetRules()) {
-		reason := "trusttunnel h3 does not support client_random rules"
-		errors.LogWarning(ctx, reason)
-		writeH2Response(w, http.StatusForbidden, "connection rejected: client_random rules are not supported on h3\n", nil)
-		log.Record(&log.AccessMessage{
-			From:   req.RemoteAddr,
-			To:     req.Host,
-			Status: log.AccessRejected,
-			Reason: errors.New(reason),
-			Email:  user.Email,
-		})
-		return
-	}
-
 	ctx = attachTrustTunnelClientRandom(ctx, clientRandom)
 	if clientRandom != "" {
 		errors.LogDebug(ctx, "trusttunnel client_random=", clientRandom)

@@ -1,10 +1,13 @@
 package tcp
 
 import (
+	stderrors "errors"
 	"io"
 	"net/http"
 	"time"
 
+	"github.com/apernet/quic-go"
+	"github.com/apernet/quic-go/http3"
 	"github.com/xtls/xray-core/common/net"
 )
 
@@ -63,11 +66,40 @@ func (c *http3RequestConn) H3ClientRandom() string {
 	return c.clientRandom
 }
 
+func isHTTP3NoError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var h3Err *http3.Error
+	if stderrors.As(err, &h3Err) && h3Err.ErrorCode == http3.ErrCodeNoError {
+		return true
+	}
+
+	var appErr *quic.ApplicationError
+	if stderrors.As(err, &appErr) && appErr.ErrorCode == quic.ApplicationErrorCode(http3.ErrCodeNoError) {
+		return true
+	}
+
+	var streamErr *quic.StreamError
+	if stderrors.As(err, &streamErr) && streamErr.ErrorCode == quic.StreamErrorCode(http3.ErrCodeNoError) {
+		return true
+	}
+
+	return false
+}
+
 func (c *http3RequestConn) Read(p []byte) (int, error) {
 	if c.body == nil {
 		return 0, io.EOF
 	}
-	return c.body.Read(p)
+
+	n, err := c.body.Read(p)
+	if isHTTP3NoError(err) {
+		return n, io.EOF
+	}
+
+	return n, err
 }
 
 func (c *http3RequestConn) Write(p []byte) (int, error) {
