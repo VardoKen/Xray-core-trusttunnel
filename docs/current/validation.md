@@ -146,9 +146,222 @@
 ## 5. Что остаётся предметом будущих проверок
 
 Открытые блоки для следующих циклов проверки:
-- H2 `_check` как отдельный special path;
+- end-to-end retest H2 `_check` после server-side special-path split;
 - `_icmp`;
 - outbound `clientRandom`;
 - полный UDP interop matrix;
 - observable server behavior для `ipv6_available`, private-network и timeout settings;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
+
+Для H2 `_check` в следующем цикле нужно отдельно зафиксировать:
+- exact server/client config paths;
+- `200` при successful auth + health-check;
+- `407` при auth failure, если используется `authFailureStatusCode=407`;
+- отсутствие ухода в обычный dispatch path с симптомами `failed to open connection to tcp:_check:443` и `lookup _check: no such host`.
+
+Подготовленные repo-local шаблоны для следующего retest:
+- server success/auth-fail: `testing/trusttunnel/server_h2.json`
+- server rule-gated allow/deny: `testing/trusttunnel/server_h2_rules.json`
+- official client success: `testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml`
+- official client auth-fail: `testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml`
+- official client rule-allow: `testing/trusttunnel/official_client_rules_allow.toml`
+- official client rule-deny: `testing/trusttunnel/official_client_rules_deny.toml`
+
+### 5.1. Debian lab runbook для H2 `_check`
+
+Предпосылки:
+- рабочее дерево находится в `/opt/lab/xray-tt/src/xray-core-trusttunnel`;
+- тестируемый Xray binary собирается в `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- official CLI client доступен как `/opt/lab/xray-tt/bin/trusttunnel_client`;
+- runtime-конфиги кладутся в `/opt/lab/xray-tt/configs`;
+- логи пишутся в `/opt/lab/xray-tt/logs`.
+
+Подготовка и preflight:
+
+```bash
+export LAB_ROOT=/opt/lab/xray-tt
+export XRAY_REPO=$LAB_ROOT/src/xray-core-trusttunnel
+export XRAY_BIN=$LAB_ROOT/tmp/xray-tt-current
+export OFFICIAL_CLIENT_BIN=$LAB_ROOT/bin/trusttunnel_client
+export CONFIG_DIR=$LAB_ROOT/configs
+export LOG_DIR=$LAB_ROOT/logs
+
+cd "$XRAY_REPO"
+
+git rev-parse HEAD
+git status --short
+go build -o "$XRAY_BIN" ./main
+
+install -m 0644 testing/trusttunnel/server_h2.json \
+  "$CONFIG_DIR/server_h2.json"
+install -m 0644 testing/trusttunnel/server_h2_rules.json \
+  "$CONFIG_DIR/server_h2_rules.json"
+install -m 0644 testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml \
+  "$CONFIG_DIR/official_client_to_our_server_h2_check_ok.toml"
+install -m 0644 testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml \
+  "$CONFIG_DIR/official_client_to_our_server_h2_check_authfail.toml"
+install -m 0644 testing/trusttunnel/official_client_rules_allow.toml \
+  "$CONFIG_DIR/official_client_rules_allow.toml"
+install -m 0644 testing/trusttunnel/official_client_rules_deny.toml \
+  "$CONFIG_DIR/official_client_rules_deny.toml"
+
+sha256sum "$XRAY_BIN"
+ls -l \
+  "$CONFIG_DIR/server_h2.json" \
+  "$CONFIG_DIR/server_h2_rules.json" \
+  "$CONFIG_DIR/official_client_to_our_server_h2_check_ok.toml" \
+  "$CONFIG_DIR/official_client_to_our_server_h2_check_authfail.toml" \
+  "$CONFIG_DIR/official_client_rules_allow.toml" \
+  "$CONFIG_DIR/official_client_rules_deny.toml"
+```
+
+#### 5.1.1. Success case: `_check` -> `200`
+
+```bash
+export SERVER_LOG=$LOG_DIR/h2-check-server-ok.log
+export CLIENT_LOG=$LOG_DIR/h2-check-client-ok.log
+
+pkill -f "$XRAY_BIN" || true
+pkill -f "$OFFICIAL_CLIENT_BIN" || true
+
+: >"$SERVER_LOG"
+: >"$CLIENT_LOG"
+
+"$XRAY_BIN" run -c "$CONFIG_DIR/server_h2.json" >"$SERVER_LOG" 2>&1 &
+SERVER_PID=$!
+sleep 2
+
+"$OFFICIAL_CLIENT_BIN" -c "$CONFIG_DIR/official_client_to_our_server_h2_check_ok.toml" >"$CLIENT_LOG" 2>&1 &
+CLIENT_PID=$!
+sleep 5
+
+ss -ltnp | grep -E '(:9443|:11081)\b'
+curl --socks5-hostname 127.0.0.1:11081 https://example.com/ -I --max-time 15
+
+grep -n 'trusttunnel H2 health-check accepted' "$SERVER_LOG"
+grep -n 'trusttunnel H2 CONNECT accepted for tcp:example.com:443' "$SERVER_LOG"
+if grep -nE 'failed to open connection to tcp:_check:443|lookup _check: no such host' "$SERVER_LOG"; then
+  false
+fi
+
+kill "$CLIENT_PID" "$SERVER_PID"
+wait "$CLIENT_PID" "$SERVER_PID" 2>/dev/null || true
+```
+
+Ожидание:
+- SOCKS listener official client поднимается на `127.0.0.1:11081`;
+- `_check` отвечает `200`, что проявляется логом `trusttunnel H2 health-check accepted`;
+- последующий CONNECT до `https://example.com/` проходит;
+- старые `_check`-сигнатуры отсутствуют.
+
+#### 5.1.2. Auth-fail case: `_check` -> `407`
+
+```bash
+export SERVER_LOG=$LOG_DIR/h2-check-server-authfail.log
+export CLIENT_LOG=$LOG_DIR/h2-check-client-authfail.log
+
+pkill -f "$XRAY_BIN" || true
+pkill -f "$OFFICIAL_CLIENT_BIN" || true
+
+: >"$SERVER_LOG"
+: >"$CLIENT_LOG"
+
+"$XRAY_BIN" run -c "$CONFIG_DIR/server_h2.json" >"$SERVER_LOG" 2>&1 &
+SERVER_PID=$!
+sleep 2
+
+"$OFFICIAL_CLIENT_BIN" -c "$CONFIG_DIR/official_client_to_our_server_h2_check_authfail.toml" >"$CLIENT_LOG" 2>&1 &
+CLIENT_PID=$!
+sleep 5
+
+ss -ltnp | grep -E '(:9443|:11082)\b'
+curl --socks5-hostname 127.0.0.1:11082 https://example.com/ -I --max-time 15 && false
+
+grep -nEi '407|authentication failed|proxy authentication' "$CLIENT_LOG"
+if grep -n 'trusttunnel H2 health-check accepted' "$SERVER_LOG"; then
+  false
+fi
+if grep -nE 'failed to open connection to tcp:_check:443|lookup _check: no such host' "$SERVER_LOG"; then
+  false
+fi
+
+kill "$CLIENT_PID" "$SERVER_PID"
+wait "$CLIENT_PID" "$SERVER_PID" 2>/dev/null || true
+```
+
+Ожидание:
+- `authFailureStatusCode=407` остаётся observable на стороне official client;
+- success-log для H2 health-check не появляется;
+- старые `_check`-сигнатуры отсутствуют.
+
+#### 5.1.3. Rule-deny case: `_check` -> `403`
+
+```bash
+export SERVER_LOG=$LOG_DIR/h2-check-server-deny.log
+export CLIENT_LOG=$LOG_DIR/h2-check-client-deny.log
+
+pkill -f "$XRAY_BIN" || true
+pkill -f "$OFFICIAL_CLIENT_BIN" || true
+
+: >"$SERVER_LOG"
+: >"$CLIENT_LOG"
+
+"$XRAY_BIN" run -c "$CONFIG_DIR/server_h2_rules.json" >"$SERVER_LOG" 2>&1 &
+SERVER_PID=$!
+sleep 2
+
+"$OFFICIAL_CLIENT_BIN" -c "$CONFIG_DIR/official_client_rules_deny.toml" >"$CLIENT_LOG" 2>&1 &
+CLIENT_PID=$!
+sleep 5
+
+ss -ltnp | grep -E '(:9443|:11080)\b'
+curl --socks5-hostname 127.0.0.1:11080 https://example.com/ -I --max-time 15 && false
+
+grep -n 'matched rule' "$SERVER_LOG"
+grep -n '403' "$CLIENT_LOG"
+if grep -n 'trusttunnel H2 CONNECT accepted for tcp:example.com:443' "$SERVER_LOG"; then
+  false
+fi
+if grep -nE 'failed to open connection to tcp:_check:443|lookup _check: no such host' "$SERVER_LOG"; then
+  false
+fi
+
+kill "$CLIENT_PID" "$SERVER_PID"
+wait "$CLIENT_PID" "$SERVER_PID" 2>/dev/null || true
+```
+
+Ожидание:
+- deny-rule блокирует и health-check, и CONNECT через `403`;
+- path остаётся в rules/health-check ветке и не падает обратно в обычный dispatch `_check`.
+
+#### 5.1.4. Rule-allow sanity-check
+
+```bash
+export SERVER_LOG=$LOG_DIR/h2-check-server-allow.log
+export CLIENT_LOG=$LOG_DIR/h2-check-client-allow.log
+
+pkill -f "$XRAY_BIN" || true
+pkill -f "$OFFICIAL_CLIENT_BIN" || true
+
+: >"$SERVER_LOG"
+: >"$CLIENT_LOG"
+
+"$XRAY_BIN" run -c "$CONFIG_DIR/server_h2_rules.json" >"$SERVER_LOG" 2>&1 &
+SERVER_PID=$!
+sleep 2
+
+"$OFFICIAL_CLIENT_BIN" -c "$CONFIG_DIR/official_client_rules_allow.toml" >"$CLIENT_LOG" 2>&1 &
+CLIENT_PID=$!
+sleep 5
+
+curl --socks5-hostname 127.0.0.1:11080 https://example.com/ -I --max-time 15
+grep -n 'matched rule\[0\] action=allow' "$SERVER_LOG"
+grep -n 'trusttunnel H2 health-check accepted' "$SERVER_LOG"
+
+kill "$CLIENT_PID" "$SERVER_PID"
+wait "$CLIENT_PID" "$SERVER_PID" 2>/dev/null || true
+```
+
+Ожидание:
+- allow-rule пропускает и health-check, и CONNECT;
+- success path логируется без возврата к историческим `_check`-ошибкам.

@@ -169,6 +169,16 @@
 - этот пункт относится к server-side rules;
 - outbound `clientRandom` на стороне Xray-client всё ещё не считается закрытой runtime-функцией.
 
+### 5.3. `_check` на H2/H3
+
+Текущее server-side ожидание для pseudo-host `_check`:
+- auth проверяется раньше health-check ответа;
+- rules проверяются раньше health-check ответа;
+- при успешных auth/rules сервер отвечает `200` и не должен уходить в обычный dispatch path;
+- при auth failure используется `authFailureStatusCode` и practically significant значением остаётся `407`.
+
+Открытым остаётся не сам server-side codepath split, а end-to-end retest с official client и фиксация pass/fail-сигнатур.
+
 ## 6. UDP path
 
 Реализовано:

@@ -73,7 +73,7 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- H2 `_check` как отдельный special path;
+- end-to-end retest и финальная фиксация H2 `_check` special path после server-side codepath split;
 - выравнивание auth semantics на всех pseudo-host path;
 - outbound `clientRandom` как реальная runtime-функция;
 - `_icmp` client/server path;

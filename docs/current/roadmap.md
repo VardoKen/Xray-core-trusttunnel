@@ -22,9 +22,9 @@
 ### 2.1. H2 `_check`
 
 Нужно:
-- реализовать отдельную обработку `_check` на H2;
-- убрать уход `_check` в обычный dispatch path;
-- поддержать корректные `200` и `407` в рамках `authFailureStatusCode`.
+- довести до end-to-end closure отдельную обработку `_check` на H2;
+- зафиксировать retest, что `_check` больше не уходит в обычный dispatch path;
+- подтвердить корректные `200` и `407` в рамках `authFailureStatusCode`.
 
 ### 2.2. Единые auth semantics на pseudo-host path
 

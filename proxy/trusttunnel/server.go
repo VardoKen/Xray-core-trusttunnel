@@ -451,8 +451,8 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 		return
 	}
 
-	if proto == "H3" && isTrustTunnelHealthcheckHost(req.Host) {
-		errors.LogInfo(ctx, "trusttunnel H3 health-check accepted")
+	if (proto == "H2" || proto == "H3") && isTrustTunnelHealthcheckHost(req.Host) {
+		errors.LogInfo(ctx, "trusttunnel ", proto, " health-check accepted")
 		w.WriteHeader(http.StatusOK)
 		if fl, ok := w.(http.Flusher); ok {
 			fl.Flush()

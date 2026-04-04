@@ -147,6 +147,10 @@
 - `http2.Server.ServeConn()` обслуживает stream;
 - каждый CONNECT stream уходит в `serveHTTPConnectRequest("H2", ...)`.
 
+Практически важная деталь текущего worktree:
+- pseudo-host `_check` на H2 больше не должен уходить в обычный dispatch path;
+- special-case health-check для H2/H3 обрабатывается в `serveHTTPConnectRequest(...)` после auth/rules и до UDP mux / обычного target parsing.
+
 ### 5.4. H3 path
 
 - если входящее соединение реализует `tcp.HTTP3RequestConn`, вызывается `processHTTP3()`;
