@@ -38,7 +38,6 @@
 
 Основные примеры:
 - `testing/trusttunnel/server_h2.json`
-- `testing/trusttunnel/server_h2_official_cert.json`
 - `testing/trusttunnel/server_h2_rules.json`
 - `testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml`
 - `testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml`
@@ -49,7 +48,7 @@
 - practically significant признаками были корректный SAN, совпадение имени `vpn.lab.local` и успешная верификация certificate chain на стороне official client.
 
 Практически подтверждённый pair для H2 `_check` retest:
-- `testing/trusttunnel/server_h2_official_cert.json`
+- `/opt/lab/xray-tt/configs/server_h2_official_cert.json` как lab-only runtime config с official-style certificate chain
 - `testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml`
 - `testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml`
 

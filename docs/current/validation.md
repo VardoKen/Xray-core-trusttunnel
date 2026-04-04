@@ -181,8 +181,8 @@ Preflight:
 - observable server behavior для `ipv6_available`, private-network и timeout settings;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
 
-Для воспроизводимости подтверждённого H2 `_check` retest в репозитории сохранены:
-- server success/auth-fail: `testing/trusttunnel/server_h2_official_cert.json`
+Для воспроизводимости подтверждённого H2 `_check` retest зафиксированы:
+- server success/auth-fail: `/opt/lab/xray-tt/configs/server_h2_official_cert.json` как lab-only config с official-style certificate chain
 - server rule-gated allow/deny: `testing/trusttunnel/server_h2_rules.json`
 - official client success: `testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml`
 - official client auth-fail: `testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml`
@@ -214,8 +214,6 @@ git rev-parse HEAD
 git status --short
 go build -o "$XRAY_BIN" ./main
 
-install -m 0644 testing/trusttunnel/server_h2_official_cert.json \
-  "$CONFIG_DIR/server_h2_official_cert.json"
 install -m 0644 testing/trusttunnel/server_h2_rules.json \
   "$CONFIG_DIR/server_h2_rules.json"
 install -m 0644 testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml \

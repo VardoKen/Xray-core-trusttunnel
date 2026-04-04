@@ -53,7 +53,6 @@
 - `testing/trusttunnel/server_stub.json`
 - `testing/trusttunnel/client_stub.json`
 - `testing/trusttunnel/server_h2.json`
-- `testing/trusttunnel/server_h2_official_cert.json`
 - `testing/trusttunnel/client_h2.json`
 - `testing/trusttunnel/server_h2_rules.json`
 - `testing/trusttunnel/server_h2_udp.json`
