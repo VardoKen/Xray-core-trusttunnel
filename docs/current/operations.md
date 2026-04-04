@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — эксплуатационная база
 
 Статус: current
-Дата фиксации: 2026-04-02
-Коммит состояния: `99e59352`
+Дата фиксации: 2026-04-04
+Коммит состояния: `9f18af9d`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -38,12 +38,20 @@
 
 Основные примеры:
 - `testing/trusttunnel/server_h2.json`
+- `testing/trusttunnel/server_h2_official_cert.json`
 - `testing/trusttunnel/server_h2_rules.json`
+- `testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml`
+- `testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml`
 
 Критичная деталь:
 - для воспроизводимого H2 interop нужно использовать сертификат и trust chain, совместимые с official client behavior;
 - лабораторный self-signed сертификат не является достаточной гарантией межоперабельности;
 - practically significant признаками были корректный SAN, совпадение имени `vpn.lab.local` и успешная верификация certificate chain на стороне official client.
+
+Практически подтверждённый pair для H2 `_check` retest:
+- `testing/trusttunnel/server_h2_official_cert.json`
+- `testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml`
+- `testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml`
 
 ### 2.4. Наш Xray client → наш Xray server по H3/TCP
 
@@ -171,13 +179,18 @@
 
 ### 5.3. `_check` на H2/H3
 
-Текущее server-side ожидание для pseudo-host `_check`:
+На состоянии 2026-04-04 `_check` на H2/H3 подтверждён runtime-проверкой:
 - auth проверяется раньше health-check ответа;
 - rules проверяются раньше health-check ответа;
 - при успешных auth/rules сервер отвечает `200` и не должен уходить в обычный dispatch path;
 - при auth failure используется `authFailureStatusCode` и practically significant значением остаётся `407`.
 
-Открытым остаётся не сам server-side codepath split, а end-to-end retest с official client и фиксация pass/fail-сигнатур.
+Для H2 дополнительно подтверждено:
+- deny-rule блокирует `_check` через `403`;
+- официальный client видит `407` и `403` как observable HTTP/2 responses;
+- старые `_check`-сигнатуры отсутствуют.
+
+Открытым после этого остаётся не `_check` как отдельный path, а более широкий блок единых auth semantics на всех pseudo-host path.
 
 ## 6. UDP path
 

@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — архитектура и runtime-path
 
 Статус: current
-Дата фиксации: 2026-04-02
-Коммит состояния: `99e59352`
+Дата фиксации: 2026-04-04
+Коммит состояния: `9f18af9d`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -53,6 +53,7 @@
 - `testing/trusttunnel/server_stub.json`
 - `testing/trusttunnel/client_stub.json`
 - `testing/trusttunnel/server_h2.json`
+- `testing/trusttunnel/server_h2_official_cert.json`
 - `testing/trusttunnel/client_h2.json`
 - `testing/trusttunnel/server_h2_rules.json`
 - `testing/trusttunnel/server_h2_udp.json`
@@ -62,6 +63,8 @@
 - `testing/trusttunnel/our_client_to_our_server.json`
 - `testing/trusttunnel/our_client_udp_to_our_server_h2.json`
 - `testing/trusttunnel/our_client_udp_to_our_server_h3.json`
+- `testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml`
+- `testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml`
 - `testing/trusttunnel/official_client_rules_allow.toml`
 - `testing/trusttunnel/official_client_rules_deny.toml`
 
@@ -147,9 +150,10 @@
 - `http2.Server.ServeConn()` обслуживает stream;
 - каждый CONNECT stream уходит в `serveHTTPConnectRequest("H2", ...)`.
 
-Практически важная деталь текущего worktree:
-- pseudo-host `_check` на H2 больше не должен уходить в обычный dispatch path;
-- special-case health-check для H2/H3 обрабатывается в `serveHTTPConnectRequest(...)` после auth/rules и до UDP mux / обычного target parsing.
+Подтверждено runtime-проверкой 2026-04-04:
+- pseudo-host `_check` на H2/H3 обрабатывается в `serveHTTPConnectRequest(...)` после auth/rules;
+- health-check special-case срабатывает до UDP mux и до обычного target parsing;
+- H2 `_check` больше не падает обратно в обычный dispatch path.
 
 ### 5.4. H3 path
 

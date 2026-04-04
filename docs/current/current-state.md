@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — текущее состояние проекта
 
 Статус: current
-Дата фиксации: 2026-04-02
-Коммит состояния: `99e59352`
+Дата фиксации: 2026-04-04
+Коммит состояния: `9f18af9d`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -16,6 +16,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - H3 UDP mux;
 - H2 rules по `client_random`;
 - H3 rules по `client_random`;
+- H2 `_check` special path с корректными `200` / `407` / `403`;
 - server-side traffic stats;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
 
@@ -59,6 +60,14 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - наш Xray client корректно работает с official TrustTunnel endpoint по H3;
 - H3 UDP mux и stats-path подтверждены рабочими smoke-тестами.
 
+### 2.5. H2 `_check` special path
+
+Подтверждено runtime-retest на 2026-04-04 / `9f18af9d`:
+- success-case для official client возвращает `200`, а `_check` не уходит в обычный dispatch path;
+- auth-fail остаётся observable как `407` в рамках `authFailureStatusCode`;
+- rule-deny остаётся observable как `403`;
+- старые сигнатуры `failed to open connection to tcp:_check:443` и `lookup _check: no such host` отсутствуют.
+
 ## 3. Что считается текущей истиной
 
 Текущую истину по проекту определяют:
@@ -73,7 +82,6 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- end-to-end retest и финальная фиксация H2 `_check` special path после server-side codepath split;
 - выравнивание auth semantics на всех pseudo-host path;
 - outbound `clientRandom` как реальная runtime-функция;
 - `_icmp` client/server path;

@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — подтверждённые проверки и границы тестирования
 
 Статус: current
-Дата фиксации: 2026-04-02
-Коммит состояния: `99e59352`
+Дата фиксации: 2026-04-04
+Коммит состояния: `9f18af9d`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -80,7 +80,32 @@
 - API stats возвращает ненулевые значения для inbound и user traffic counters;
 - `user>>>u1>>>online` должен трактоваться как `onlineMap`, а не как обычный counter.
 
-### 2.4. H2 rules retest
+### 2.4. H2 `_check` interop-retest
+
+Preflight:
+- commit: `9f18af9da4856bc15b5f9e63e604abf3e00158ee`;
+- worktree: clean;
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- binary sha256: `b2f53503363027e600d6bb754509b051a0bd318e4f5863c79ed77c2c471980ac`;
+- official client binary: `/opt/lab/xray-tt/bin/trusttunnel_client/trusttunnel_client`;
+- success/auth-fail server config: `/opt/lab/xray-tt/configs/server_h2_official_cert.json`;
+- rules server config: `/opt/lab/xray-tt/configs/server_h2_rules.json`;
+- success client config: `/opt/lab/xray-tt/configs/official_client_to_our_server_h2_check_ok.toml`;
+- auth-fail client config: `/opt/lab/xray-tt/configs/official_client_to_our_server_h2_check_authfail.toml`;
+- rule-allow client config: `/opt/lab/xray-tt/configs/official_client_rules_allow.toml`;
+- rule-deny client config: `/opt/lab/xray-tt/configs/official_client_rules_deny.toml`;
+- server certificate fingerprint: `D8:2C:1F:B9:42:33:B4:1D:D2:C1:C9:2C:23:24:F9:A8:22:98:D3:2A:94:48:E0:CC:AE:A5:A8:99:E7:C2:D6:9F`;
+- log bundle: `/opt/lab/xray-tt/logs/h2-check-retest-20260404-233636`.
+
+Подтверждено:
+- success-case логирует `trusttunnel H2 health-check accepted` и `trusttunnel H2 CONNECT accepted for tcp:example.com:443`;
+- official client логирует `Certificate verified successfully`;
+- auth-fail case возвращает `HTTP/2.0 407` на стороне official client;
+- deny-case возвращает `HTTP/2.0 403` на стороне official client и логирует `matched rule[1] action=deny catch-all` на сервере;
+- allow sanity-check логирует `matched rule[0] action=allow clientRandom=deadbeef`, `trusttunnel H2 health-check accepted` и `trusttunnel H2 CONNECT accepted for tcp:example.com:443`;
+- сигнатуры `failed to open connection to tcp:_check:443` и `lookup _check: no such host` отсутствуют.
+
+### 2.5. H2 rules retest
 
 Конфиги:
 - `/opt/lab/xray-tt/configs/server_h2_rules.json`
@@ -91,7 +116,7 @@
 - allow-case пропускает трафик;
 - deny-case возвращает `403` и блокирует трафик.
 
-### 2.5. H3 rules retest
+### 2.6. H3 rules retest
 
 База retest:
 - использован H3-вариант rules-конфигов, полученный из rules-сценария H2 заменой transport `http2 -> http3`;
@@ -102,7 +127,7 @@
 - allow-case логирует `matched rule[0] action=allow` и пропускает трафик;
 - deny-case логирует deny-rule и блокирует и health-check, и CONNECT через `403`.
 
-### 2.6. Retest исправления `H3_NO_ERROR`
+### 2.7. Retest исправления `H3_NO_ERROR`
 
 Конфиги:
 - `/opt/lab/xray-tt/configs/server_h3.json`
@@ -118,6 +143,7 @@
 
 Признаки рабочего поведения:
 - session устанавливается;
+- H2 `_check` возвращает `200` / `407` / `403` согласно auth/rules сценарию;
 - TCP CONNECT проходит и держит двусторонний обмен;
 - UDP через `_udp2` проходит без развала session;
 - H3 allow/deny определяется rule match, а не глобальным запретом;
@@ -128,6 +154,8 @@
 ### 3.2. Fail
 
 Признаки регрессии:
+- `failed to open connection to tcp:_check:443`;
+- `lookup _check: no such host`;
 - `failed to read trusttunnel request > H3_NO_ERROR (local)`;
 - `connect: connection refused` при ошибочном заходе TCP на QUIC listener;
 - `peer certificate is missing` при неправильном порядке TLS verify в H3;
@@ -137,30 +165,24 @@
 ## 4. Что уже не нужно повторно проверять как открытую проблему
 
 На текущем состоянии не требуется повторная перепроверка как открытого дефекта:
+- H2 `_check` как отдельного special path с `200` / `407` / `403`;
 - transport-layer принадлежности рабочего H3 path;
 - server-side H3 rules по `client_random`;
 - ложного `H3_NO_ERROR` в H3 TCP path.
 
 Переоткрывать эти вопросы можно только при появлении более новых и воспроизводимых доказательств, чем фиксация `99e59352`.
 
-## 5. Что остаётся предметом будущих проверок
+## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- end-to-end retest H2 `_check` после server-side special-path split;
 - `_icmp`;
 - outbound `clientRandom`;
 - полный UDP interop matrix;
 - observable server behavior для `ipv6_available`, private-network и timeout settings;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
 
-Для H2 `_check` в следующем цикле нужно отдельно зафиксировать:
-- exact server/client config paths;
-- `200` при successful auth + health-check;
-- `407` при auth failure, если используется `authFailureStatusCode=407`;
-- отсутствие ухода в обычный dispatch path с симптомами `failed to open connection to tcp:_check:443` и `lookup _check: no such host`.
-
-Подготовленные repo-local шаблоны для следующего retest:
-- server success/auth-fail: `testing/trusttunnel/server_h2.json`
+Для воспроизводимости подтверждённого H2 `_check` retest в репозитории сохранены:
+- server success/auth-fail: `testing/trusttunnel/server_h2_official_cert.json`
 - server rule-gated allow/deny: `testing/trusttunnel/server_h2_rules.json`
 - official client success: `testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml`
 - official client auth-fail: `testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml`
@@ -172,7 +194,7 @@
 Предпосылки:
 - рабочее дерево находится в `/opt/lab/xray-tt/src/xray-core-trusttunnel`;
 - тестируемый Xray binary собирается в `/opt/lab/xray-tt/tmp/xray-tt-current`;
-- official CLI client доступен как `/opt/lab/xray-tt/bin/trusttunnel_client`;
+- official CLI client доступен как `/opt/lab/xray-tt/bin/trusttunnel_client/trusttunnel_client`;
 - runtime-конфиги кладутся в `/opt/lab/xray-tt/configs`;
 - логи пишутся в `/opt/lab/xray-tt/logs`.
 
@@ -182,7 +204,7 @@
 export LAB_ROOT=/opt/lab/xray-tt
 export XRAY_REPO=$LAB_ROOT/src/xray-core-trusttunnel
 export XRAY_BIN=$LAB_ROOT/tmp/xray-tt-current
-export OFFICIAL_CLIENT_BIN=$LAB_ROOT/bin/trusttunnel_client
+export OFFICIAL_CLIENT_BIN=$LAB_ROOT/bin/trusttunnel_client/trusttunnel_client
 export CONFIG_DIR=$LAB_ROOT/configs
 export LOG_DIR=$LAB_ROOT/logs
 
@@ -192,8 +214,8 @@ git rev-parse HEAD
 git status --short
 go build -o "$XRAY_BIN" ./main
 
-install -m 0644 testing/trusttunnel/server_h2.json \
-  "$CONFIG_DIR/server_h2.json"
+install -m 0644 testing/trusttunnel/server_h2_official_cert.json \
+  "$CONFIG_DIR/server_h2_official_cert.json"
 install -m 0644 testing/trusttunnel/server_h2_rules.json \
   "$CONFIG_DIR/server_h2_rules.json"
 install -m 0644 testing/trusttunnel/official_client_to_our_server_h2_check_ok.toml \
@@ -207,7 +229,7 @@ install -m 0644 testing/trusttunnel/official_client_rules_deny.toml \
 
 sha256sum "$XRAY_BIN"
 ls -l \
-  "$CONFIG_DIR/server_h2.json" \
+  "$CONFIG_DIR/server_h2_official_cert.json" \
   "$CONFIG_DIR/server_h2_rules.json" \
   "$CONFIG_DIR/official_client_to_our_server_h2_check_ok.toml" \
   "$CONFIG_DIR/official_client_to_our_server_h2_check_authfail.toml" \
@@ -227,7 +249,7 @@ pkill -f "$OFFICIAL_CLIENT_BIN" || true
 : >"$SERVER_LOG"
 : >"$CLIENT_LOG"
 
-"$XRAY_BIN" run -c "$CONFIG_DIR/server_h2.json" >"$SERVER_LOG" 2>&1 &
+"$XRAY_BIN" run -c "$CONFIG_DIR/server_h2_official_cert.json" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 sleep 2
 
@@ -266,7 +288,7 @@ pkill -f "$OFFICIAL_CLIENT_BIN" || true
 : >"$SERVER_LOG"
 : >"$CLIENT_LOG"
 
-"$XRAY_BIN" run -c "$CONFIG_DIR/server_h2.json" >"$SERVER_LOG" 2>&1 &
+"$XRAY_BIN" run -c "$CONFIG_DIR/server_h2_official_cert.json" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 sleep 2
 

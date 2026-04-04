@@ -2,13 +2,13 @@
 
 Статус: current
 Дата фиксации: 2026-04-04
-База roadmap: состояние проекта после коммита `99e59352`
-Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR` и legacy H3-path
+База roadmap: состояние проекта после коммита `9f18af9d`
+Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path и H2 `_check`
 Не использовать для: фиксации уже закрытых багов и исторической хронологии
 
 ## 1. Принцип чтения roadmap
 
-Этот документ не повторяет уже закрытые H3-дефекты.
+Этот документ не повторяет уже закрытые H3-дефекты и не переоткрывает закрытый H2 `_check`.
 
 Текущее направление разработки:
 1. закрыть оставшиеся обязательные протокольные пробелы TrustTunnel;
@@ -19,14 +19,7 @@
 
 ## 2. Открытые задачи уровня обязательной совместимости
 
-### 2.1. H2 `_check`
-
-Нужно:
-- довести до end-to-end closure отдельную обработку `_check` на H2;
-- зафиксировать retest, что `_check` больше не уходит в обычный dispatch path;
-- подтвердить корректные `200` и `407` в рамках `authFailureStatusCode`.
-
-### 2.2. Единые auth semantics на pseudo-host path
+### 2.1. Единые auth semantics на pseudo-host path
 
 Нужно выровнять поведение для:
 - обычного TCP CONNECT;
@@ -34,15 +27,15 @@
 - `_udp2`;
 - `_icmp`.
 
-### 2.3. Outbound `clientRandom`
+### 2.2. Outbound `clientRandom`
 
 Нужно сделать `clientRandom` на стороне Xray-client реальной runtime-функцией для H2 и H3.
 
-### 2.4. `_icmp`
+### 2.3. `_icmp`
 
 Нужно реализовать полноценный client/server path `_icmp` по спецификации, без обходной логики через TCP/UDP.
 
-### 2.5. Observable server behavior
+### 2.4. Observable server behavior
 
 Нужно привязать к runtime следующие поля и эффекты:
 - `ipv6_available`;
@@ -54,7 +47,7 @@
 - `udp_connections_timeout_secs`;
 - `auth_failure_status_code`.
 
-### 2.6. Полный UDP interop matrix
+### 2.5. Полный UDP interop matrix
 
 Нужно закрыть:
 - official client → our server по H2/UDP и H3/UDP;
@@ -64,7 +57,7 @@
 - idle timeout и reopen;
 - корректное поле `App Name`.
 
-### 2.7. Auth и stats sanity-check
+### 2.6. Auth и stats sanity-check
 
 После закрытия interop-пробелов нужно перепроверить:
 - `407` → новая сессия;
@@ -157,21 +150,20 @@ REALITY должен внедряться через общий Xray `streamSett
 
 ## 5. Порядок выполнения
 
-1. H2 `_check`
-2. auth semantics на всех pseudo-host path
-3. outbound `clientRandom`
-4. `_icmp`
-5. observable server behavior
-6. полный UDP interop matrix
-7. auth/stats sanity-check
-8. TrustTunnel + H2/TCP + REALITY
-9. TrustTunnel + H2/UDP + REALITY
-10. R&D по TrustTunnel + H3 + REALITY
-11. client-side parity fields после REALITY
-12. нормализация вокруг `streamSettings`
-13. full TLS/REALITY surface
-14. common outbound features
-15. common inbound features
-16. `_icmp` в routing/policy/stats модели Xray
-17. dynamic user management
-18. финальная матрица совместимости и validator
+1. auth semantics на всех pseudo-host path
+2. outbound `clientRandom`
+3. `_icmp`
+4. observable server behavior
+5. полный UDP interop matrix
+6. auth/stats sanity-check
+7. TrustTunnel + H2/TCP + REALITY
+8. TrustTunnel + H2/UDP + REALITY
+9. R&D по TrustTunnel + H3 + REALITY
+10. client-side parity fields после REALITY
+11. нормализация вокруг `streamSettings`
+12. full TLS/REALITY surface
+13. common outbound features
+14. common inbound features
+15. `_icmp` в routing/policy/stats модели Xray
+16. dynamic user management
+17. финальная матрица совместимости и validator
