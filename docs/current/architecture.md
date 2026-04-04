@@ -50,9 +50,11 @@
 
 ### 2.4. Ключевые тестовые конфиги
 
+- `testing/trusttunnel/*` — tracked test artifacts и примеры конфигов; они не попадают в обычный `go build ./main`, пока их отдельно не использует runtime или packaging tooling.
 - `testing/trusttunnel/server_stub.json`
 - `testing/trusttunnel/client_stub.json`
 - `testing/trusttunnel/server_h2.json`
+- `testing/trusttunnel/server_h2_official_cert.json`
 - `testing/trusttunnel/client_h2.json`
 - `testing/trusttunnel/server_h2_rules.json`
 - `testing/trusttunnel/server_h2_udp.json`
