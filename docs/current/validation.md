@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — подтверждённые проверки и границы тестирования
 
 Статус: current
-Дата фиксации: 2026-04-04
-Коммит состояния: `9f18af9d`
+Дата фиксации: 2026-04-05
+Коммит состояния: `worktree after auth semantics fix`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -144,6 +144,7 @@ Preflight:
 Признаки рабочего поведения:
 - session устанавливается;
 - H2 `_check` возвращает `200` / `407` / `403` согласно auth/rules сценарию;
+- reserved pseudo-hosts `_check`, `_udp2` и `_icmp` не падают из H1/H2/H3 обратно в обычный dispatch path;
 - TCP CONNECT проходит и держит двусторонний обмен;
 - UDP через `_udp2` проходит без развала session;
 - H3 allow/deny определяется rule match, а не глобальным запретом;
@@ -180,6 +181,15 @@ Preflight:
 - полный UDP interop matrix;
 - observable server behavior для `ipv6_available`, private-network и timeout settings;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
+
+Локально подтверждённые regression-тесты на 2026-04-05:
+- `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
+- обычный H2 CONNECT auth-fail возвращает `407` и `Proxy-Authenticate`;
+- H2 `_udp2` auth-fail возвращает `407` до UDP mux;
+- H2 `_icmp` auth-fail возвращает `407`, а success после auth/rules возвращает `501 Not Implemented`;
+- H1 `_check` отвечает `200` без dispatch;
+- H1 `_udp2` больше не уходит в обычный dispatch и отвечает явной HTTP-ошибкой;
+- H1 `_icmp` больше не уходит в обычный dispatch и отвечает `501 Not Implemented`.
 
 Для воспроизводимости подтверждённого H2 `_check` retest зафиксированы:
 - server success/auth-fail: `testing/trusttunnel/server_h2_official_cert.json`, который в lab копируется в `/opt/lab/xray-tt/configs/server_h2_official_cert.json`

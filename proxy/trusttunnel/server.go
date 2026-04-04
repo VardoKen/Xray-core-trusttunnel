@@ -292,6 +292,37 @@ Start:
 		return errors.New(reason).AtInfo()
 	}
 
+	if isTrustTunnelHealthcheckHost(req.Host) {
+		errors.LogInfo(ctx, "trusttunnel H1 health-check accepted")
+		writePlainResponse(conn, http.StatusOK, http.StatusText(http.StatusOK), "", map[string]string{
+			"Connection": "close",
+		})
+		return nil
+	}
+
+	if isTrustTunnelUDPHost(req.Host) {
+		if !s.config.GetEnableUdp() {
+			writePlainResponse(conn, http.StatusForbidden, "Forbidden", "udp is disabled\n", map[string]string{
+				"Connection": "close",
+			})
+			return nil
+		}
+
+		writePlainResponse(conn, http.StatusBadRequest, "Bad Request", "udp mux requires HTTP/2 or HTTP/3\n", map[string]string{
+			"Connection": "close",
+		})
+		errors.LogInfo(ctx, "trusttunnel H1 UDP pseudo-host rejected: requires H2/H3")
+		return nil
+	}
+
+	if isTrustTunnelICMPHost(req.Host) {
+		writePlainResponse(conn, http.StatusNotImplemented, "Not Implemented", "icmp is not implemented\n", map[string]string{
+			"Connection": "close",
+		})
+		errors.LogInfo(ctx, "trusttunnel H1 ICMP pseudo-host reached but is not implemented")
+		return nil
+	}
+
 	dest, err := http_proto.ParseHost(req.Host, net.Port(443))
 	if err != nil {
 		writePlainResponse(conn, http.StatusBadRequest, "Bad Request", "invalid CONNECT host\n", map[string]string{
@@ -383,6 +414,15 @@ func isTrustTunnelHealthcheckHost(host string) bool {
 	}
 }
 
+func isTrustTunnelICMPHost(host string) bool {
+	switch strings.ToLower(host) {
+	case "_icmp", "_icmp:0":
+		return true
+	default:
+		return false
+	}
+}
+
 func hasTrustTunnelClientRandomRules(rules []*Rule) bool {
 	for _, rule := range rules {
 		if rule != nil && rule.GetClientRandom() != "" {
@@ -466,6 +506,12 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 			return
 		}
 		s.serveUDPMuxRequest(proto, ctx, w, req, dispatcher)
+		return
+	}
+
+	if isTrustTunnelICMPHost(req.Host) {
+		writeH2Response(w, http.StatusNotImplemented, "icmp is not implemented\n", nil)
+		errors.LogInfo(ctx, "trusttunnel ", proto, " ICMP pseudo-host reached but is not implemented")
 		return
 	}
 

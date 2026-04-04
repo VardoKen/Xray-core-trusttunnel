@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — архитектура и runtime-path
 
 Статус: current
-Дата фиксации: 2026-04-04
-Коммит состояния: `9f18af9d`
+Дата фиксации: 2026-04-05
+Коммит состояния: `worktree after auth semantics fix`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -143,7 +143,9 @@
 - `Process()` читает TCP conn;
 - через `bufio.Reader` проверяет H2 preface;
 - при отсутствии preface уходит в `processHTTP1()`;
-- там выполняются auth, извлечение `client_random`, rule-matching, parse target и dispatch через `dispatcher.DispatchLink()` и `appdispatcher.WrapLink()`.
+- там выполняются auth, извлечение `client_random`, rule-matching, а затем:
+- reserved pseudo-hosts `_check`, `_udp2` и `_icmp` обрабатываются до обычного target parsing;
+- только обычный CONNECT target уходит в `dispatcher.DispatchLink()` и `appdispatcher.WrapLink()`.
 
 ### 5.3. H2 path
 
@@ -155,6 +157,10 @@
 - pseudo-host `_check` на H2/H3 обрабатывается в `serveHTTPConnectRequest(...)` после auth/rules;
 - health-check special-case срабатывает до UDP mux и до обычного target parsing;
 - H2 `_check` больше не падает обратно в обычный dispatch path.
+
+Подтверждено локальными regression-тестами 2026-04-05:
+- reserved pseudo-host `_icmp` на H2/H3 тоже перехватывается до обычного target parsing;
+- `_icmp` на текущем состоянии отвечает явным `501 Not Implemented`, а не уходит в обычный dispatch path.
 
 ### 5.4. H3 path
 
@@ -235,6 +241,7 @@
 - на каждый flow поднимается `udp_transport.NewDispatcher(...)`.
 
 Подтверждённое ограничение:
+- H1 path не реализует UDP mux и явно отклоняет `_udp2` до обычного dispatch;
 - destination должен быть IP-адресом;
 - доменные UDP targets не подтверждены как рабочий path.
 

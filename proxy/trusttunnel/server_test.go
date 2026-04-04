@@ -1,8 +1,10 @@
 package trusttunnel
 
 import (
+	"bufio"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -81,6 +83,69 @@ func newTestConnectRequest(host string, authHeader string) *http.Request {
 	return req.WithContext(context.Background())
 }
 
+func runTestHTTP1ConnectRequest(t *testing.T, server *Server, host string, authHeader string, dispatcher routing.Dispatcher) (*http.Response, error) {
+	t.Helper()
+
+	clientConn, serverConn := net.Pipe()
+	done := make(chan error, 1)
+
+	go func() {
+		reader := bufio.NewReader(serverConn)
+		err := server.processHTTP1(context.Background(), serverConn, reader, dispatcher, nil, "")
+		_ = serverConn.Close()
+		done <- err
+	}()
+
+	var raw strings.Builder
+	raw.WriteString("CONNECT ")
+	raw.WriteString(host)
+	raw.WriteString(" HTTP/1.1\r\n")
+	raw.WriteString("Host: ")
+	raw.WriteString(host)
+	raw.WriteString("\r\n")
+	if authHeader != "" {
+		raw.WriteString("Proxy-Authorization: ")
+		raw.WriteString(authHeader)
+		raw.WriteString("\r\n")
+	}
+	raw.WriteString("\r\n")
+
+	if _, err := io.WriteString(clientConn, raw.String()); err != nil {
+		_ = clientConn.Close()
+		t.Fatalf("failed to write request: %v", err)
+	}
+
+	resp, err := http.ReadResponse(bufio.NewReader(clientConn), &http.Request{Method: http.MethodConnect})
+	if err != nil {
+		_ = clientConn.Close()
+		t.Fatalf("failed to read response: %v", err)
+	}
+
+	_ = clientConn.Close()
+	return resp, <-done
+}
+
+func TestServeHTTP2ConnectAuthFailureUsesConfiguredStatus(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{
+		AuthFailureStatusCode: http.StatusProxyAuthRequired,
+	})
+	dispatcher := &testDispatcher{}
+	recorder := httptest.NewRecorder()
+	req := newTestConnectRequest("example.com:443", "")
+
+	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+
+	if recorder.Code != http.StatusProxyAuthRequired {
+		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusProxyAuthRequired)
+	}
+	if got := recorder.Header().Get("Proxy-Authenticate"); got != `Basic realm="trusttunnel"` {
+		t.Fatalf("unexpected Proxy-Authenticate header: got %q", got)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
 func TestServeHTTP2CheckReturnsOKWithoutDispatch(t *testing.T) {
 	server := newTestTrustTunnelServer(t, &ServerConfig{})
 	dispatcher := &testDispatcher{}
@@ -118,6 +183,65 @@ func TestServeHTTP2CheckAuthFailureUsesConfiguredStatus(t *testing.T) {
 	}
 }
 
+func TestServeHTTP2UDPAuthFailureUsesConfiguredStatus(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{
+		AuthFailureStatusCode: http.StatusProxyAuthRequired,
+		EnableUdp:             true,
+	})
+	dispatcher := &testDispatcher{}
+	recorder := httptest.NewRecorder()
+	req := newTestConnectRequest("_udp2:0", "")
+
+	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+
+	if recorder.Code != http.StatusProxyAuthRequired {
+		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusProxyAuthRequired)
+	}
+	if got := recorder.Header().Get("Proxy-Authenticate"); got != `Basic realm="trusttunnel"` {
+		t.Fatalf("unexpected Proxy-Authenticate header: got %q", got)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestServeHTTP2ICMPAuthFailureUsesConfiguredStatus(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{
+		AuthFailureStatusCode: http.StatusProxyAuthRequired,
+	})
+	dispatcher := &testDispatcher{}
+	recorder := httptest.NewRecorder()
+	req := newTestConnectRequest("_icmp:0", "")
+
+	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+
+	if recorder.Code != http.StatusProxyAuthRequired {
+		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusProxyAuthRequired)
+	}
+	if got := recorder.Header().Get("Proxy-Authenticate"); got != `Basic realm="trusttunnel"` {
+		t.Fatalf("unexpected Proxy-Authenticate header: got %q", got)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestServeHTTP2ICMPReturnsNotImplementedWithoutDispatch(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{})
+	dispatcher := &testDispatcher{}
+	recorder := httptest.NewRecorder()
+	req := newTestConnectRequest("_icmp:0", buildBasicAuthValue("u1", "p1"))
+
+	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+
+	if recorder.Code != http.StatusNotImplemented {
+		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusNotImplemented)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
 func TestServeHTTP2CheckRuleDenyBlocksBeforeHealthcheck(t *testing.T) {
 	server := newTestTrustTunnelServer(t, &ServerConfig{
 		Rules: []*Rule{
@@ -132,6 +256,83 @@ func TestServeHTTP2CheckRuleDenyBlocksBeforeHealthcheck(t *testing.T) {
 
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestProcessHTTP1CheckReturnsOKWithoutDispatch(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{})
+	dispatcher := &testDispatcher{}
+
+	resp, err := runTestHTTP1ConnectRequest(t, server, "_check", buildBasicAuthValue("u1", "p1"), dispatcher)
+	defer resp.Body.Close()
+
+	if err != nil {
+		t.Fatalf("unexpected server error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestProcessHTTP1UDPReservedHostRejectedWithoutDispatch(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{
+		EnableUdp: true,
+	})
+	dispatcher := &testDispatcher{}
+
+	resp, err := runTestHTTP1ConnectRequest(t, server, "_udp2:0", buildBasicAuthValue("u1", "p1"), dispatcher)
+	defer resp.Body.Close()
+
+	if err != nil {
+		t.Fatalf("unexpected server error: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestProcessHTTP1UDPPseudoHostAuthFailureUsesConfiguredStatus(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{
+		AuthFailureStatusCode: http.StatusProxyAuthRequired,
+		EnableUdp:             true,
+	})
+	dispatcher := &testDispatcher{}
+
+	resp, _ := runTestHTTP1ConnectRequest(t, server, "_udp2:0", "", dispatcher)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusProxyAuthRequired {
+		t.Fatalf("unexpected status: got %d, want %d", resp.StatusCode, http.StatusProxyAuthRequired)
+	}
+	if got := resp.Header.Get("Proxy-Authenticate"); got != `Basic realm="trusttunnel"` {
+		t.Fatalf("unexpected Proxy-Authenticate header: got %q", got)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestProcessHTTP1ICMPReturnsNotImplementedWithoutDispatch(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{})
+	dispatcher := &testDispatcher{}
+
+	resp, err := runTestHTTP1ConnectRequest(t, server, "_icmp:0", buildBasicAuthValue("u1", "p1"), dispatcher)
+	defer resp.Body.Close()
+
+	if err != nil {
+		t.Fatalf("unexpected server error: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("unexpected status: got %d, want %d", resp.StatusCode, http.StatusNotImplemented)
 	}
 	if dispatcher.dispatchCount != 0 {
 		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)

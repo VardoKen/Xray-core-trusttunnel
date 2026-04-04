@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — текущее состояние проекта
 
 Статус: current
-Дата фиксации: 2026-04-04
-Коммит состояния: `9f18af9d`
+Дата фиксации: 2026-04-05
+Коммит состояния: `worktree after auth semantics fix`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -17,6 +17,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - H2 rules по `client_random`;
 - H3 rules по `client_random`;
 - H2 `_check` special path с корректными `200` / `407` / `403`;
+- server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
 - server-side traffic stats;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
 
@@ -68,6 +69,14 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - rule-deny остаётся observable как `403`;
 - старые сигнатуры `failed to open connection to tcp:_check:443` и `lookup _check: no such host` отсутствуют.
 
+### 2.6. Server-side auth semantics на pseudo-host path
+
+Подтверждено локальными regression-тестами на 2026-04-05:
+- auth и rules проверяются раньше special-path handling как для обычного CONNECT, так и для `_check`, `_udp2` и `_icmp`;
+- H1 path больше не уводит `_check`, `_udp2` и `_icmp` в обычный target parsing и dispatch;
+- H1 `_check` отвечает явным `200`, H1 `_udp2` отвечает явной HTTP-ошибкой вместо dispatch, а `_icmp` отвечает явным `501 Not Implemented` после auth/rules;
+- H2/H3 `_icmp` больше не уходит в обычный dispatch path и тоже отвечает явным `501 Not Implemented`.
+
 ## 3. Что считается текущей истиной
 
 Текущую истину по проекту определяют:
@@ -82,7 +91,6 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- выравнивание auth semantics на всех pseudo-host path;
 - outbound `clientRandom` как реальная runtime-функция;
 - `_icmp` client/server path;
 - привязка `ipv6_available`, private-network policy и timeout settings к реальному runtime;
