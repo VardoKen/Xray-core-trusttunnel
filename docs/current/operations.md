@@ -230,7 +230,8 @@
 - routing/API/webhook layer видит `icmp` как отдельное network-значение.
 - TrustTunnel outbound для такого target больше не возвращает ранний reject: H2/H3 path открывает `_icmp:0`, кодирует fixed-size request frames и локально восстанавливает echo-reply packet из reply-frame и сохранённого payload.
 - Практически подтверждённый client-side contract пока покрывает только echo-request/echo-reply semantics.
-- Это всё ещё не равняется полноценному Xray product path: `proxy/tun/README.md` по-прежнему фиксирует `No ICMP support`, а gVisor stack в `proxy/tun/stack_gvisor.go` поднимает только TCP/UDP.
+- На Linux это уже образует рабочий Xray product path через `proxy/tun`, если TUN interface управляется ОС с явной адресацией и routing. Подтверждённый clean-HEAD шаблон: выделенный namespace `tunxrayh2` / `tunxrayh3`, адрес `192.0.2.10/32` на `xraytunh*` и маршрут `1.1.1.1/32 dev xraytunh*`.
+- Host-namespace схема вида `ip addr add 192.0.2.10/32 dev xraytunh2` + `ip route add 1.1.1.1/32 dev xraytunh2` считается unsafe wiring pattern: в диагностическом retest она воспроизвела ICMP request storm без egress.
 
 ## 6. UDP path
 
@@ -252,7 +253,7 @@
 - `hasIpv6` / `ipv6Available` как активную готовую функцию;
 - server runtime host/cert selection через `settings.hosts[]`;
 - server runtime routing H2/H3 только через `settings.transports[]` без корректных `streamSettings`;
-- `_icmp` как полностью закрытый outbound/Xray product path;
+- `_icmp` как полностью закрытый path за пределами Linux echo-request/echo-reply и без OS-managed TUN routing assumptions;
 - доменные UDP targets.
 
 ## 8. Как использовать старые документы

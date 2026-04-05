@@ -20,6 +20,7 @@ This is explicit decision, significantly simplifying implementation, and allowin
 Working configuration, is tun enabled in Xray config with specific name (e.g. xray0), and OS level configuration to manage "xray0" interface, applying routing and rules on interface up.
 This way consistency of system level routing and rules is ensured from single place of responsibility - the OS itself. \
 Examples of how to achieve this on a simple Linux system (Ubuntu with systemd-networkd) can be found at the end of this README.
+For ICMP traffic this is especially important: the validated Linux deployment keeps the TUN interface in a dedicated network namespace, or otherwise in an equally explicit OS-managed routing domain, instead of assigning ad-hoc host-namespace `/32` routes directly on the TUN interface.
 
 Due to this inbound not actually being a proxy, the configuration ignore required listen and port options, and never listen on any port. \
 Here is simple Xray config snippet to enable the inbound:
@@ -41,10 +42,11 @@ Here is simple Xray config snippet to enable the inbound:
 
 - IPv4 and IPv6
 - TCP and UDP
+- ICMP echo request/reply when routed to an outbound that implements `icmp` / `Network_ICMP`
 
 ## LIMITATION
 
-- No ICMP support
+- ICMP support currently covers echo request/reply traffic only; other ICMP message types are not a general proxy path
 - Connections are established to any host, as connection success is only a mark of successful accepting packet for proxying. Hosts that are not accepting connections or don't even exists, will look like they opened a connection (SYN-ACK), and never send back a single byte, closing connection (RST) after some time. This is the side effect of the whole process actually being a proxy, and not real network layer 3 vpn
 
 ## CONSIDERATIONS

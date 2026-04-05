@@ -106,7 +106,7 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - `infra/conf.Network` / `NetworkList` принимают `icmp`;
 - routing/API/webhook layer получает `icmp` через общий `SystemString()` и `net.Network` plumbing.
 - TrustTunnel outbound больше не пытается молча увести `Network_ICMP` в обычный CONNECT path: он открывает `_icmp:0`, кодирует fixed-size request frames и локально восстанавливает echo-reply packet по сохранённому payload.
-- Этот outbound path пока покрывает только echo-request/echo-reply semantics и ещё не образует полный Xray product path, потому что `proxy/tun` по-прежнему фиксирует `No ICMP support`.
+- Этот outbound path пока покрывает только echo-request/echo-reply semantics, но на Linux уже образует рабочий Xray product path через `proxy/tun`, если TUN interface управляется ОС с явной адресацией и routing. Clean-HEAD H2/H3 retest на 2026-04-05 / `96a9d053` подтверждён через выделенные namespace `tunxrayh2` / `tunxrayh3`, адрес `192.0.2.10/32` и маршрут `1.1.1.1/32 dev xraytunh*`.
 
 ## 3. Что считается текущей истиной
 
@@ -122,7 +122,8 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- product-level source path для outbound/client-side `_icmp`: TrustTunnel packet contract уже есть, но `proxy/tun` по-прежнему не даёт ICMP source traffic;
+- explicit config surface и observable runtime для ICMP timeout/interface/private-network semantics;
+- error-type parity для `_icmp` сверх подтверждённого echo-request/echo-reply path;
 - привязка `ipv6_available`, private-network policy и timeout settings к реальному runtime;
 - полный UDP interop matrix;
 - REALITY;

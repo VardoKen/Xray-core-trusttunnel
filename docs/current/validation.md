@@ -229,7 +229,8 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- product-level outbound `_icmp` path после появления client-side packet contract: сейчас concrete TrustTunnel contract уже есть, но `proxy/tun` всё ещё не даёт ICMP source traffic;
+- explicit config surface для ICMP timeout/interface/private-network semantics;
+- error-type parity для `_icmp` сверх подтверждённого echo-request/echo-reply path;
 - полный UDP interop matrix;
 - observable server behavior для `ipv6_available`, private-network и timeout settings;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
@@ -302,6 +303,43 @@ Clean-HEAD official client ↔ our server H3 `_icmp` runtime-retest на 2026-04
 - client log содержит `Certificate verified successfully`, `ICMP register_request` и `ICMP register_reply` с `type=0 code=0`;
 - ping из namespace `tun`: `3 packets transmitted, 3 received, 0% packet loss`;
 - `server-errors.txt` пустой, `fatal error: concurrent map writes` отсутствует.
+
+### 2.10. Clean-HEAD our TUN client → our server H2/H3 `_icmp`
+
+Подтверждено на 2026-04-05 / `96a9d053`:
+- worktree: clean на lab (`git status --short` пустой);
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- H2 server config: `/opt/lab/xray-tt/configs/server_h2.json`;
+- H2 client config: `/opt/lab/xray-tt/configs/our_client_tun_to_our_server_h2_icmp.json`;
+- H2 log bundle: `/opt/lab/xray-tt/logs/h2-tun-netns-clean-20260405-165558`;
+- H3 server config: `/opt/lab/xray-tt/configs/server_h3.json`;
+- H3 client config: `/opt/lab/xray-tt/configs/our_client_tun_to_our_server_h3_icmp.json`;
+- H3 log bundle: `/opt/lab/xray-tt/logs/h3-tun-netns-clean-20260405-165602`.
+
+Подтверждённый Linux setup:
+- Xray поднимает `xraytunh2` / `xraytunh3` в host namespace;
+- interface переносится в отдельный namespace `tunxrayh2` / `tunxrayh3`;
+- внутри namespace задаются `ip addr add 192.0.2.10/32 dev xraytunh*` и `ip route add 1.1.1.1/32 dev xraytunh*`;
+- `ping -n -I 192.0.2.10 -c 1 -W 3 1.1.1.1` проходит как на H2, так и на H3.
+
+Pass markers:
+- H2 ping: `1 packets transmitted, 1 received, 0% packet loss`;
+- H3 ping: `1 packets transmitted, 1 received, 0% packet loss`;
+- server log содержит `trusttunnel H2 ICMP mux accepted` и `trusttunnel H3 ICMP mux accepted`;
+- `tcpdump` внутри namespace фиксирует ровно один `ICMP echo request` и один `ICMP echo reply` в обоих run.
+
+### 2.11. Host-namespace `/32` + route anti-pattern для TUN `_icmp`
+
+Диагностический retest на 2026-04-05 / `96a9d053` показал, что host-namespace wiring вида `ip addr add 192.0.2.10/32 dev xraytunh2` + `ip route add 1.1.1.1/32 dev xraytunh2` воспроизводит ICMP request storm и не должен трактоваться как нормальный product-path.
+
+Зафиксировано:
+- log bundle: `/opt/lab/xray-tt/logs/h2-tun-manualroute-trace2-20260405-164238`;
+- runtime state: dirty worktree только из-за trace-only instrumentation в `proxy/tun/icmp.go`, `proxy/tun/icmp_test.go`, `proxy/tun/stack_gvisor.go`, `proxy/tun/stack_gvisor_endpoint.go`;
+- observed counters: `tun_read=9762`, `ingress=9760`, `egress=0`, `tt_requests=9760`, `mux=1`.
+
+Вывод:
+- проблема относится к unsafe host-namespace routing pattern, а не к отсутствию product-level `_icmp` source path в `proxy/tun`;
+- current truth для Linux `_icmp` через `proxy/tun` должна опираться на clean-HEAD netns-based validation из раздела 2.10.
 
 Отдельное внешнее ограничение локального test-run:
 - полный `go test ./infra/conf ./app/router` по-прежнему цепляется за отсутствие `geoip.dat`; это исторический fixture-gap текущего окружения, а не регрессия `Network_ICMP`.

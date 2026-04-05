@@ -162,18 +162,21 @@
 - `proxy/trusttunnel/client.go`
 - `proxy/trusttunnel/icmp_client.go`
 - `proxy/trusttunnel/icmp_codec.go`
+- `proxy/tun/icmp.go`
+- `proxy/tun/stack_gvisor.go`
 
 Реализовано:
 - `common/net.Network_ICMP` на outbound стороне переводит `Client.Process(...)` в отдельный `_icmp:0` path вместо обычного CONNECT target;
 - request-side contract читает raw ICMP echo-request packet из `transport.Link`, извлекает `id`, `sequence`, `destination`, `ttl/hop_limit` и `data_size`, после чего пишет fixed-size TrustTunnel request frame;
 - response-side contract читает fixed-size TrustTunnel reply frame и локально восстанавливает raw ICMP echo-reply packet по сохранённому исходному payload;
-- path работает для H2 и H3 и использует те же transport-specific CONNECT routines, что и TCP/UDP path.
+- path работает для H2 и H3 и использует те же transport-specific CONNECT routines, что и TCP/UDP path;
+- `proxy/tun` поднимает `gicmp.NewProtocol4/NewProtocol6`, принимает echo-request traffic в `icmpConnectionHandler` и инжектит echo-reply обратно в link endpoint;
+- clean-HEAD Linux retest на 2026-04-05 / `96a9d053` подтверждает, что этот path уже образует product-level source path через `proxy/tun`, если TUN interface вынесен в отдельный network namespace или иным образом получает явную OS-managed адресацию и routing.
 
 Ограничения текущего состояния:
 - client-side contract пока покрывает только echo-request/echo-reply semantics, а не полный ICMP error-type parity;
-- `proxy/tun/README.md` по-прежнему фиксирует `No ICMP support`;
-- `proxy/tun/stack_gvisor.go` регистрирует только `tcp` и `udp` transport protocols, без ICMP protocol handler;
-- поэтому concrete packet contract внутри TrustTunnel уже есть, но product-level Xray source path для `Network_ICMP` ещё не закрыт.
+- validated product path пока относится к Linux TUN deployment с внешним OS-managed routing; host-namespace схема вида `ip addr add 192.0.2.10/32 dev xraytunh2` + `ip route add 1.1.1.1/32 dev xraytunh2` воспроизводит request storm и считается unsafe wiring pattern;
+- явной config surface для ICMP timeout/interface/private-network semantics пока нет.
 
 ## 5. Карта серверного path
 
@@ -231,7 +234,7 @@
 - H1 `_icmp` остаётся не transport path и отвечает `501 Not Implemented`;
 - TrustTunnel config model пока не имеет отдельных ICMP settings;
 - `ipv6Available` пока влияет только на попытку открыть IPv6 raw socket, а не образует полноценный product-level ICMP config surface;
-- client-side TrustTunnel `_icmp` contract уже существует, но не превращает `_icmp` в полный Xray product path, пока `proxy/tun` остаётся без ICMP support и transport-level ICMP source traffic.
+- clean-HEAD H2/H3 retest подтверждает product-level `_icmp` source path через `proxy/tun` на Linux с OS-managed routing, но не закрывает error-type parity и config surface для timeouts/interface/private-network semantics.
 
 ### 5.4. H3 path
 
