@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `5a21fd31`
+Коммит состояния: `1810939f`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -229,12 +229,15 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- Xray-side/runtime-модель `_icmp` после server-side mux;
+- client-side/outbound `_icmp` packet contract после появления `Network_ICMP` в core model;
 - полный UDP interop matrix;
 - observable server behavior для `ipv6_available`, private-network и timeout settings;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
 
 Локально подтверждённые regression-тесты на 2026-04-05:
+- `go test ./common/net` проходит, включая `Network_ICMP` string/destination coverage;
+- `go test ./infra/conf -run 'TestNetwork(BuildSupportsICMP|ListBuildSupportsICMP)$'` проходит;
+- `go test ./app/router -run '^$'` проходит как compile-only sanity-check для routing layer после добавления `Network_ICMP`;
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
 - `TestAttachTrustTunnelClientRandomClonesSharedContent` защищает H2/H3 parallel streams от shared `session.Content.Attributes`;
 - обычный H2 CONNECT auth-fail возвращает `407` и `Proxy-Authenticate`;
@@ -288,6 +291,9 @@ Clean-HEAD official client ↔ our server H3 `_icmp` runtime-retest на 2026-04
 - client log содержит `Certificate verified successfully`, `ICMP register_request` и `ICMP register_reply` с `type=0 code=0`;
 - ping из namespace `tun`: `3 packets transmitted, 3 received, 0% packet loss`;
 - `server-errors.txt` пустой, `fatal error: concurrent map writes` отсутствует.
+
+Отдельное внешнее ограничение локального test-run:
+- полный `go test ./infra/conf ./app/router` по-прежнему цепляется за отсутствие `geoip.dat`; это исторический fixture-gap текущего окружения, а не регрессия `Network_ICMP`.
 
 Для воспроизводимости outbound `clientRandom` retest зафиксированы:
 - server H2 rules: `testing/trusttunnel/server_h2_rules.json`;

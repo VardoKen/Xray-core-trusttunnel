@@ -221,6 +221,14 @@
 - сервер логирует `trusttunnel H2 health-check accepted` / `trusttunnel H2 ICMP mux accepted` и `trusttunnel H3 health-check accepted` / `trusttunnel H3 ICMP mux accepted`;
 - `ping 1.1.1.1` из namespace `tun` проходит с `3/3 received` как на H2, так и на H3.
 
+### 5.3.2. `icmp` в core config/routing layer
+
+Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f`:
+- `common/net` содержит `Network_ICMP` и строковую форму `icmp`;
+- `common/net.ParseDestination(...)` принимает `icmp:1.2.3.4` и `icmp:[2001:4860:4860::8888]`;
+- `infra/conf.Network` и `NetworkList` принимают `icmp` в JSON-конфигах;
+- routing/API/webhook layer видит `icmp` как отдельное network-значение.
+
 ## 6. UDP path
 
 Реализовано:

@@ -211,7 +211,7 @@
 - H1 `_icmp` остаётся не transport path и отвечает `501 Not Implemented`;
 - TrustTunnel config model пока не имеет отдельных ICMP settings;
 - `ipv6Available` пока влияет только на попытку открыть IPv6 raw socket, а не образует полноценный product-level ICMP config surface;
-- client-side/Xray-side `_icmp` path вне server-side mux пока не интегрирован в routing/policy/stats модель Xray.
+- `common/net.Network_ICMP` уже существует как core primitive для config/routing/API semantics, но client-side TrustTunnel `_icmp` path вне server-side mux пока не интегрирован в concrete packet contract поверх `transport.Link`.
 
 ### 5.4. H3 path
 
