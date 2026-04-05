@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `fc276340`
+Коммит состояния: `32b2eff2`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -18,6 +18,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - H3 rules по `client_random`;
 - outbound `clientRandom` как реальная runtime-функция для H2 и H3;
 - H2 `_check` special path с корректными `200` / `407` / `403`;
+- server-side H2/H3 `_icmp` mux по official wire-format с raw ICMP echo-reply path;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
 - server-side traffic stats;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
@@ -76,7 +77,7 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - auth и rules проверяются раньше special-path handling как для обычного CONNECT, так и для `_check`, `_udp2` и `_icmp`;
 - H1 path больше не уводит `_check`, `_udp2` и `_icmp` в обычный target parsing и dispatch;
 - H1 `_check` отвечает явным `200`, H1 `_udp2` отвечает явной HTTP-ошибкой вместо dispatch, а `_icmp` отвечает явным `501 Not Implemented` после auth/rules;
-- H2/H3 `_icmp` больше не уходит в обычный dispatch path и тоже отвечает явным `501 Not Implemented`.
+- H2/H3 `_icmp` больше не уходит в обычный dispatch path: при доступном raw ICMP открывается отдельный mux path, а при недоступном raw socket сервер отвечает `503 Service Unavailable`.
 
 ### 2.7. Outbound `clientRandom`
 
@@ -100,7 +101,8 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- `_icmp` client/server path;
+- official interop-retest для H2/H3 `_icmp`;
+- место `_icmp` в outbound/runtime-модели Xray после server-side mux реализации;
 - привязка `ipv6_available`, private-network policy и timeout settings к реальному runtime;
 - полный UDP interop matrix;
 - REALITY;

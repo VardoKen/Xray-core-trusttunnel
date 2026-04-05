@@ -2,8 +2,8 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-База roadmap: состояние проекта после закрытия auth semantics на pseudo-host path и outbound clientRandom
-Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path и outbound clientRandom
+База roadmap: состояние проекта после server-side `_icmp` mux, закрытия auth semantics на pseudo-host path и outbound clientRandom
+Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom и server-side `_icmp` mux
 Не использовать для: фиксации уже закрытых багов и исторической хронологии
 
 ## 1. Принцип чтения roadmap
@@ -21,7 +21,13 @@
 
 ### 2.1. `_icmp`
 
-Нужно реализовать полноценный client/server path `_icmp` по спецификации, без обходной логики через TCP/UDP.
+Server-side H2/H3 `_icmp` mux по official wire-format уже реализован на `32b2eff2`, включая raw ICMP echo-reply path и `503` при недоступном raw socket.
+
+Открытым остаётся:
+- official client ↔ our server interop-retest для `_icmp`;
+- Xray-side/client-side модель `_icmp`, потому что в текущем core нет отдельного `Network_ICMP`;
+- explicit config surface для ICMP timeout/interface/private-network semantics;
+- error-type parity сверх подтверждённого echo-reply path.
 
 ### 2.2. Observable server behavior
 
@@ -138,7 +144,7 @@ REALITY должен внедряться через общий Xray `streamSett
 
 ## 5. Порядок выполнения
 
-1. `_icmp`
+1. `_icmp` interop и Xray-side model
 2. observable server behavior
 3. полный UDP interop matrix
 4. auth/stats sanity-check

@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `fc276340`
+Коммит состояния: `32b2eff2`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -145,6 +145,8 @@ Preflight:
 - session устанавливается;
 - H2 `_check` возвращает `200` / `407` / `403` согласно auth/rules сценарию;
 - reserved pseudo-hosts `_check`, `_udp2` и `_icmp` не падают из H1/H2/H3 обратно в обычный dispatch path;
+- H2/H3 `_icmp` при доступном raw ICMP открывает `200` mux stream и пишет reply-frames fixed-size codec;
+- H2/H3 `_icmp` при недоступном raw socket отвечает `503`;
 - outbound `clientRandom` на H2/H3 позволяет детерминированно проходить allow/deny по server-side rules;
 - TCP CONNECT проходит и держит двусторонний обмен;
 - UDP через `_udp2` проходит без развала session;
@@ -178,7 +180,8 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- `_icmp`;
+- official interop для `_icmp`;
+- Xray-side/runtime-модель `_icmp` после server-side mux;
 - полный UDP interop matrix;
 - observable server behavior для `ipv6_available`, private-network и timeout settings;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
@@ -187,10 +190,19 @@ Preflight:
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
 - обычный H2 CONNECT auth-fail возвращает `407` и `Proxy-Authenticate`;
 - H2 `_udp2` auth-fail возвращает `407` до UDP mux;
-- H2 `_icmp` auth-fail возвращает `407`, а success после auth/rules возвращает `501 Not Implemented`;
+- H2 `_icmp` auth-fail возвращает `407`;
+- H2 `_icmp` при недоступной ICMP session отвечает `503 Service Unavailable`;
+- H2 `_icmp` при доступной fake-session возвращает `200` и reply-frame без dispatch;
 - H1 `_check` отвечает `200` без dispatch;
 - H1 `_udp2` больше не уходит в обычный dispatch и отвечает явной HTTP-ошибкой;
 - H1 `_icmp` больше не уходит в обычный dispatch и отвечает `501 Not Implemented`.
+
+Linux root verification на Debian lab 2026-04-05 / `32b2eff2`:
+- repo HEAD: `32b2eff2527e9da632c980823d8435166f38d75f`;
+- worktree: clean;
+- `go test ./proxy/trusttunnel -run TestTrustTunnelICMPSessionEchoV4Loopback -count=1` проходит;
+- `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
+- `go build -buildvcs=false -o /opt/lab/xray-tt/tmp/xray-tt-current ./main` проходит.
 
 Clean-HEAD runtime-retest outbound `clientRandom` на 2026-04-05 / `fc276340`:
 - binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;

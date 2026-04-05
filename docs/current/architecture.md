@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `fc276340`
+Коммит состояния: `32b2eff2`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -161,6 +161,8 @@
 
 Файл:
 - `proxy/trusttunnel/server.go`
+- `proxy/trusttunnel/icmp_codec.go`
+- `proxy/trusttunnel/icmp_server.go`
 
 ### 5.2. H1 path
 
@@ -182,9 +184,32 @@
 - health-check special-case срабатывает до UDP mux и до обычного target parsing;
 - H2 `_check` больше не падает обратно в обычный dispatch path.
 
-Подтверждено локальными regression-тестами 2026-04-05:
-- reserved pseudo-host `_icmp` на H2/H3 тоже перехватывается до обычного target parsing;
-- `_icmp` на текущем состоянии отвечает явным `501 Not Implemented`, а не уходит в обычный dispatch path.
+Подтверждено локальными regression-тестами и Linux root loopback-тестом 2026-04-05 / `32b2eff2`:
+- reserved pseudo-host `_icmp` на H2/H3 перехватывается до обычного target parsing;
+- H2/H3 `_icmp` использует отдельный fixed-size codec по official wire-format;
+- серверный path создаёт per-stream raw ICMP session и пишет обратно reply-frames без участия обычного Xray dispatcher;
+- на подтверждённом состоянии echo-reply path работает для IPv4 loopback; ICMP error-type parity и official interop ещё не подтверждены.
+
+### 5.3.1. H2/H3 `_icmp` runtime-path
+
+Файлы:
+- `proxy/trusttunnel/icmp_codec.go`
+- `proxy/trusttunnel/icmp_server.go`
+
+Реализовано:
+- CONNECT на `_icmp:0` после auth/rules переводится в отдельный H2/H3 mux path;
+- входящий stream разбирается как последовательность fixed-size request frames:
+  `id(2) + destination(16) + sequence(2) + ttl/hop_limit(1) + data_size(2)`;
+- сервер создаёт echo-request в raw ICMP socket и ждёт reply в пределах фиксированного timeout;
+- исходящий stream пишет fixed-size reply frames:
+  `id(2) + source(16) + type(1) + code(1) + sequence(2)`;
+- если raw ICMP недоступен, H2/H3 path отвечает `503 Service Unavailable`.
+
+Ограничения текущего состояния:
+- H1 `_icmp` остаётся не transport path и отвечает `501 Not Implemented`;
+- TrustTunnel config model пока не имеет отдельных ICMP settings;
+- `ipv6Available` пока влияет только на попытку открыть IPv6 raw socket, а не образует полноценный product-level ICMP config surface;
+- client-side/Xray-side `_icmp` path вне server-side mux пока не интегрирован в routing/policy/stats модель Xray.
 
 ### 5.4. H3 path
 
