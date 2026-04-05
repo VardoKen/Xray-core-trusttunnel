@@ -312,6 +312,26 @@ func TestExtractICMPTTL(t *testing.T) {
 			t.Fatalf("extractICMPTTL() = %d, want 11", got)
 		}
 	})
+
+	t.Run("full-packet fallback", func(t *testing.T) {
+		wire := make([]byte, header.IPv4MinimumSize+header.ICMPv4MinimumSize)
+		ipHdr := header.IPv4(wire[:header.IPv4MinimumSize])
+		ipHdr.Encode(&header.IPv4Fields{
+			TTL:         5,
+			Protocol:    uint8(header.ICMPv4ProtocolNumber),
+			TotalLength: uint16(len(wire)),
+		})
+
+		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+			Payload: buffer.MakeWithData(wire),
+		})
+		defer pkt.DecRef()
+		pkt.NetworkProtocolNumber = header.IPv4ProtocolNumber
+
+		if got := extractICMPTTL(pkt); got != 5 {
+			t.Fatalf("extractICMPTTL() = %d, want 5", got)
+		}
+	})
 }
 
 func TestWriteRawICMPPacketUsesLinkEndpointInjection(t *testing.T) {

@@ -230,7 +230,26 @@ func extractRawICMPPacket(pkt *stack.PacketBuffer) []byte {
 func extractICMPTTL(pkt *stack.PacketBuffer) uint8 {
 	networkHeader := pkt.NetworkHeader().Slice()
 	if len(networkHeader) == 0 {
+		view := pkt.ToView()
+		if view == nil {
+			return 0
+		}
+		defer view.Release()
+		networkHeader = view.AsSlice()
+	}
+	if len(networkHeader) == 0 {
 		return 0
+	}
+
+	switch pkt.NetworkProtocolNumber {
+	case header.IPv4ProtocolNumber:
+		if len(networkHeader) >= header.IPv4MinimumSize {
+			return networkHeader[8]
+		}
+	case header.IPv6ProtocolNumber:
+		if len(networkHeader) >= header.IPv6MinimumSize {
+			return networkHeader[7]
+		}
 	}
 
 	switch networkHeader[0] >> 4 {
