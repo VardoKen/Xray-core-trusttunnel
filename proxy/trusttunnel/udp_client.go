@@ -18,7 +18,10 @@ import (
 	xtlstls "github.com/xtls/xray-core/transport/internet/tls"
 )
 
-const trustTunnelUDPPseudoHost = "_udp2:0"
+const (
+	trustTunnelUDPPseudoHost       = "_udp2"
+	trustTunnelLegacyUDPPseudoHost = "_udp2:0"
+)
 
 func (c *Client) processUDP(ctx context.Context, link *transport.Link, dialer internet.Dialer, account *MemoryAccount, fallbackDest xnet.Destination) error {
 	if !c.config.GetEnableUdp() {

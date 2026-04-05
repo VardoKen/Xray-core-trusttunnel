@@ -68,7 +68,7 @@ func (f *trustTunnelUDPFlow) close() {
 }
 
 func isTrustTunnelUDPHost(host string) bool {
-	return host == "_udp2" || host == trustTunnelUDPPseudoHost
+	return host == trustTunnelUDPPseudoHost || host == trustTunnelLegacyUDPPseudoHost
 }
 
 func trustTunnelCloneUDPAddr(addr *stdnet.UDPAddr) *stdnet.UDPAddr {

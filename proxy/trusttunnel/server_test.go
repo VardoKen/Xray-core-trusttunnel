@@ -285,6 +285,28 @@ func TestServeHTTP2UDPAuthFailureUsesConfiguredStatus(t *testing.T) {
 	}
 }
 
+func TestServeHTTP2UDPAuthFailureAcceptsAuthorityWithoutPort(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{
+		AuthFailureStatusCode: http.StatusProxyAuthRequired,
+		EnableUdp:             true,
+	})
+	dispatcher := &testDispatcher{}
+	recorder := httptest.NewRecorder()
+	req := newTestConnectRequest("_udp2", "")
+
+	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
+
+	if recorder.Code != http.StatusProxyAuthRequired {
+		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusProxyAuthRequired)
+	}
+	if got := recorder.Header().Get("Proxy-Authenticate"); got != `Basic realm="trusttunnel"` {
+		t.Fatalf("unexpected Proxy-Authenticate header: got %q", got)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
 func TestServeHTTP2ICMPAuthFailureUsesConfiguredStatus(t *testing.T) {
 	server := newTestTrustTunnelServer(t, &ServerConfig{
 		AuthFailureStatusCode: http.StatusProxyAuthRequired,
@@ -465,6 +487,26 @@ func TestProcessHTTP1UDPPseudoHostAuthFailureUsesConfiguredStatus(t *testing.T) 
 	}
 	if got := resp.Header.Get("Proxy-Authenticate"); got != `Basic realm="trusttunnel"` {
 		t.Fatalf("unexpected Proxy-Authenticate header: got %q", got)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestProcessHTTP1UDPPseudoHostWithoutPortRejectedWithoutDispatch(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{
+		EnableUdp: true,
+	})
+	dispatcher := &testDispatcher{}
+
+	resp, err := runTestHTTP1ConnectRequest(t, server, "_udp2", buildBasicAuthValue("u1", "p1"), dispatcher)
+	defer resp.Body.Close()
+
+	if err != nil {
+		t.Fatalf("unexpected server error: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 	if dispatcher.dispatchCount != 0 {
 		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
