@@ -2,7 +2,9 @@ package trusttunnel
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	goerrors "errors"
 	"io"
 	"net"
 	"net/http"
@@ -66,6 +68,9 @@ func newTestTrustTunnelServer(t *testing.T, cfg *ServerConfig) *Server {
 	return &Server{
 		config: cfg,
 		users:  store,
+		newICMPSession: func(bool) (trustTunnelICMPHandler, error) {
+			return nil, goerrors.New("icmp unavailable in unit test")
+		},
 	}
 }
 
@@ -226,7 +231,7 @@ func TestServeHTTP2ICMPAuthFailureUsesConfiguredStatus(t *testing.T) {
 	}
 }
 
-func TestServeHTTP2ICMPReturnsNotImplementedWithoutDispatch(t *testing.T) {
+func TestServeHTTP2ICMPUnavailableReturnsServiceUnavailableWithoutDispatch(t *testing.T) {
 	server := newTestTrustTunnelServer(t, &ServerConfig{})
 	dispatcher := &testDispatcher{}
 	recorder := httptest.NewRecorder()
@@ -234,11 +239,81 @@ func TestServeHTTP2ICMPReturnsNotImplementedWithoutDispatch(t *testing.T) {
 
 	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
 
-	if recorder.Code != http.StatusNotImplemented {
-		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusNotImplemented)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusServiceUnavailable)
 	}
 	if dispatcher.dispatchCount != 0 {
 		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+type fakeTrustTunnelICMPSession struct {
+	reply trustTunnelICMPReplyPacket
+	err   error
+	ok    bool
+	reqs  []trustTunnelICMPRequestPacket
+}
+
+func (s *fakeTrustTunnelICMPSession) HandleRequest(_ context.Context, pkt trustTunnelICMPRequestPacket) (trustTunnelICMPReplyPacket, bool, error) {
+	s.reqs = append(s.reqs, pkt)
+	return s.reply, s.ok, s.err
+}
+
+func (*fakeTrustTunnelICMPSession) Close() error {
+	return nil
+}
+
+func TestServeHTTP2ICMPReturnsReplyFrameWithoutDispatch(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{})
+	dispatcher := &testDispatcher{}
+	recorder := httptest.NewRecorder()
+	reqBody, err := encodeTrustTunnelICMPRequest(trustTunnelICMPRequestPacket{
+		ID:          0x1234,
+		Destination: net.IPv4(127, 0, 0, 1),
+		Sequence:    7,
+		TTL:         64,
+		DataSize:    32,
+	})
+	if err != nil {
+		t.Fatalf("failed to encode request: %v", err)
+	}
+
+	fake := &fakeTrustTunnelICMPSession{
+		reply: trustTunnelICMPReplyPacket{
+			ID:       0x1234,
+			Source:   net.IPv4(127, 0, 0, 1),
+			Type:     0,
+			Code:     0,
+			Sequence: 7,
+		},
+		ok: true,
+	}
+	server.newICMPSession = func(bool) (trustTunnelICMPHandler, error) {
+		return fake, nil
+	}
+
+	req := newTestConnectRequest("_icmp:0", buildBasicAuthValue("u1", "p1"))
+	req.Body = io.NopCloser(bytes.NewReader(reqBody))
+
+	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+	if len(fake.reqs) != 1 {
+		t.Fatalf("unexpected request count: got %d, want 1", len(fake.reqs))
+	}
+
+	got := recorder.Body.Bytes()
+	want, err := encodeTrustTunnelICMPReply(fake.reply)
+	if err != nil {
+		t.Fatalf("failed to encode reply: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("unexpected body: got %v, want %v", got, want)
 	}
 }
 

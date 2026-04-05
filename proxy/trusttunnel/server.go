@@ -38,10 +38,11 @@ func init() {
 }
 
 type Server struct {
-	config        *ServerConfig
-	users         *UserStore
-	policyManager policy.Manager
-	statsManager  stats.Manager
+	config         *ServerConfig
+	users          *UserStore
+	policyManager  policy.Manager
+	statsManager   stats.Manager
+	newICMPSession func(ipv6Available bool) (trustTunnelICMPHandler, error)
 }
 
 type bufferedConn struct {
@@ -510,8 +511,7 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 	}
 
 	if isTrustTunnelICMPHost(req.Host) {
-		writeH2Response(w, http.StatusNotImplemented, "icmp is not implemented\n", nil)
-		errors.LogInfo(ctx, "trusttunnel ", proto, " ICMP pseudo-host reached but is not implemented")
+		s.serveICMPMuxRequest(proto, ctx, w, req)
 		return
 	}
 
