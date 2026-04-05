@@ -42,7 +42,7 @@ type Server struct {
 	users          *UserStore
 	policyManager  policy.Manager
 	statsManager   stats.Manager
-	newICMPSession func(ipv6Available bool) (trustTunnelICMPHandler, error)
+	newICMPSession func(options trustTunnelICMPSessionOptions) (trustTunnelICMPHandler, error)
 }
 
 type bufferedConn struct {

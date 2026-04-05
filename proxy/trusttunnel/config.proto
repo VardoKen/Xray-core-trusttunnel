@@ -52,4 +52,7 @@ message ServerConfig {
   bool ipv6_available = 5;
   uint32 auth_failure_status_code = 6;
   bool enable_udp = 7;
+  string icmp_interface_name = 8;
+  uint32 icmp_request_timeout_secs = 9;
+  bool allow_private_network_connections = 10;
 }

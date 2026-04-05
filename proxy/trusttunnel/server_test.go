@@ -68,7 +68,7 @@ func newTestTrustTunnelServer(t *testing.T, cfg *ServerConfig) *Server {
 	return &Server{
 		config: cfg,
 		users:  store,
-		newICMPSession: func(bool) (trustTunnelICMPHandler, error) {
+		newICMPSession: func(trustTunnelICMPSessionOptions) (trustTunnelICMPHandler, error) {
 			return nil, goerrors.New("icmp unavailable in unit test")
 		},
 	}
@@ -288,7 +288,7 @@ func TestServeHTTP2ICMPReturnsReplyFrameWithoutDispatch(t *testing.T) {
 		},
 		ok: true,
 	}
-	server.newICMPSession = func(bool) (trustTunnelICMPHandler, error) {
+	server.newICMPSession = func(trustTunnelICMPSessionOptions) (trustTunnelICMPHandler, error) {
 		return fake, nil
 	}
 

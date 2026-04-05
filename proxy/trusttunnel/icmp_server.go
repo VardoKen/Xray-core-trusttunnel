@@ -6,6 +6,7 @@ import (
 	"io"
 	stdnet "net"
 	"net/http"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -16,6 +17,13 @@ import (
 )
 
 const trustTunnelICMPRequestTimeout = 3 * time.Second
+
+type trustTunnelICMPSessionOptions struct {
+	ipv6Available                  bool
+	interfaceName                  string
+	requestTimeout                 time.Duration
+	allowPrivateNetworkConnections bool
+}
 
 type trustTunnelICMPHandler interface {
 	HandleRequest(context.Context, trustTunnelICMPRequestPacket) (trustTunnelICMPReplyPacket, bool, error)
@@ -30,11 +38,13 @@ type trustTunnelICMPWaitKey struct {
 }
 
 type trustTunnelICMPSession struct {
-	timeout time.Duration
-	v4      *icmp.PacketConn
-	v4pc    *ipv4.PacketConn
-	v6      *icmp.PacketConn
-	v6pc    *ipv6.PacketConn
+	timeout                        time.Duration
+	interfaceIndex                 int
+	allowPrivateNetworkConnections bool
+	v4                             *icmp.PacketConn
+	v4pc                           *ipv4.PacketConn
+	v6                             *icmp.PacketConn
+	v6pc                           *ipv6.PacketConn
 
 	waiters map[trustTunnelICMPWaitKey]chan trustTunnelICMPReplyPacket
 	mu      sync.Mutex
@@ -42,20 +52,47 @@ type trustTunnelICMPSession struct {
 	closeOnce sync.Once
 }
 
-func newTrustTunnelICMPSession(ipv6Available bool) (trustTunnelICMPHandler, error) {
+func buildTrustTunnelICMPSessionOptions(config *ServerConfig) trustTunnelICMPSessionOptions {
+	options := trustTunnelICMPSessionOptions{
+		ipv6Available:                  config.GetIpv6Available(),
+		interfaceName:                  config.GetIcmpInterfaceName(),
+		allowPrivateNetworkConnections: config.GetAllowPrivateNetworkConnections(),
+		requestTimeout:                 trustTunnelICMPRequestTimeout,
+	}
+	if secs := config.GetIcmpRequestTimeoutSecs(); secs > 0 {
+		options.requestTimeout = time.Duration(secs) * time.Second
+	}
+	return options
+}
+
+func newTrustTunnelICMPSession(options trustTunnelICMPSessionOptions) (trustTunnelICMPHandler, error) {
 	v4, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
 	if err != nil {
 		return nil, err
 	}
 
 	session := &trustTunnelICMPSession{
-		timeout: trustTunnelICMPRequestTimeout,
-		v4:      v4,
-		v4pc:    v4.IPv4PacketConn(),
-		waiters: make(map[trustTunnelICMPWaitKey]chan trustTunnelICMPReplyPacket),
+		timeout:                        options.requestTimeout,
+		allowPrivateNetworkConnections: options.allowPrivateNetworkConnections,
+		v4:                             v4,
+		v4pc:                           v4.IPv4PacketConn(),
+		waiters:                        make(map[trustTunnelICMPWaitKey]chan trustTunnelICMPReplyPacket),
 	}
 
-	if ipv6Available {
+	if session.timeout <= 0 {
+		session.timeout = trustTunnelICMPRequestTimeout
+	}
+
+	if options.interfaceName != "" {
+		iface, err := stdnet.InterfaceByName(options.interfaceName)
+		if err != nil {
+			_ = v4.Close()
+			return nil, err
+		}
+		session.interfaceIndex = iface.Index
+	}
+
+	if options.ipv6Available {
 		if v6, err := icmp.ListenPacket("ip6:ipv6-icmp", "::"); err == nil {
 			session.v6 = v6
 			session.v6pc = v6.IPv6PacketConn()
@@ -68,10 +105,11 @@ func newTrustTunnelICMPSession(ipv6Available bool) (trustTunnelICMPHandler, erro
 }
 
 func (s *Server) openICMPSession() (trustTunnelICMPHandler, error) {
+	options := buildTrustTunnelICMPSessionOptions(s.config)
 	if s.newICMPSession != nil {
-		return s.newICMPSession(s.config.GetIpv6Available())
+		return s.newICMPSession(options)
 	}
-	return newTrustTunnelICMPSession(s.config.GetIpv6Available())
+	return newTrustTunnelICMPSession(options)
 }
 
 func (s *Server) serveICMPMuxRequest(proto string, ctx context.Context, w http.ResponseWriter, req *http.Request) {
@@ -162,6 +200,9 @@ func (s *trustTunnelICMPSession) HandleRequest(ctx context.Context, pkt trustTun
 	if dst == nil {
 		return zero, false, stdnet.InvalidAddrError("invalid ICMP destination")
 	}
+	if err := trustTunnelValidateICMPDestination(dst, s.allowPrivateNetworkConnections); err != nil {
+		return zero, false, err
+	}
 
 	data := make([]byte, int(pkt.DataSize))
 	if _, err := rand.Read(data); err != nil {
@@ -197,7 +238,11 @@ func (s *trustTunnelICMPSession) HandleRequest(ctx context.Context, pkt trustTun
 		if err != nil {
 			return zero, false, err
 		}
-		if _, err := s.v4pc.WriteTo(wire, &ipv4.ControlMessage{TTL: int(ttl)}, &stdnet.IPAddr{IP: dst}); err != nil {
+		control := &ipv4.ControlMessage{TTL: int(ttl)}
+		if s.interfaceIndex != 0 {
+			control.IfIndex = s.interfaceIndex
+		}
+		if _, err := s.v4pc.WriteTo(wire, control, &stdnet.IPAddr{IP: dst}); err != nil {
 			return zero, false, err
 		}
 		errors.LogDebug(ctx, "trusttunnel icmp raw send v4 dst=", dst.String(), " id=", pkt.ID, " seq=", pkt.Sequence)
@@ -218,7 +263,11 @@ func (s *trustTunnelICMPSession) HandleRequest(ctx context.Context, pkt trustTun
 		if err != nil {
 			return zero, false, err
 		}
-		if _, err := s.v6pc.WriteTo(wire, &ipv6.ControlMessage{HopLimit: int(ttl)}, &stdnet.IPAddr{IP: dst}); err != nil {
+		control := &ipv6.ControlMessage{HopLimit: int(ttl)}
+		if s.interfaceIndex != 0 {
+			control.IfIndex = s.interfaceIndex
+		}
+		if _, err := s.v6pc.WriteTo(wire, control, &stdnet.IPAddr{IP: dst}); err != nil {
 			return zero, false, err
 		}
 		errors.LogDebug(ctx, "trusttunnel icmp raw send v6 dst=", dst.String(), " id=", pkt.ID, " seq=", pkt.Sequence)
@@ -364,4 +413,29 @@ func trustTunnelICMPIsReplyType(typ icmp.Type, v6 bool) bool {
 	}
 	typed, ok := typ.(ipv4.ICMPType)
 	return ok && typed == ipv4.ICMPTypeEchoReply
+}
+
+func trustTunnelValidateICMPDestination(ip stdnet.IP, allowPrivateNetworkConnections bool) error {
+	if trustTunnelCloneIP(ip) == nil {
+		return stdnet.InvalidAddrError("invalid ICMP destination")
+	}
+	if allowPrivateNetworkConnections {
+		return nil
+	}
+	if !trustTunnelIsGlobalIP(ip) {
+		return stdnet.InvalidAddrError("private network connections are disabled")
+	}
+	return nil
+}
+
+func trustTunnelIsGlobalIP(ip stdnet.IP) bool {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	addr = addr.Unmap()
+	if !addr.IsValid() || addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsPrivate() {
+		return false
+	}
+	return addr.IsGlobalUnicast()
 }

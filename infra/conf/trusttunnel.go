@@ -31,22 +31,22 @@ type TrustTunnelEndpointConfig struct {
 }
 
 type TrustTunnelClientConfig struct {
-	Address            *Address                    `json:"address"`
-	Port               uint16                      `json:"port"`
-	Level              byte                        `json:"level"`
-	Email              string                      `json:"email"`
-	Username           string                      `json:"username"`
-	Password           string                      `json:"password"`
+	Address            *Address                     `json:"address"`
+	Port               uint16                       `json:"port"`
+	Level              byte                         `json:"level"`
+	Email              string                       `json:"email"`
+	Username           string                       `json:"username"`
+	Password           string                       `json:"password"`
 	Servers            []*TrustTunnelEndpointConfig `json:"servers"`
-	Hostname           string                      `json:"hostname"`
-	Transport          string                      `json:"transport"`
-	HasIPv6            bool                        `json:"hasIpv6"`
-	SkipVerification   bool                        `json:"skipVerification"`
-	CertificatePEM     string                      `json:"certificatePem"`
-	CertificatePEMFile string                      `json:"certificatePemFile"`
-	ClientRandom       string                      `json:"clientRandom"`
-	AntiDpi            bool                        `json:"antiDpi"`
-	UDP                bool                        `json:"udp"`
+	Hostname           string                       `json:"hostname"`
+	Transport          string                       `json:"transport"`
+	HasIPv6            bool                         `json:"hasIpv6"`
+	SkipVerification   bool                         `json:"skipVerification"`
+	CertificatePEM     string                       `json:"certificatePem"`
+	CertificatePEMFile string                       `json:"certificatePemFile"`
+	ClientRandom       string                       `json:"clientRandom"`
+	AntiDpi            bool                         `json:"antiDpi"`
+	UDP                bool                         `json:"udp"`
 }
 
 func parseTrustTunnelTransport(v string) (trusttunnel.TransportProtocol, error) {
@@ -150,25 +150,38 @@ type TrustTunnelRuleConfig struct {
 	Allow        bool   `json:"allow"`
 }
 
+type TrustTunnelICMPConfig struct {
+	InterfaceName      string `json:"interfaceName"`
+	RequestTimeoutSecs uint32 `json:"requestTimeoutSecs"`
+}
+
 type TrustTunnelServerConfig struct {
-	Users                 []*TrustTunnelUserConfig `json:"users"`
-	Hosts                 []*TrustTunnelHostConfig `json:"hosts"`
-	Transports            []string                 `json:"transports"`
-	Rules                 []*TrustTunnelRuleConfig `json:"rules"`
-	IPv6Available         bool                     `json:"ipv6Available"`
-	AuthFailureStatusCode uint32                   `json:"authFailureStatusCode"`
-	UDP                   bool                     `json:"udp"`
+	Users                          []*TrustTunnelUserConfig `json:"users"`
+	Hosts                          []*TrustTunnelHostConfig `json:"hosts"`
+	Transports                     []string                 `json:"transports"`
+	Rules                          []*TrustTunnelRuleConfig `json:"rules"`
+	IPv6Available                  bool                     `json:"ipv6Available"`
+	AllowPrivateNetworkConnections bool                     `json:"allowPrivateNetworkConnections"`
+	AuthFailureStatusCode          uint32                   `json:"authFailureStatusCode"`
+	UDP                            bool                     `json:"udp"`
+	ICMP                           *TrustTunnelICMPConfig   `json:"icmp"`
 }
 
 func (c *TrustTunnelServerConfig) Build() (proto.Message, error) {
 	config := &trusttunnel.ServerConfig{
-		Users:                 make([]*protocol.User, 0, len(c.Users)),
-		Hosts:                 make([]*trusttunnel.ServerHost, 0, len(c.Hosts)),
-		Transports:            make([]trusttunnel.TransportProtocol, 0, len(c.Transports)),
-		Rules:                 make([]*trusttunnel.Rule, 0, len(c.Rules)),
-		Ipv6Available:         c.IPv6Available,
-		AuthFailureStatusCode: c.AuthFailureStatusCode,
-		EnableUdp:             c.UDP,
+		Users:                          make([]*protocol.User, 0, len(c.Users)),
+		Hosts:                          make([]*trusttunnel.ServerHost, 0, len(c.Hosts)),
+		Transports:                     make([]trusttunnel.TransportProtocol, 0, len(c.Transports)),
+		Rules:                          make([]*trusttunnel.Rule, 0, len(c.Rules)),
+		Ipv6Available:                  c.IPv6Available,
+		AllowPrivateNetworkConnections: c.AllowPrivateNetworkConnections,
+		AuthFailureStatusCode:          c.AuthFailureStatusCode,
+		EnableUdp:                      c.UDP,
+	}
+
+	if c.ICMP != nil {
+		config.IcmpInterfaceName = c.ICMP.InterfaceName
+		config.IcmpRequestTimeoutSecs = c.ICMP.RequestTimeoutSecs
 	}
 
 	for _, u := range c.Users {
