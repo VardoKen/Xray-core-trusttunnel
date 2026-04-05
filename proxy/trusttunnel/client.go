@@ -195,6 +195,10 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	}
 	ob.Name = "trusttunnel"
 
+	if ob.Target.Network == xnet.Network_ICMP {
+		return errors.New("trusttunnel client-side icmp packet contract is not implemented")
+	}
+
 	user := c.server.User
 	account, ok := user.Account.(*MemoryAccount)
 	if !ok {
