@@ -187,6 +187,13 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		return s.processHTTP3(ctx, h3conn, conn, dispatcher, inbound)
 	}
 
+	if strings.EqualFold(trustTunnelNegotiatedProtocol(conn), "h2") {
+		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+			errors.LogDebugInner(ctx, err, "failed to clear read deadline")
+		}
+		return s.processHTTP2(ctx, &bufferedConn{Connection: conn, reader: bufio.NewReaderSize(conn, 64*1024)}, dispatcher, inbound, clientRandom, false)
+	}
+
 	if err := conn.SetReadDeadline(time.Now().Add(s.config.clientListenerTimeout())); err != nil {
 		errors.LogInfoInner(ctx, err, "failed to set read deadline")
 	}
@@ -201,10 +208,34 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		if err := conn.SetReadDeadline(time.Time{}); err != nil {
 			errors.LogDebugInner(ctx, err, "failed to clear read deadline")
 		}
-		return s.processHTTP2(ctx, &bufferedConn{Connection: conn, reader: reader}, dispatcher, inbound, clientRandom)
+		return s.processHTTP2(ctx, &bufferedConn{Connection: conn, reader: reader}, dispatcher, inbound, clientRandom, true)
+	}
+
+	if err != nil {
+		trace := errors.New("failed to read trusttunnel request").Base(err)
+		if errors.Cause(err) != io.EOF && !isTimeout(errors.Cause(err)) {
+			trace = trace.AtWarning()
+		}
+		return trace
 	}
 
 	return s.processHTTP1(ctx, conn, reader, dispatcher, inbound, clientRandom)
+}
+
+func trustTunnelNegotiatedProtocol(conn stat.Connection) string {
+	if conn == nil {
+		return ""
+	}
+
+	if negotiated, ok := any(conn).(interface{ NegotiatedProtocol() string }); ok {
+		return negotiated.NegotiatedProtocol()
+	}
+
+	if negotiated, ok := stat.TryUnwrapStatsConn(conn).(interface{ NegotiatedProtocol() string }); ok {
+		return negotiated.NegotiatedProtocol()
+	}
+
+	return ""
 }
 
 func (s *Server) processHTTP3(ctx context.Context, h3conn tcptransport.HTTP3RequestConn, conn stat.Connection, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) error {
@@ -373,7 +404,7 @@ Start:
 		inbound.CanSpliceCopy = 1
 	}
 
-	if err := s.dispatchConnectSession(ctx, dispatcher, dest, linkReader, buf.NewWriter(conn)); err != nil {
+	if err := s.dispatchConnectSession(ctx, dispatcher, dest, linkReader, buf.NewWriter(conn), conn); err != nil {
 		return err
 	}
 
@@ -384,7 +415,7 @@ Start:
 	return nil
 }
 
-func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) error {
+func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string, sawClientPreface bool) error {
 	done := make(chan struct{})
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -399,7 +430,7 @@ func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatche
 		h2s.ServeConn(conn, &http2.ServeConnOpts{
 			Context:          ctx,
 			Handler:          handler,
-			SawClientPreface: true,
+			SawClientPreface: sawClientPreface,
 		})
 	}()
 
@@ -433,7 +464,11 @@ func isTrustTunnelICMPHost(host string) bool {
 	}
 }
 
-func (s *Server) dispatchConnectSession(ctx context.Context, dispatcher routing.Dispatcher, dest net.Destination, input buf.Reader, output buf.Writer) error {
+func (s *Server) dispatchConnectSession(ctx context.Context, dispatcher routing.Dispatcher, dest net.Destination, input buf.Reader, output buf.Writer, cleanupTarget interface{}) error {
+	abortInbound := func() {
+		_ = common.Interrupt(cleanupTarget)
+	}
+
 	dispatchCtx := ctx
 	pinOnline := func() {}
 	if establishTimeout := s.config.connectionEstablishmentTimeout(); establishTimeout > 0 {
@@ -447,6 +482,7 @@ func (s *Server) dispatchConnectSession(ctx context.Context, dispatcher routing.
 
 	link, err := dispatcher.Dispatch(dispatchCtx, dest)
 	if err != nil {
+		abortInbound()
 		return errors.New("failed to dispatch trusttunnel CONNECT").Base(err).AtWarning()
 	}
 
@@ -457,6 +493,7 @@ func (s *Server) dispatchConnectSession(ctx context.Context, dispatcher routing.
 	if idleTimeout := s.config.tcpConnectionsTimeout(); idleTimeout > 0 {
 		timer := signal.CancelAfterInactivity(sessionCtx, func() {
 			cancel()
+			abortInbound()
 			common.Interrupt(link.Reader)
 			common.Interrupt(link.Writer)
 		}, idleTimeout)
@@ -479,6 +516,7 @@ func (s *Server) dispatchConnectSession(ctx context.Context, dispatcher routing.
 
 	requestDoneAndCloseWriter := task.OnSuccess(requestDone, task.Close(link.Writer))
 	if err := task.Run(sessionCtx, requestDoneAndCloseWriter, responseDone); err != nil {
+		abortInbound()
 		common.Interrupt(link.Reader)
 		common.Interrupt(link.Writer)
 		return errors.New("trusttunnel connection ends").Base(err)
@@ -634,7 +672,7 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 		f: flusher,
 	}
 
-	if err := s.dispatchConnectSession(ctx, dispatcher, dest, buf.NewReader(req.Body), buf.NewWriter(writer)); err != nil {
+	if err := s.dispatchConnectSession(ctx, dispatcher, dest, buf.NewReader(req.Body), buf.NewWriter(writer), req.Body); err != nil {
 		errors.LogWarningInner(ctx, err, "failed to dispatch trusttunnel "+strings.ToLower(proto)+" CONNECT")
 	}
 }

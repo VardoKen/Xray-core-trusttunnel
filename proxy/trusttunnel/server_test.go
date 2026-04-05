@@ -16,10 +16,13 @@ import (
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/features/routing"
 	"github.com/xtls/xray-core/transport"
+	"github.com/xtls/xray-core/transport/internet/stat"
 )
 
 type testDispatcher struct {
 	dispatchCount int
+	dispatchFn    func(context.Context, xnet.Destination) (*transport.Link, error)
+	dispatchLink  func(context.Context, xnet.Destination, *transport.Link) error
 }
 
 func (*testDispatcher) Type() interface{} {
@@ -34,13 +37,19 @@ func (*testDispatcher) Close() error {
 	return nil
 }
 
-func (d *testDispatcher) Dispatch(context.Context, xnet.Destination) (*transport.Link, error) {
+func (d *testDispatcher) Dispatch(ctx context.Context, dest xnet.Destination) (*transport.Link, error) {
 	d.dispatchCount++
+	if d.dispatchFn != nil {
+		return d.dispatchFn(ctx, dest)
+	}
 	return nil, goerrors.New("unexpected Dispatch call")
 }
 
-func (d *testDispatcher) DispatchLink(context.Context, xnet.Destination, *transport.Link) error {
+func (d *testDispatcher) DispatchLink(ctx context.Context, dest xnet.Destination, link *transport.Link) error {
 	d.dispatchCount++
+	if d.dispatchLink != nil {
+		return d.dispatchLink(ctx, dest, link)
+	}
 	return goerrors.New("unexpected DispatchLink call")
 }
 
@@ -87,6 +96,25 @@ func newTestConnectRequest(host string, authHeader string) *http.Request {
 		req.Header.Set("Proxy-Authorization", authHeader)
 	}
 	return req.WithContext(context.Background())
+}
+
+type closeTrackingBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *closeTrackingBody) Close() error {
+	b.closed = true
+	return nil
+}
+
+type negotiatedProtocolConn struct {
+	net.Conn
+	protocol string
+}
+
+func (c *negotiatedProtocolConn) NegotiatedProtocol() string {
+	return c.protocol
 }
 
 func runTestHTTP1ConnectRequest(t *testing.T, server *Server, host string, authHeader string, dispatcher routing.Dispatcher) (*http.Response, error) {
@@ -165,6 +193,47 @@ func TestServeHTTP2CheckReturnsOKWithoutDispatch(t *testing.T) {
 	}
 	if dispatcher.dispatchCount != 0 {
 		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestServeHTTP2ConnectDispatchFailureClosesRequestBody(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{})
+	dispatcher := &testDispatcher{
+		dispatchFn: func(context.Context, xnet.Destination) (*transport.Link, error) {
+			return nil, goerrors.New("dial failed")
+		},
+	}
+	recorder := httptest.NewRecorder()
+	req := newTestConnectRequest("example.com:443", buildBasicAuthValue("u1", "p1"))
+	body := &closeTrackingBody{Reader: strings.NewReader("")}
+	req.Body = body
+
+	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if !body.closed {
+		t.Fatal("expected request body to be closed on CONNECT dispatch failure")
+	}
+	if dispatcher.dispatchCount != 1 {
+		t.Fatalf("unexpected dispatch count: got %d, want 1", dispatcher.dispatchCount)
+	}
+}
+
+func TestTrustTunnelNegotiatedProtocolUnwrapsStatsConn(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	got := trustTunnelNegotiatedProtocol(&stat.CounterConnection{
+		Connection: &negotiatedProtocolConn{
+			Conn:     serverConn,
+			protocol: "h2",
+		},
+	})
+	if got != "h2" {
+		t.Fatalf("trustTunnelNegotiatedProtocol() = %q, want %q", got, "h2")
 	}
 }
 
