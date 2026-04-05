@@ -151,6 +151,7 @@ func runTrustTunnelStreamTunnel(ctx context.Context, link *transport.Link, tunne
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	responseClosed := make(chan struct{})
+	requestFinished := make(chan struct{})
 
 	abortTunnel := func() {
 		cancel()
@@ -160,6 +161,8 @@ func runTrustTunnelStreamTunnel(ctx context.Context, link *transport.Link, tunne
 	}
 
 	requestDone := func() error {
+		defer close(requestFinished)
+
 		err := buf.Copy(link.Reader, buf.NewWriter(tunnelConn))
 		if err == nil {
 			return nil
@@ -180,7 +183,13 @@ func runTrustTunnelStreamTunnel(ctx context.Context, link *transport.Link, tunne
 		err := buf.Copy(buf.NewReader(tunnelConn), link.Writer)
 		if err == nil {
 			close(responseClosed)
-			common.Interrupt(link.Reader)
+
+			select {
+			case <-requestFinished:
+			case <-time.After(50 * time.Millisecond):
+				common.Interrupt(link.Reader)
+			}
+
 			_ = tunnelConn.Close()
 		}
 		return err
