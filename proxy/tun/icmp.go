@@ -131,6 +131,7 @@ func (c *icmpConn) SetWriteDeadline(time.Time) error {
 }
 
 func (c *icmpConn) WriteMultiBuffer(mb buf.MultiBuffer) error {
+	var wrote bool
 	for _, b := range mb {
 		dst := c.dst
 		if b.UDP != nil {
@@ -138,17 +139,21 @@ func (c *icmpConn) WriteMultiBuffer(mb buf.MultiBuffer) error {
 		}
 
 		if !dst.IsValid() || dst.Address == nil || dst.Address.IP() == nil {
-			continue
+			return errors.New("icmp reply destination is invalid")
 		}
 		if dst.Address.Family() != c.dst.Address.Family() {
-			continue
+			return errors.New("icmp reply destination family does not match flow")
 		}
 
 		if err := c.handler.writePacket(b.Bytes(), dst, c.src); err != nil {
-			continue
+			return err
 		}
+		wrote = true
 	}
 
+	if !wrote && !mb.IsEmpty() {
+		return errors.New("icmp reply was not written")
+	}
 	return nil
 }
 
