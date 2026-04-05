@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `b1c14eb3`
+Коммит состояния: `6fcb3a28`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -120,7 +120,7 @@
 - H2 CONNECT через `http2.Transport.NewClientConn`
 - H3 CONNECT через `apernet/quic-go/http3.Transport`
 - ручная TLS verify semantics в `verifyTrustTunnelTLS()`
-- UDP CONNECT на `_udp2:0`
+- UDP CONNECT на official authority `_udp2`; server-side reserved-host matcher сохраняет backward-compat на `_udp2` и legacy `_udp2:0`
 - ICMP CONNECT на `_icmp:0` для H2 и H3
 
 ### 4.3. Поля outbound, реально участвующие в runtime
@@ -310,13 +310,18 @@
 - `proxy/trusttunnel/udp_server.go`
 
 Признаки реализации:
-- pseudo-host `_udp2:0`;
+- outbound pseudo-host `_udp2`;
+- server-side reserved-host matcher принимает `_udp2` и legacy `_udp2:0`;
 - отдельный request/response frame format;
 - IPv4 кодируется как zero-padded 16-byte address;
 - IPv6 передаётся в 16-byte raw form;
 - клиент передаёт `AppName`;
 - сервер держит flow table по `(client source, target)`;
 - на каждый flow поднимается `udp_transport.NewDispatcher(...)`.
+
+Подтверждённое состояние:
+- clean-HEAD bundle `/opt/lab/xray-tt/logs/udp-matrix-20260405-222820` закрывает official client → our server и our client → official endpoint на H2/H3, IPv4/IPv6, multi-flow per session и reopen после `udpConnectionsTimeoutSecs = 1`;
+- current `AppName`, который наш client пишет в UDP frame, принимается official endpoint в подтверждённой H2/H3 matrix и не остаётся interop-blocker.
 
 Подтверждённое ограничение:
 - H1 path не реализует UDP mux и явно отклоняет `_udp2` до обычного dispatch;
@@ -343,6 +348,9 @@
 - `outbound>>>...>>>traffic>>>*` — обычные counters;
 - `user>>>...>>>online` — `onlineMap`, а не counter;
 - `NotFound` по `user>>>...>>>online` не равен поломке user stats.
+- clean-HEAD bundle `/opt/lab/xray-tt/logs/auth-stats-sanity-20260405-231514` подтверждает H2 auth recovery, H2 TCP counters и H3 UDP `onlineMap`/user stats на текущем code-state `6fcb3a28`;
+- `app/stats/online_map.go` намеренно игнорирует `127.0.0.1` и `[::1]`, поэтому localhost-only lab probes не могут подтверждать `onlineMap` как ненулевой;
+- `api statsonlineiplist` возвращает IP/time map для `onlineMap`, а `api statsgetallonlineusers` возвращает полные onlineMap keys вида `user>>>u1>>>online`, а не bare usernames.
 
 ## 10. Активные и декларативные поля
 

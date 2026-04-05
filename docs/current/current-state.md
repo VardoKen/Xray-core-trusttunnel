@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `b1c14eb3`
+Коммит состояния: `6fcb3a28`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -14,10 +14,12 @@ TrustTunnel в текущем дереве подтверждённо наход
 - H3 TCP;
 - H2 UDP mux;
 - H3 UDP mux;
+- полный UDP interop matrix в направлениях official client → our server и our client → official endpoint для H2/H3, IPv4/IPv6, multi-flow и reopen после idle timeout;
 - H2 rules по `client_random`;
 - H3 rules по `client_random`;
 - outbound `clientRandom` как реальная runtime-функция для H2 и H3;
 - H2 `_check` special path с корректными `200` / `407` / `403`;
+- H2 auth recovery после `407`: failed session не отравляет следующую session, и тот же server process принимает subsequent clean auth от official client;
 - server-side H2/H3 `_icmp` mux по official wire-format с representable raw ICMP reply path;
 - official client → our server H2/H3 `_icmp` interop через TUN-mode и raw ICMP echo-reply;
 - client-side/outbound `_icmp` packet contract поверх `transport.Link` для H2/H3 echo-request и representable reply path;
@@ -25,7 +27,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - representable `_icmp` error-type parity подтверждена для echo-reply, destination-unreachable и time-exceeded; extra MTU/pointer fields остаются ограничением fixed-size reply frame;
 - core network model распознаёт `icmp` в `common/net`, config parsing и routing/API semantics;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
-- server-side traffic stats;
+- server-side inbound/outbound/user traffic counters и `onlineMap` sanity-check;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
 
 ## 2. Что закрыто на текущем состоянии
@@ -116,6 +118,15 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - reply types, которым нужны дополнительные поля вне fixed-size reply frame, не считаются открытым runtime-дефектом текущей ветки: `PacketTooBig`/`ParameterProblem` server-side распознаются и матчятся по quoted echo-request, но MTU/pointer не могут быть переданы обратно без расширения протокола;
 - Этот outbound path на текущем wire-format покрывает echo-request и representable reply types, а на Linux уже образует рабочий Xray product path через `proxy/tun`, если TUN interface управляется ОС с явной адресацией и routing. Clean-HEAD H2/H3 retest на 2026-04-05 / `96a9d053` подтверждён через выделенные namespace `tunxrayh2` / `tunxrayh3`, адрес `192.0.2.10/32` и маршрут `1.1.1.1/32 dev xraytunh*`.
 
+### 2.10. Полный UDP interop matrix
+
+Подтверждено clean-HEAD runtime-retest на 2026-04-05 / `6fcb3a28`:
+- bundle `/opt/lab/xray-tt/logs/udp-matrix-20260405-222820` закрывает обе половины матрицы: official client → our server и our client → official endpoint;
+- official client → our server на H2 и H3 проходит для IPv4 `1.1.1.1:53`, `8.8.8.8:53` и IPv6 `2606:4700:4700::1111:53`, а server log фиксирует `trusttunnel H2 UDP mux accepted` и `trusttunnel H3 UDP mux accepted`;
+- отдельные reopen-case на `server_h2_udp_official_cert_timeout_1.json` и `server_h3_udp_timeout_1.json` подтверждают reopen после `udpConnectionsTimeoutSecs = 1`;
+- our client → official endpoint на H2 и H3 проходит для IPv4 и IPv6 targets через runtime ports `5304/5305/5306/5307`, а прежний H2 outbound fail `trusttunnel CONNECT failed with status 502` больше не воспроизводится;
+- practically significant interop-fix: outbound UDP CONNECT теперь использует official authority `_udp2`, при этом server-side matcher сохраняет backward-compat и принимает как `_udp2`, так и legacy `_udp2:0`.
+
 ## 3. Что считается текущей истиной
 
 Текущую истину по проекту определяют:
@@ -130,8 +141,7 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- observable server behavior вне уже подтверждённого `_icmp` surface: `tls_handshake_timeout_secs`, `client_listener_timeout_secs`, `connection_establishment_timeout_secs`, `tcp_connections_timeout_secs`, `udp_connections_timeout_secs`;
-- полный UDP interop matrix;
+- observable server behavior вне уже подтверждённого `_icmp` surface: bundle `/opt/lab/xray-tt/logs/timeout-retest-20260405-210405` и `/opt/lab/xray-tt/logs/timeout-retest-20260405-214512` пока дают downstream-observable подтверждение только для `udp_connections_timeout_secs`; `tls_handshake_timeout_secs`, `client_listener_timeout_secs`, `connection_establishment_timeout_secs` и `tcp_connections_timeout_secs` остаются частично подтверждёнными;
 - REALITY;
 - нормализация TrustTunnel вокруг `streamSettings` и общей модели Xray.
 

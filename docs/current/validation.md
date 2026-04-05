@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `b1c14eb3`
+Коммит состояния: `6fcb3a28`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -219,9 +219,11 @@ Preflight:
 - H2 `_check` как отдельного special path с `200` / `407` / `403`;
 - official H2 `_icmp` interop как отдельного незакрытого server-side дефекта;
 - official H3 `_icmp` interop как отдельного незакрытого server-side дефекта;
+- полного UDP interop matrix как отдельного незакрытого compatibility gap;
 - outbound `clientRandom` как отдельного чисто декларативного поля на H2/H3;
 - transport-layer принадлежности рабочего H3 path;
 - server-side H3 rules по `client_random`;
+- auth и stats sanity-check как отдельного открытого compatibility gap, если `onlineMap` валидируется через non-loopback source IP;
 - ложного `H3_NO_ERROR` в H3 TCP path.
 
 Переоткрывать эти вопросы можно только при появлении более новых и воспроизводимых доказательств, чем фиксация `99e59352`.
@@ -229,7 +231,6 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- полный UDP interop matrix;
 - observable server behavior вне уже закрытого `_icmp` surface: `tls_handshake_timeout_secs`, `client_listener_timeout_secs`, `connection_establishment_timeout_secs`, `tcp_connections_timeout_secs`, `udp_connections_timeout_secs`;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
 
@@ -420,6 +421,82 @@ Pass markers:
 - true-case server log содержит `trusttunnel icmp raw send v6 dst=2001:4860:4860::8888` и `trusttunnel H2 icmp reply ... type=129 code=0`;
 - probe получает `reply source=2001:4860:4860::8888 type=129 code=0 seq=1`;
 - `ipv6Available` подтверждён как observable server-side `_icmp` runtime setting.
+
+### 2.17. Clean-HEAD полный UDP interop matrix
+
+Подтверждено на 2026-04-05 / `6fcb3a28`:
+- worktree: clean на lab (`git status --short` пустой);
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- binary sha256: `5b8ea165ba62eaecdb992ae10803fb1d3b1e11fd1615fd5bf42fcee439f46673`;
+- official client binary: `/opt/lab/xray-tt/bin/trusttunnel_client/trusttunnel_client`;
+- official endpoint config: `/opt/lab/xray-tt/official-endpoint-lab/vpn.toml`;
+- H2 official-client server config: `/opt/lab/xray-tt/configs/server_h2_udp_official_cert.json`;
+- H2 reopen server config: `/opt/lab/xray-tt/configs/server_h2_udp_official_cert_timeout_1.json`;
+- H3 official-client server config: `/opt/lab/xray-tt/configs/server_h3_udp.json`;
+- H3 reopen server config: `/opt/lab/xray-tt/configs/server_h3_udp_timeout_1.json`;
+- official client configs: `/opt/lab/xray-tt/configs/official_client_to_our_server_h2_udp.toml`, `/opt/lab/xray-tt/configs/official_client_to_our_server_h3_udp.toml`;
+- our client configs: `/opt/lab/xray-tt/configs/our_client_udp_to_official_endpoint_h2.json`, `/opt/lab/xray-tt/configs/our_client_udp_to_official_endpoint_h3.json`, `/opt/lab/xray-tt/configs/our_client_udp_to_official_endpoint_h2_ipv6.json`, `/opt/lab/xray-tt/configs/our_client_udp_to_official_endpoint_h3_ipv6.json`;
+- repo-local config sources: `testing/trusttunnel/server_h2_udp_official_cert.json`, `testing/trusttunnel/server_h3_udp.json`, `testing/trusttunnel/official_client_to_our_server_h2_udp.toml`, `testing/trusttunnel/official_client_to_our_server_h3_udp.toml`, `testing/trusttunnel/our_client_udp_to_official_endpoint_h2.json`, `testing/trusttunnel/our_client_udp_to_official_endpoint_h3.json`;
+- log bundle: `/opt/lab/xray-tt/logs/udp-matrix-20260405-222820`.
+
+Pass markers:
+- official client → our server H2: `dig-v4-cf.txt`, `dig-v4-google.txt` и `dig-v6-cf.txt` дают `answers=2`, server log содержит `trusttunnel H2 UDP mux accepted`;
+- official client → our server H3: те же probes проходят на H3, server log содержит `trusttunnel H3 UDP mux accepted`;
+- H2 reopen-case на timeout-1 config проходит: `dig-reopen-v4.txt` даёт `answers=2`;
+- H3 reopen-case на timeout-1 config проходит: `dig-reopen-v4.txt` даёт `answers=2`;
+- our client → official endpoint H2 IPv4/IPv6 проходит: локальные probes на `127.0.0.1:5304` и `127.0.0.1:5306` дают `answers=2`, а client log больше не содержит `trusttunnel CONNECT failed with status 502`;
+- our client → official endpoint H3 IPv4/IPv6 проходит: локальные probes на `127.0.0.1:5305` и `127.0.0.1:5307` дают `answers=2`;
+- previous H2 outbound interop breakage закрыта practically significant fix: UDP CONNECT authority выровнен с official protocol на `_udp2`, при этом server-side backward-compat на `_udp2:0` сохранён.
+
+### 2.18. Observable timeout surface вне `_icmp` остаётся частично подтверждённым
+
+Подтверждено на 2026-04-05 / `7c92c5c5`:
+- worktree: clean;
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- binary sha256: `debe8b2ec309aab0afca50607ca51fa7ce30bc7bf02656be4ed320ff7e05d132`;
+- base config dir: `/opt/lab/xray-tt/configs/timeout-retest-20260405-210405`;
+- client config: `/opt/lab/xray-tt/src/xray-core-trusttunnel/testing/trusttunnel/our_client_to_our_server.json`;
+- udp client config: `/opt/lab/xray-tt/src/xray-core-trusttunnel/testing/trusttunnel/our_client_udp_to_our_server_h2.json`;
+- server cert fingerprint: `F1:22:FD:22:AF:B0:C9:2B:03:05:A9:55:9B:F7:5E:8F:80:43:00:B9:7C:22:34:EA:6B:34:F9:24:7A:AD:64:9C`;
+- log bundles: `/opt/lab/xray-tt/logs/timeout-retest-20260405-210405`, `/opt/lab/xray-tt/logs/timeout-retest-20260405-214512`.
+
+Подтверждено:
+- `udp_connections_timeout_secs` имеет downstream-observable reopen marker: `h2_udp_timeout_dig1.txt` и `h2_udp_timeout_dig2.txt` оба успешны, а `h2_udp_timeout_reopen_count.txt` содержит `2`;
+- `tls_handshake_timeout_secs` observable на probe `h2_tls_handshake_probe.txt` как `closed_after=timeout`;
+- `client_listener_timeout_secs` даёт частичный marker: `h2_client_listener_probe.txt` фиксирует `alpn=h2`, `initial_bytes=45`, `closed_after=9.01`;
+- `connection_establishment_timeout_secs` и `tcp_connections_timeout_secs` остаются неполностью подтверждёнными: probes `h2_connect_establish_probe.txt` и `h2_tcp_idle_probe.txt` завершаются curl-side timeout после ~10s без downstream bytes.
+
+Вывод:
+- timeout block вне `_icmp` не закрыт;
+- practically significant закрытым на текущем состоянии можно считать только `udp_connections_timeout_secs`;
+- для остальных четырёх timeout fields нужен более чистый downstream-observable retest.
+
+### 2.19. Clean-HEAD auth и stats sanity-check
+
+Подтверждено на 2026-04-05 / `6fcb3a28`:
+- worktree: clean на lab (`git status --short` пустой);
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- binary sha256: `d1683fab2c607826a7410cd9b59402f6d08c22344a0394e073e7b093c65489ee`;
+- official client binary: `/opt/lab/xray-tt/bin/trusttunnel_client/trusttunnel_client`;
+- H2 auth server config: `/opt/lab/xray-tt/configs/server_h2_official_cert.json`;
+- H2 auth-fail client config: `/opt/lab/xray-tt/configs/official_client_to_our_server_h2_check_authfail.toml`;
+- H2 auth-success client config: `/opt/lab/xray-tt/configs/official_client_to_our_server_h2_check_ok.toml`;
+- H2 stats server config: `/opt/lab/xray-tt/configs/server_h2_tcp_stats.json`;
+- H2 stats client config: `/opt/lab/xray-tt/src/xray-core-trusttunnel/testing/trusttunnel/our_client_to_our_server.json`;
+- H3 UDP stats server config: `/opt/lab/xray-tt/configs/server_h3_udp_stats_iso.json`;
+- H3 UDP stats client config: runtime-generated `/opt/lab/xray-tt/logs/auth-stats-sanity-20260405-231514/our_client_udp_to_our_server_h3_stats_iso_lan.json` на базе `/opt/lab/xray-tt/configs/our_client_udp_to_our_server_h3_stats_iso.json`;
+- API ports: H2 stats `127.0.0.1:10085`, H3 UDP stats `127.0.0.1:10096`;
+- log bundle: `/opt/lab/xray-tt/logs/auth-stats-sanity-20260405-231514`.
+
+Pass markers:
+- H2 auth-fail path на official client остаётся observable как `407`, при этом snapshot `h2-auth-server-after-authfail.log` не содержит `trusttunnel H2 health-check accepted` и не воспроизводит legacy `_check` сигнатуры;
+- без перезапуска H2 server subsequent official-client session с корректным auth проходит: `h2-auth-server.log` содержит `trusttunnel H2 health-check accepted` и `trusttunnel H2 CONNECT accepted for tcp:example.com:443`, а `h2-auth-success-client.log` содержит `Certificate verified successfully`;
+- H2 TCP stats sanity-check против локального HTTP target `127.0.0.1:18080` даёт ненулевые `inbound>>>...`, `outbound>>>...` и `user>>>u1>>>traffic>>>*` counters через API `127.0.0.1:10085`;
+- H3 UDP stats sanity-check через non-loopback server address `192.168.1.19` даёт ненулевые `user>>>u1>>>traffic>>>*` counters, `api statsonline --email u1` возвращает `value = 1`, `api statsonlineiplist --email u1` возвращает IP `192.168.1.19`, а `api statsgetallonlineusers` возвращает `user>>>u1>>>online`;
+- `user>>>...>>>online` подтверждён как отдельный `onlineMap`, а не как counter: для него нужно использовать `statsonline` / `statsonlineiplist` / `statsgetallonlineusers`, а не `statsquery`.
+
+Практически значимое ограничение:
+- `app/stats/online_map.go` намеренно игнорирует `127.0.0.1` и `[::1]`, поэтому localhost-only lab configs пригодны для traffic counters, но не для подтверждения ненулевого `onlineMap`; для online-state нужен non-loopback source IP.
 
 Отдельное внешнее ограничение локального test-run:
 - полный `go test ./infra/conf ./app/router` по-прежнему цепляется за отсутствие `geoip.dat`; это исторический fixture-gap текущего окружения, а не регрессия `Network_ICMP`.

@@ -2,13 +2,13 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path и outbound clientRandom
-Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom и `_icmp` protocol/runtime surface
+База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path, outbound clientRandom, полного UDP interop matrix и auth/stats sanity-check
+Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom, `_icmp` protocol/runtime surface, полного UDP interop matrix и auth/stats sanity-check
 Не использовать для: фиксации уже закрытых багов и исторической хронологии
 
 ## 1. Принцип чтения roadmap
 
-Этот документ не повторяет уже закрытые H3-дефекты и не переоткрывает закрытый H2 `_check`.
+Этот документ не повторяет уже закрытые H3-дефекты, не переоткрывает закрытый H2 `_check` и не возвращает auth/stats sanity-check в список открытых проблем без новых доказательств.
 
 Текущее направление разработки:
 1. закрыть оставшиеся обязательные протокольные пробелы TrustTunnel;
@@ -28,22 +28,9 @@
 - `tcp_connections_timeout_secs`;
 - `udp_connections_timeout_secs`;
 
-### 2.2. Полный UDP interop matrix
-
-Нужно закрыть:
-- official client → our server по H2/UDP и H3/UDP;
-- our client → official endpoint по H2/UDP и H3/UDP;
-- IPv4 и IPv6 target;
-- несколько flows в одной session;
-- idle timeout и reopen;
-- корректное поле `App Name`.
-
-### 2.3. Auth и stats sanity-check
-
-После закрытия interop-пробелов нужно перепроверить:
-- `407` → новая сессия;
-- inbound/outbound/user traffic counters;
-- `onlineMap` отдельно от counters.
+Текущее честное состояние по bundle `/opt/lab/xray-tt/logs/timeout-retest-20260405-210405` и `/opt/lab/xray-tt/logs/timeout-retest-20260405-214512`:
+- downstream-observable reopen уже подтверждён для `udp_connections_timeout_secs`;
+- `tls_handshake_timeout_secs`, `client_listener_timeout_secs`, `connection_establishment_timeout_secs` и `tcp_connections_timeout_secs` всё ещё не имеют такого же чистого downstream marker и остаются открытыми.
 
 ## 3. REALITY после базовой совместимости
 
@@ -132,16 +119,14 @@ REALITY должен внедряться через общий Xray `streamSett
 ## 5. Порядок выполнения
 
 1. observable server behavior
-2. полный UDP interop matrix
-3. auth/stats sanity-check
-4. TrustTunnel + H2/TCP + REALITY
-5. TrustTunnel + H2/UDP + REALITY
-6. R&D по TrustTunnel + H3 + REALITY
-7. client-side parity fields после REALITY
-8. нормализация вокруг `streamSettings`
-9. full TLS/REALITY surface
-10. common outbound features
-11. common inbound features
-12. `_icmp` в routing/policy/stats модели Xray
-13. dynamic user management
-14. финальная матрица совместимости и validator
+2. TrustTunnel + H2/TCP + REALITY
+3. TrustTunnel + H2/UDP + REALITY
+4. R&D по TrustTunnel + H3 + REALITY
+5. client-side parity fields после REALITY
+6. нормализация вокруг `streamSettings`
+7. full TLS/REALITY surface
+8. common outbound features
+9. common inbound features
+10. `_icmp` в routing/policy/stats модели Xray
+11. dynamic user management
+12. финальная матрица совместимости и validator

@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `b1c14eb3`
+Коммит состояния: `6fcb3a28`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -12,7 +12,7 @@
 - `protocol: "trusttunnel"` доступен как inbound и outbound;
 - outbound работает для `transport="http2"` и `transport="http3"`;
 - inbound обслуживает HTTP/1.1 CONNECT, HTTP/2 CONNECT и HTTP/3 CONNECT;
-- UDP mux реализован через `_udp2:0` для H2 и H3;
+- outbound UDP mux использует official host `_udp2` для H2 и H3, а inbound compatibility matcher принимает `_udp2` и legacy `_udp2:0`;
 - TCP и UDP используют штатный `dispatcher` Xray;
 - server-side user stats, inbound stats и outbound stats работают на текущей архитектуре;
 - H3 listener поднят внутри `transport/internet/tcp`;
@@ -76,6 +76,24 @@
 Основные примеры:
 - `testing/trusttunnel/server_h3_udp.json`
 - `testing/trusttunnel/our_client_udp_to_our_server_h3.json`
+
+### 2.9. Official TrustTunnel client → наш Xray server по H2/H3 UDP
+
+Подтверждено clean-HEAD matrix bundle `/opt/lab/xray-tt/logs/udp-matrix-20260405-222820`:
+- H2 server config: `testing/trusttunnel/server_h2_udp_official_cert.json`, runtime-copy `/opt/lab/xray-tt/configs/server_h2_udp_official_cert.json`;
+- H3 server config: `testing/trusttunnel/server_h3_udp.json`, runtime-copy `/opt/lab/xray-tt/configs/server_h3_udp.json`;
+- official client configs: `testing/trusttunnel/official_client_to_our_server_h2_udp.toml` и `testing/trusttunnel/official_client_to_our_server_h3_udp.toml`;
+- IPv4 probes к `1.1.1.1:53` и `8.8.8.8:53` и IPv6 probe к `2606:4700:4700::1111:53` проходят как на H2, так и на H3;
+- server logs содержат `trusttunnel H2 UDP mux accepted` и `trusttunnel H3 UDP mux accepted`.
+
+### 2.10. Наш Xray client → official TrustTunnel endpoint по H2/H3 UDP
+
+Подтверждено clean-HEAD matrix bundle `/opt/lab/xray-tt/logs/udp-matrix-20260405-222820`:
+- official endpoint config: `/opt/lab/xray-tt/official-endpoint-lab/vpn.toml`;
+- H2 client config: `testing/trusttunnel/our_client_udp_to_official_endpoint_h2.json`, runtime-copy `/opt/lab/xray-tt/configs/our_client_udp_to_official_endpoint_h2.json`, IPv6 runtime-copy `/opt/lab/xray-tt/configs/our_client_udp_to_official_endpoint_h2_ipv6.json`;
+- H3 client config: `testing/trusttunnel/our_client_udp_to_official_endpoint_h3.json`, runtime-copy `/opt/lab/xray-tt/configs/our_client_udp_to_official_endpoint_h3.json`, IPv6 runtime-copy `/opt/lab/xray-tt/configs/our_client_udp_to_official_endpoint_h3_ipv6.json`;
+- локальные DNS probes через `127.0.0.1:5304/5305/5306/5307` дают `answers=2`;
+- после перехода outbound UDP CONNECT на `_udp2` прежний H2 fail `trusttunnel CONNECT failed with status 502` больше не воспроизводится.
 
 ## 3. Как писать рабочие outbound-конфиги
 
@@ -161,6 +179,8 @@
 - `users[].email` не обязателен;
 - если `email` пустой, runtime подставляет `username` как user-key;
 - `user>>>...>>>online` — это `onlineMap`, а не counter;
+- `api statsgetallonlineusers` возвращает полные onlineMap keys вида `user>>>u1>>>online`, а не bare usernames;
+- `app/stats/online_map.go` намеренно игнорирует `127.0.0.1` и `[::1]`, поэтому `onlineMap` нужно валидировать через non-loopback source IP, а не через localhost-only client config;
 - traffic counters и online-state нельзя диагностировать одним и тем же способом.
 
 ## 5. Rules и `client_random`
@@ -247,13 +267,13 @@
 ## 6. UDP path
 
 Реализовано:
-- отдельный UDP CONNECT host `_udp2:0`;
+- outbound UDP CONNECT использует `_udp2`, а inbound compatibility matcher принимает `_udp2` и legacy `_udp2:0`;
 - клиентский и серверный codec;
 - H2 и H3 path;
 - multiplex нескольких UDP flows поверх одного HTTP stream.
 
 Подтверждённое ограничение:
-- H1 `CONNECT _udp2:0` не является рабочим UDP path и явно отклоняется до обычного dispatch;
+- H1 `CONNECT _udp2` и legacy `CONNECT _udp2:0` не являются рабочим UDP path и явно отклоняются до обычного dispatch;
 - destination должен быть IP-адресом;
 - доменные UDP targets не подтверждены как рабочая функция.
 
