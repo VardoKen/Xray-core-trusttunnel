@@ -8,9 +8,10 @@ import (
 	xnet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/session"
+	"github.com/xtls/xray-core/transport"
 )
 
-func TestClientProcessRejectsICMPTargetWithoutPacketContract(t *testing.T) {
+func TestClientProcessRejectsIncompleteICMPLink(t *testing.T) {
 	client := &Client{
 		config: &ClientConfig{},
 		server: protocol.NewServerSpec(
@@ -30,11 +31,11 @@ func TestClientProcessRejectsICMPTargetWithoutPacketContract(t *testing.T) {
 		},
 	})
 
-	err := client.Process(ctx, nil, nil)
+	err := client.Process(ctx, &transport.Link{}, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "icmp packet contract is not implemented") {
+	if !strings.Contains(err.Error(), "icmp link is incomplete") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
