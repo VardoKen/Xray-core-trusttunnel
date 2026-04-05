@@ -108,6 +108,7 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - routing/API/webhook layer получает `icmp` через общий `SystemString()` и `net.Network` plumbing.
 - TrustTunnel outbound больше не пытается молча увести `Network_ICMP` в обычный CONNECT path: он открывает `_icmp:0`, кодирует fixed-size request frames и локально восстанавливает echo-reply packet по сохранённому payload.
 - server-side config model частично подключает `_icmp` runtime-surface: `allowPrivateNetworkConnections` по умолчанию ограничивает назначения глобальными адресами, `icmp.interfaceName` задаёт raw-socket `IfIndex`, а `icmp.requestTimeoutSecs` переопределяет timeout ожидания reply;
+- H2 lab runtime-retest против `192.168.1.19` подтверждает, что `allowPrivateNetworkConnections = false` режет private target до raw-send path, а `true` возвращает `1/1 received`; отдельный retest с `icmp.interfaceName = "definitely-missing-if0"` даёт `trusttunnel H2 ICMP unavailable > route ip+net: no such network interface`;
 - Этот outbound path пока покрывает только echo-request/echo-reply semantics, но на Linux уже образует рабочий Xray product path через `proxy/tun`, если TUN interface управляется ОС с явной адресацией и routing. Clean-HEAD H2/H3 retest на 2026-04-05 / `96a9d053` подтверждён через выделенные namespace `tunxrayh2` / `tunxrayh3`, адрес `192.0.2.10/32` и маршрут `1.1.1.1/32 dev xraytunh*`.
 
 ## 3. Что считается текущей истиной
@@ -124,9 +125,9 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- завершение `_icmp` config surface и отдельный runtime/interop-retest для timeout/interface/private-network semantics;
+- завершение `_icmp` config surface, включая отсутствующий аналог official `recv_message_queue_capacity`, и отдельный runtime-retest для `icmp.requestTimeoutSecs`;
 - error-type parity для `_icmp` сверх подтверждённого echo-request/echo-reply path;
-- довязка `ipv6_available`, private-network policy и timeout settings до полного observable runtime;
+- довязка `ipv6_available` и timeout settings до полного observable runtime;
 - полный UDP interop matrix;
 - REALITY;
 - нормализация TrustTunnel вокруг `streamSettings` и общей модели Xray.

@@ -229,10 +229,10 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- завершение `_icmp` config surface: сейчас локально wired `settings.allowPrivateNetworkConnections`, `settings.icmp.interfaceName` и `settings.icmp.requestTimeoutSecs`, но нет аналога official `recv_message_queue_capacity`;
+- завершение `_icmp` config surface: сейчас wired `settings.allowPrivateNetworkConnections`, `settings.icmp.interfaceName` и `settings.icmp.requestTimeoutSecs`, но нет аналога official `recv_message_queue_capacity`;
 - error-type parity для `_icmp` сверх подтверждённого echo-request/echo-reply path;
 - полный UDP interop matrix;
-- отдельный lab/runtime-retest для `ipv6_available`, private-network и timeout settings;
+- отдельный lab/runtime-retest для `ipv6_available` и `icmp.requestTimeoutSecs`;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
 
 Локально подтверждённые regression-тесты на 2026-04-05:
@@ -346,6 +346,35 @@ Pass markers:
 Вывод:
 - проблема относится к unsafe host-namespace routing pattern, а не к отсутствию product-level `_icmp` source path в `proxy/tun`;
 - current truth для Linux `_icmp` через `proxy/tun` должна опираться на clean-HEAD netns-based validation из раздела 2.10.
+
+### 2.12. H2 `_icmp` private-network policy
+
+Подтверждено на 2026-04-05 после code-state `0fbc2ed5`:
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- runtime deny server config: `/opt/lab/xray-tt/configs/server_h2_icmp_private_deny.json`;
+- runtime allow server config: `/opt/lab/xray-tt/configs/server_h2_icmp_private_allow.json`;
+- runtime client config: `/opt/lab/xray-tt/configs/our_client_tun_to_our_server_h2_icmp_private_test.json`;
+- target private IP: `192.168.1.19`;
+- log bundle: `/opt/lab/xray-tt/logs/h2-icmp-private-policy-20260405-175704`.
+
+Pass markers:
+- deny-case: `ping -n -I 192.0.2.10 -c 1 -W 3 192.168.1.19` даёт `1 packets transmitted, 0 received, 100% packet loss`;
+- deny-case server log содержит `trusttunnel H2 ICMP mux accepted` и `private network connections are disabled`;
+- allow-case: тот же ping даёт `1 packets transmitted, 1 received, 0% packet loss`;
+- allow-case server log содержит `trusttunnel H2 ICMP mux accepted`.
+
+### 2.13. H2 `_icmp` invalid `interfaceName`
+
+Подтверждено на 2026-04-05 после code-state `0fbc2ed5`:
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- runtime server config: `/opt/lab/xray-tt/configs/server_h2_icmp_bad_ifname.json`;
+- runtime client config: `/opt/lab/xray-tt/configs/our_client_tun_to_our_server_h2_icmp_ifname_test.json`;
+- target IP: `1.1.1.1`;
+- log bundle: `/opt/lab/xray-tt/logs/h2-icmp-interface-name-20260405-180010`.
+
+Pass markers:
+- `ping -n -I 192.0.2.10 -c 1 -W 3 1.1.1.1` даёт `1 packets transmitted, 0 received, 100% packet loss`;
+- server log содержит `trusttunnel H2 ICMP unavailable > route ip+net: no such network interface`.
 
 Отдельное внешнее ограничение локального test-run:
 - полный `go test ./infra/conf ./app/router` по-прежнему цепляется за отсутствие `geoip.dat`; это исторический fixture-gap текущего окружения, а не регрессия `Network_ICMP`.

@@ -236,7 +236,7 @@
 - H1 `_icmp` остаётся не transport path и отвечает `501 Not Implemented`;
 - TrustTunnel config model пока покрывает только часть ICMP settings: есть `allowPrivateNetworkConnections`, `icmp.interfaceName` и `icmp.requestTimeoutSecs`, но нет аналога official `recv_message_queue_capacity`;
 - `ipv6Available` пока влияет только на попытку открыть IPv6 raw socket и ещё не образует полный product-level ICMP surface;
-- clean-HEAD H2/H3 retest подтверждает product-level `_icmp` source path через `proxy/tun` на Linux с OS-managed routing, но не закрывает error-type parity и не содержит отдельного lab-retest для timeout/interface/private-network settings.
+- clean-HEAD H2/H3 retest подтверждает product-level `_icmp` source path через `proxy/tun` на Linux с OS-managed routing; отдельный H2 lab-retest уже подтвердил private-network policy и invalid `icmp.interfaceName`, но `icmp.requestTimeoutSecs` пока не закрыт dedicated runtime-retest и error-type parity остаётся открытым.
 
 ### 5.4. H3 path
 

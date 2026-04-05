@@ -232,6 +232,8 @@
 - Практически подтверждённый client-side contract пока покрывает только echo-request/echo-reply semantics.
 - server-side JSON config теперь частично подаёт `_icmp` runtime-settings: `allowPrivateNetworkConnections`, `icmp.interfaceName`, `icmp.requestTimeoutSecs`;
 - по текущей реализации `allowPrivateNetworkConnections = false` ограничивает `_icmp` global-unicast destination-адресами, `icmp.interfaceName` задаёт raw-socket `IfIndex`, а `icmp.requestTimeoutSecs` переопределяет timeout ожидания reply;
+- отдельный H2 lab runtime-retest против `192.168.1.19` подтверждает, что `allowPrivateNetworkConnections = false` даёт `0 received` и лог `private network connections are disabled`, а `true` возвращает `1 received`;
+- отдельный H2 lab runtime-retest с `icmp.interfaceName = "definitely-missing-if0"` подтверждает, что `_icmp` path доходит до `trusttunnel H2 ICMP unavailable > route ip+net: no such network interface`;
 - На Linux это уже образует рабочий Xray product path через `proxy/tun`, если TUN interface управляется ОС с явной адресацией и routing. Подтверждённый clean-HEAD шаблон: выделенный namespace `tunxrayh2` / `tunxrayh3`, адрес `192.0.2.10/32` на `xraytunh*` и маршрут `1.1.1.1/32 dev xraytunh*`.
 - Host-namespace схема вида `ip addr add 192.0.2.10/32 dev xraytunh2` + `ip route add 1.1.1.1/32 dev xraytunh2` считается unsafe wiring pattern: в диагностическом retest она воспроизвела ICMP request storm без egress.
 - Полной parity по official ICMP settings пока нет: `recv_message_queue_capacity` в config model и runtime отсутствует.
