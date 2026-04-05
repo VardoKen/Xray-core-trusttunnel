@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	stdnet "net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -263,8 +264,24 @@ func startTrustTunnelConnAbortTimer(conn stat.Connection, timeout time.Duration)
 		return nil
 	}
 	return time.AfterFunc(timeout, func() {
-		_ = common.Close(conn)
+		_ = forceCloseTrustTunnelConn(conn)
 	})
+}
+
+func forceCloseTrustTunnelConn(conn stdnet.Conn) error {
+	if conn == nil {
+		return nil
+	}
+
+	if counterConn, ok := conn.(*stat.CounterConnection); ok {
+		conn = counterConn.Connection
+	}
+
+	if rawConn, ok := conn.(interface{ NetConn() stdnet.Conn }); ok {
+		return rawConn.NetConn().Close()
+	}
+
+	return conn.Close()
 }
 
 func (s *Server) processHTTP3(ctx context.Context, h3conn tcptransport.HTTP3RequestConn, conn stat.Connection, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) error {
@@ -495,6 +512,10 @@ func isTrustTunnelICMPHost(host string) bool {
 
 func (s *Server) dispatchConnectSession(ctx context.Context, dispatcher routing.Dispatcher, dest net.Destination, input buf.Reader, output buf.Writer, cleanupTarget interface{}) error {
 	abortInbound := func() {
+		if conn, ok := cleanupTarget.(stdnet.Conn); ok {
+			_ = forceCloseTrustTunnelConn(conn)
+			return
+		}
 		_ = common.Interrupt(cleanupTarget)
 	}
 
@@ -704,7 +725,7 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 	if err := s.dispatchConnectSession(ctx, dispatcher, dest, buf.NewReader(req.Body), buf.NewWriter(writer), req.Body); err != nil {
 		errors.LogWarningInner(ctx, err, "failed to dispatch trusttunnel "+strings.ToLower(proto)+" CONNECT")
 		if proto == "H2" {
-			_ = common.Close(cleanupConn)
+			_ = forceCloseTrustTunnelConn(cleanupConn)
 			panic(http.ErrAbortHandler)
 		}
 	}

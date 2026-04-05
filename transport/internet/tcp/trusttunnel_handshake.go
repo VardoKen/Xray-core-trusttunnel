@@ -5,7 +5,6 @@ import (
 	gonet "net"
 	"time"
 
-	"github.com/xtls/xray-core/common"
 	xtlstls "github.com/xtls/xray-core/transport/internet/tls"
 )
 
@@ -20,7 +19,7 @@ func trustTunnelServerHandshake(conn gonet.Conn, timeout time.Duration) error {
 	}
 
 	abortTimer := time.AfterFunc(timeout, func() {
-		_ = common.Close(conn)
+		_ = forceCloseTrustTunnelConn(conn)
 	})
 	defer abortTimer.Stop()
 
@@ -36,4 +35,16 @@ func trustTunnelServerHandshake(conn gonet.Conn, timeout time.Duration) error {
 	defer cancel()
 
 	return handshakeConn.HandshakeContext(handshakeCtx)
+}
+
+func forceCloseTrustTunnelConn(conn gonet.Conn) error {
+	if conn == nil {
+		return nil
+	}
+
+	if rawConn, ok := conn.(interface{ NetConn() gonet.Conn }); ok {
+		return rawConn.NetConn().Close()
+	}
+
+	return conn.Close()
 }
