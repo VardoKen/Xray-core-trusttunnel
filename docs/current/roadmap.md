@@ -21,10 +21,9 @@
 
 ### 2.1. `_icmp`
 
-Server-side H2/H3 `_icmp` mux по official wire-format уже реализован на `32b2eff2`, включая raw ICMP echo-reply path и `503` при недоступном raw socket. Clean-HEAD official client ↔ our server H2 interop подтверждён на `5a21fd31`.
+Server-side H2/H3 `_icmp` mux по official wire-format уже реализован на `32b2eff2`, включая raw ICMP echo-reply path и `503` при недоступном raw socket. Clean-HEAD official client ↔ our server H2/H3 interop подтверждён на `5a21fd31` и `6c46922c`.
 
 Открытым остаётся:
-- official client ↔ our server interop-retest для H3 `_icmp`;
 - Xray-side/client-side модель `_icmp`, потому что в текущем core нет отдельного `Network_ICMP`;
 - explicit config surface для ICMP timeout/interface/private-network semantics;
 - error-type parity сверх подтверждённого echo-reply path.

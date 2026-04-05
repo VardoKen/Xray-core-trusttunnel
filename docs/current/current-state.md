@@ -19,7 +19,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - outbound `clientRandom` как реальная runtime-функция для H2 и H3;
 - H2 `_check` special path с корректными `200` / `407` / `403`;
 - server-side H2/H3 `_icmp` mux по official wire-format с raw ICMP echo-reply path;
-- official client → our server H2 `_icmp` interop через TUN-mode и raw ICMP echo-reply;
+- official client → our server H2/H3 `_icmp` interop через TUN-mode и raw ICMP echo-reply;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
 - server-side traffic stats;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
@@ -88,13 +88,13 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - H3 allow-case с `clientRandom = "deadbeef"` проходит через server-side rules и логирует тот же allow-match;
 - deny-case с несовпадающим `clientRandom` на H2 и H3 возвращает `403` и уходит в catch-all deny-rule.
 
-### 2.8. Official H2 `_icmp` interop
+### 2.8. Official H2/H3 `_icmp` interop
 
-Подтверждено clean-HEAD runtime-retest на 2026-04-05 / `5a21fd31`:
-- official client в TUN-mode проходит certificate verification и открывает H2 `_check` / `_icmp` против нашего server-side path;
-- сервер логирует `trusttunnel H2 health-check accepted` и `trusttunnel H2 ICMP mux accepted`;
-- client log содержит `ICMP register_request` и `ICMP register_reply`, а `ping 1.1.1.1` из namespace `tun` проходит с `3/3 received`;
-- сигнатура `fatal error: concurrent map writes` больше не воспроизводится на параллельных H2 stream `_check` + `_icmp`.
+Подтверждено clean-HEAD runtime-retest на 2026-04-05 / `5a21fd31` и `6c46922c`:
+- official client в TUN-mode проходит certificate verification и открывает H2/H3 `_check` / `_icmp` против нашего server-side path;
+- сервер логирует `trusttunnel H2 health-check accepted` / `trusttunnel H2 ICMP mux accepted` и `trusttunnel H3 health-check accepted` / `trusttunnel H3 ICMP mux accepted`;
+- client log содержит `ICMP register_request` и `ICMP register_reply`, а `ping 1.1.1.1` из namespace `tun` проходит с `3/3 received` как на H2, так и на H3;
+- сигнатура `fatal error: concurrent map writes` больше не воспроизводится на H2 parallel stream `_check` + `_icmp`, а H3 clean-HEAD retest проходит без transport-level регрессии.
 
 ## 3. Что считается текущей истиной
 
@@ -110,7 +110,6 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- official interop-retest для H3 `_icmp`;
 - место `_icmp` в outbound/runtime-модели Xray после server-side mux реализации;
 - привязка `ipv6_available`, private-network policy и timeout settings к реальному runtime;
 - полный UDP interop matrix;

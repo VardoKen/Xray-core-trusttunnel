@@ -188,7 +188,7 @@
 - reserved pseudo-host `_icmp` на H2/H3 перехватывается до обычного target parsing;
 - H2/H3 `_icmp` использует отдельный fixed-size codec по official wire-format;
 - серверный path создаёт per-stream raw ICMP session и пишет обратно reply-frames без участия обычного Xray dispatcher;
-- на подтверждённом состоянии echo-reply path работает для IPv4 loopback; clean-HEAD official H2 interop подтверждён на 2026-04-05 / `5a21fd31`, а H3 official interop и ICMP error-type parity ещё не подтверждены.
+- на подтверждённом состоянии echo-reply path работает для IPv4 loopback; clean-HEAD official H2/H3 interop подтверждён на 2026-04-05 / `5a21fd31` и `6c46922c`, а ICMP error-type parity ещё не подтверждён.
 
 ### 5.3.1. H2/H3 `_icmp` runtime-path
 
