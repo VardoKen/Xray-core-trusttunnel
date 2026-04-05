@@ -1,0 +1,47 @@
+loglevel = "trace"
+vpn_mode = "general"
+killswitch_enabled = false
+killswitch_allow_ports = []
+post_quantum_group_enabled = true
+exclusions = []
+dns_upstreams = []
+
+[endpoint]
+hostname = "vpn.lab.local"
+addresses = ["127.0.0.1:9443"]
+custom_sni = ""
+has_ipv6 = true
+username = "u1"
+password = "p1"
+client_random = ""
+skip_verification = false
+certificate = """
+-----BEGIN CERTIFICATE-----
+MIIBXzCCAQWgAwIBAgIUMEkgq6/mlvcPvuG+L8ywf8K3W9swCgYIKoZIzj0EAwIw
+GDEWMBQGA1UEAwwNdnBuLmxhYi5sb2NhbDAeFw0yNjAzMjQwMDAwMDBaFw0yNzAz
+MjQwMDAwMDBaMBgxFjAUBgNVBAMMDXZwbi5sYWIubG9jYWwwWTATBgcqhkjOPQIB
+BggqhkjOPQMBBwNCAATeD8a0b3AFJQXj32NRmstMUuQ4icXTYUPvc42jnK6SlFBk
+sFZ3QUjqNjFiyVpSlLWOrvsaFmIi9hQT+ku8JN7roy0wKzApBgNVHREEIjAggg12
+cG4ubGFiLmxvY2Fsgg8qLnZwbi5sYWIubG9jYWwwCgYIKoZIzj0EAwIDSAAwRQIh
+ALxAEnITikOq4mVI8WWP+Xw+MeT62kO3UQT73MTVD5aJAiBtwtzsl32RKfmk1Y+W
+zVglTNd6+XSF+Az3JzGktku8kQ==
+-----END CERTIFICATE-----
+"""
+upstream_protocol = "http3"
+anti_dpi = false
+
+[listener.tun]
+bound_if = "eth0"
+netns = "tun"
+included_routes = [
+    "0.0.0.0/0",
+    "2000::/3",
+]
+excluded_routes = [
+    "0.0.0.0/8",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "224.0.0.0/3",
+]
+mtu_size = 1280
