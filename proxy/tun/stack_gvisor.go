@@ -128,7 +128,7 @@ func (t *stackGVisor) Start() error {
 
 		src := net.ICMPDestination(net.IPAddress(id.RemoteAddress.AsSlice()))
 		dst := net.ICMPDestination(net.IPAddress(id.LocalAddress.AsSlice()))
-		return icmpForwarder.HandlePacket(src, dst, wire)
+		return icmpForwarder.HandlePacket(src, dst, wire, extractICMPTTL(pkt))
 	}
 	ipStack.SetTransportProtocolHandler(gicmp.ProtocolNumber4, icmpHandler)
 	ipStack.SetTransportProtocolHandler(gicmp.ProtocolNumber6, icmpHandler)

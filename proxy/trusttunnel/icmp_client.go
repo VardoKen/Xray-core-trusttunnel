@@ -160,7 +160,7 @@ func runTrustTunnelICMPTunnel(ctx context.Context, link *transport.Link, tunnelC
 			}
 
 			for _, b := range mb {
-				req, payload, key, reqErr := trustTunnelICMPRequestFromBuffer(b, fallbackDest, trustTunnelICMPDefaultTTL)
+				req, payload, key, reqErr := trustTunnelICMPRequestFromBuffer(b, fallbackDest, trustTunnelICMPTTLFromBuffer(b, trustTunnelICMPDefaultTTL))
 				if reqErr != nil {
 					buf.ReleaseMulti(mb)
 					return reqErr
@@ -279,6 +279,13 @@ func trustTunnelICMPRequestFromBuffer(b *buf.Buffer, fallbackDest xnet.Destinati
 		TTL:         ttl,
 		DataSize:    uint16(len(echo.Data)),
 	}, append([]byte(nil), echo.Data...), key, nil
+}
+
+func trustTunnelICMPTTLFromBuffer(b *buf.Buffer, fallback uint8) uint8 {
+	if b != nil && b.UDP != nil && b.UDP.Network == xnet.Network_ICMP && b.UDP.Port > 0 && b.UDP.Port <= 255 {
+		return uint8(b.UDP.Port)
+	}
+	return fallback
 }
 
 func trustTunnelICMPTargetFromBuffer(b *buf.Buffer, fallbackDest xnet.Destination) (xnet.Destination, error) {

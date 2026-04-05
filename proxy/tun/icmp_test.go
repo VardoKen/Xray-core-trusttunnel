@@ -38,7 +38,7 @@ func TestICMPConnectionHandlerCreatesPerDestinationFlow(t *testing.T) {
 		},
 	})
 
-	if !handler.HandlePacket(src, dst1, echoReq) {
+	if !handler.HandlePacket(src, dst1, echoReq, 33) {
 		t.Fatal("HandlePacket() = false, want true for echo request")
 	}
 	first := mustReceiveCreatedFlow(t, created)
@@ -46,12 +46,12 @@ func TestICMPConnectionHandlerCreatesPerDestinationFlow(t *testing.T) {
 		t.Fatalf("first flow dst = %v, want %v", first.dst, dst1)
 	}
 
-	if !handler.HandlePacket(src, dst1, echoReq) {
+	if !handler.HandlePacket(src, dst1, echoReq, 33) {
 		t.Fatal("HandlePacket() = false on existing flow, want true")
 	}
 	assertNoCreatedFlow(t, created)
 
-	if !handler.HandlePacket(src, dst2, echoReq) {
+	if !handler.HandlePacket(src, dst2, echoReq, 44) {
 		t.Fatal("HandlePacket() = false, want true for second destination")
 	}
 	second := mustReceiveCreatedFlow(t, created)
@@ -68,7 +68,7 @@ func TestICMPConnectionHandlerCreatesPerDestinationFlow(t *testing.T) {
 			Data: []byte("pong"),
 		},
 	})
-	if handler.HandlePacket(src, dst1, echoReply) {
+	if handler.HandlePacket(src, dst1, echoReply, 33) {
 		t.Fatal("HandlePacket() = true, want false for non-request packet")
 	}
 	assertNoCreatedFlow(t, created)
@@ -112,7 +112,7 @@ func TestICMPConnWriteMultiBufferHonorsSourceOverride(t *testing.T) {
 	conn := &icmpConn{
 		handler: handler,
 		key:     icmpFlowKey{src: src, dst: dst},
-		egress:  make(chan []byte, 1),
+		egress:  make(chan icmpPacket, 1),
 		src:     src,
 		dst:     dst,
 	}
@@ -141,6 +141,40 @@ func TestICMPConnWriteMultiBufferHonorsSourceOverride(t *testing.T) {
 	}
 	if got := string(calls[0].payload); got != string([]byte{1, 2, 3, 4}) {
 		t.Fatalf("write payload = %v, want %v", calls[0].payload, []byte{1, 2, 3, 4})
+	}
+}
+
+func TestICMPConnReadMultiBufferCarriesTTLMetadata(t *testing.T) {
+	src := xnet.ICMPDestination(xnet.ParseAddress("192.0.2.10"))
+	dst := xnet.ICMPDestination(xnet.ParseAddress("1.1.1.1"))
+	conn := &icmpConn{
+		key:    icmpFlowKey{src: src, dst: dst},
+		egress: make(chan icmpPacket, 1),
+		src:    src,
+		dst:    dst,
+	}
+	conn.egress <- icmpPacket{
+		wire: []byte{8, 0, 0, 0, 0, 1, 0, 1},
+		ttl:  9,
+	}
+
+	mb, err := conn.ReadMultiBuffer()
+	if err != nil {
+		t.Fatalf("ReadMultiBuffer() failed: %v", err)
+	}
+	defer buf.ReleaseMulti(mb)
+
+	if len(mb) != 1 {
+		t.Fatalf("len(mb) = %d, want 1", len(mb))
+	}
+	if mb[0].UDP == nil {
+		t.Fatal("UDP metadata is nil")
+	}
+	if got := mb[0].UDP.Address.String(); got != "1.1.1.1" {
+		t.Fatalf("UDP.Address = %q, want %q", got, "1.1.1.1")
+	}
+	if got := mb[0].UDP.Port; got != 9 {
+		t.Fatalf("UDP.Port = %d, want 9", got)
 	}
 }
 
@@ -241,6 +275,45 @@ func TestExtractRawICMPPacket(t *testing.T) {
 	}
 }
 
+func TestExtractICMPTTL(t *testing.T) {
+	t.Run("ipv4", func(t *testing.T) {
+		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+			ReserveHeaderBytes: header.IPv4MinimumSize + header.ICMPv4MinimumSize,
+		})
+		defer pkt.DecRef()
+
+		pkt.TransportHeader().Push(header.ICMPv4MinimumSize)
+		ipHdr := header.IPv4(pkt.NetworkHeader().Push(header.IPv4MinimumSize))
+		ipHdr.Encode(&header.IPv4Fields{
+			TTL:         7,
+			Protocol:    uint8(header.ICMPv4ProtocolNumber),
+			TotalLength: uint16(header.IPv4MinimumSize + header.ICMPv4MinimumSize),
+		})
+
+		if got := extractICMPTTL(pkt); got != 7 {
+			t.Fatalf("extractICMPTTL() = %d, want 7", got)
+		}
+	})
+
+	t.Run("ipv6", func(t *testing.T) {
+		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+			ReserveHeaderBytes: header.IPv6MinimumSize + header.ICMPv6MinimumSize,
+		})
+		defer pkt.DecRef()
+
+		pkt.TransportHeader().Push(header.ICMPv6MinimumSize)
+		ipHdr := header.IPv6(pkt.NetworkHeader().Push(header.IPv6MinimumSize))
+		ipHdr.Encode(&header.IPv6Fields{
+			HopLimit:          11,
+			TransportProtocol: header.ICMPv6ProtocolNumber,
+		})
+
+		if got := extractICMPTTL(pkt); got != 11 {
+			t.Fatalf("extractICMPTTL() = %d, want 11", got)
+		}
+	})
+}
+
 func TestWriteRawICMPPacketUsesLinkEndpointInjection(t *testing.T) {
 	endpoint := &capturingInjectableEndpoint{}
 	stack := &stackGVisor{endpoint: endpoint}
@@ -323,7 +396,9 @@ func (*capturingInjectableEndpoint) IsAttached() bool { return true }
 
 func (*capturingInjectableEndpoint) Wait() {}
 
-func (*capturingInjectableEndpoint) ARPHardwareType() header.ARPHardwareType { return header.ARPHardwareNone }
+func (*capturingInjectableEndpoint) ARPHardwareType() header.ARPHardwareType {
+	return header.ARPHardwareNone
+}
 
 func (*capturingInjectableEndpoint) AddHeader(*stack.PacketBuffer) {}
 

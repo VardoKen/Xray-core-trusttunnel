@@ -26,6 +26,11 @@ type icmpFlowKey struct {
 	dst net.Destination
 }
 
+type icmpPacket struct {
+	wire []byte
+	ttl  uint8
+}
+
 type icmpConnectionHandler struct {
 	sync.Mutex
 
@@ -43,13 +48,16 @@ func newICMPConnectionHandler(handleConnection func(conn net.Conn, dest net.Dest
 	}
 }
 
-func (h *icmpConnectionHandler) HandlePacket(src net.Destination, dst net.Destination, wire []byte) bool {
+func (h *icmpConnectionHandler) HandlePacket(src net.Destination, dst net.Destination, wire []byte, ttl uint8) bool {
 	if !isSupportedICMPEchoRequest(dst, wire) {
 		return false
 	}
 
 	key := icmpFlowKey{src: src, dst: dst}
-	packet := append([]byte(nil), wire...)
+	packet := icmpPacket{
+		wire: append([]byte(nil), wire...),
+		ttl:  ttl,
+	}
 
 	h.Lock()
 	conn, found := h.icmpConns[key]
@@ -57,7 +65,7 @@ func (h *icmpConnectionHandler) HandlePacket(src net.Destination, dst net.Destin
 		conn = &icmpConn{
 			handler: h,
 			key:     key,
-			egress:  make(chan []byte, 16),
+			egress:  make(chan icmpPacket, 16),
 			src:     src,
 			dst:     dst,
 		}
@@ -87,19 +95,39 @@ type icmpConn struct {
 	handler *icmpConnectionHandler
 	key     icmpFlowKey
 
-	egress chan []byte
+	egress chan icmpPacket
 	src    net.Destination
 	dst    net.Destination
 }
 
+func (c *icmpConn) readPacket() (icmpPacket, bool) {
+	packet, ok := <-c.egress
+	return packet, ok
+}
+
 func (c *icmpConn) Read(p []byte) (int, error) {
-	data, ok := <-c.egress
+	packet, ok := c.readPacket()
 	if !ok {
 		return 0, io.EOF
 	}
 
-	n := copy(p, data)
+	n := copy(p, packet.wire)
 	return n, nil
+}
+
+func (c *icmpConn) ReadMultiBuffer() (buf.MultiBuffer, error) {
+	packet, ok := c.readPacket()
+	if !ok {
+		return nil, io.EOF
+	}
+
+	b := buf.FromBytes(packet.wire)
+	metadata := c.dst
+	if packet.ttl != 0 {
+		metadata.Port = net.Port(packet.ttl)
+	}
+	b.UDP = &metadata
+	return buf.MultiBuffer{b}, nil
 }
 
 func (c *icmpConn) Write(p []byte) (int, error) {
@@ -197,6 +225,26 @@ func extractRawICMPPacket(pkt *stack.PacketBuffer) []byte {
 	wire = append(wire, headerBytes...)
 	wire = append(wire, dataBytes...)
 	return wire
+}
+
+func extractICMPTTL(pkt *stack.PacketBuffer) uint8 {
+	networkHeader := pkt.NetworkHeader().Slice()
+	if len(networkHeader) == 0 {
+		return 0
+	}
+
+	switch networkHeader[0] >> 4 {
+	case 4:
+		if len(networkHeader) >= header.IPv4MinimumSize {
+			return networkHeader[8]
+		}
+	case 6:
+		if len(networkHeader) >= header.IPv6MinimumSize {
+			return networkHeader[7]
+		}
+	}
+
+	return 0
 }
 
 func buildRawICMPNetworkPacket(payload []byte, src net.Destination, dst net.Destination) ([]byte, tcpip.NetworkProtocolNumber, error) {

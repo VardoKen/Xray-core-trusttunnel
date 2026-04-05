@@ -146,6 +146,36 @@ func TestTrustTunnelICMPRequestFromBufferUsesFallbackDestination(t *testing.T) {
 	}
 }
 
+func TestTrustTunnelICMPRequestFromBufferUsesTTLMetadata(t *testing.T) {
+	reqWire := mustMarshalICMPMessage(t, &icmp.Message{
+		Type: ipv4.ICMPTypeEcho,
+		Code: 0,
+		Body: &icmp.Echo{
+			ID:   0x3456,
+			Seq:  0x0002,
+			Data: []byte("ttl"),
+		},
+	})
+
+	b := buf.New()
+	if _, err := b.Write(reqWire); err != nil {
+		t.Fatalf("Write() failed: %v", err)
+	}
+	defer b.Release()
+
+	dest := xnet.ICMPDestination(xnet.ParseAddress("1.1.1.1"))
+	dest.Port = 9
+	b.UDP = &dest
+
+	pkt, _, _, err := trustTunnelICMPRequestFromBuffer(b, xnet.ICMPDestination(xnet.ParseAddress("9.9.9.9")), trustTunnelICMPTTLFromBuffer(b, trustTunnelICMPDefaultTTL))
+	if err != nil {
+		t.Fatalf("trustTunnelICMPRequestFromBuffer() failed: %v", err)
+	}
+	if pkt.TTL != 9 {
+		t.Fatalf("TTL = %d, want 9", pkt.TTL)
+	}
+}
+
 func TestTrustTunnelICMPRequestFromBufferRejectsNonEchoRequest(t *testing.T) {
 	replyWire := mustMarshalICMPMessage(t, &icmp.Message{
 		Type: ipv4.ICMPTypeEchoReply,
