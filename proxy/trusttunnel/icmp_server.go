@@ -48,6 +48,8 @@ type trustTunnelICMPSession struct {
 
 	waiters map[trustTunnelICMPWaitKey]chan trustTunnelICMPReplyPacket
 	mu      sync.Mutex
+	v4Write sync.Mutex
+	v6Write sync.Mutex
 
 	closeOnce sync.Once
 }
@@ -238,11 +240,17 @@ func (s *trustTunnelICMPSession) HandleRequest(ctx context.Context, pkt trustTun
 		if err != nil {
 			return zero, false, err
 		}
-		control := &ipv4.ControlMessage{TTL: int(ttl)}
+		control := &ipv4.ControlMessage{}
 		if s.interfaceIndex != 0 {
 			control.IfIndex = s.interfaceIndex
 		}
-		if _, err := s.v4pc.WriteTo(wire, control, &stdnet.IPAddr{IP: dst}); err != nil {
+		s.v4Write.Lock()
+		err = s.v4pc.SetTTL(int(ttl))
+		if err == nil {
+			_, err = s.v4pc.WriteTo(wire, control, &stdnet.IPAddr{IP: dst})
+		}
+		s.v4Write.Unlock()
+		if err != nil {
 			return zero, false, err
 		}
 		errors.LogDebug(ctx, "trusttunnel icmp raw send v4 dst=", dst.String(), " id=", pkt.ID, " seq=", pkt.Sequence)
@@ -263,11 +271,17 @@ func (s *trustTunnelICMPSession) HandleRequest(ctx context.Context, pkt trustTun
 		if err != nil {
 			return zero, false, err
 		}
-		control := &ipv6.ControlMessage{HopLimit: int(ttl)}
+		control := &ipv6.ControlMessage{}
 		if s.interfaceIndex != 0 {
 			control.IfIndex = s.interfaceIndex
 		}
-		if _, err := s.v6pc.WriteTo(wire, control, &stdnet.IPAddr{IP: dst}); err != nil {
+		s.v6Write.Lock()
+		err = s.v6pc.SetHopLimit(int(ttl))
+		if err == nil {
+			_, err = s.v6pc.WriteTo(wire, control, &stdnet.IPAddr{IP: dst})
+		}
+		s.v6Write.Unlock()
+		if err != nil {
 			return zero, false, err
 		}
 		errors.LogDebug(ctx, "trusttunnel icmp raw send v6 dst=", dst.String(), " id=", pkt.ID, " seq=", pkt.Sequence)
