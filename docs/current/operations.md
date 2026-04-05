@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `worktree after auth semantics fix`
+Коммит состояния: `fc276340`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -95,8 +95,10 @@
 
 Присутствуют в модели, но не подтверждены как самостоятельная активная функция:
 - `hasIpv6`
-- `clientRandom`
 - `antiDpi`
+
+Подтверждённо активная runtime-функция:
+- `clientRandom` для H2 и H3 outbound
 
 ### 3.2. Минимальные правила для H2 outbound
 
@@ -107,6 +109,7 @@
 - `streamSettings.tlsSettings.serverName == settings.hostname`
 - сертификат сервера соответствует `hostname`
 - если используется `certificatePemFile`, PEM должен читаться в runtime verify path
+- если нужен deterministic allow/deny через server-side rules, `settings.clientRandom` должен совпадать с `client_random` rule-spec
 
 ### 3.3. Минимальные правила для H3 outbound
 
@@ -115,6 +118,7 @@
 - `hostname`
 - согласованный certificate PEM или `skipVerification=true`
 - отдельный TCP listener на server data-port для H3 не требуется
+- если нужен deterministic allow/deny через server-side rules, `settings.clientRandom` должен совпадать с `client_random` rule-spec
 
 ## 4. Как писать рабочие inbound-конфиги
 
@@ -174,7 +178,20 @@
 
 Важно:
 - этот пункт относится к server-side rules;
-- outbound `clientRandom` на стороне Xray-client всё ещё не считается закрытой runtime-функцией.
+- outbound `clientRandom` на стороне Xray-client подтверждён как рабочая runtime-функция для H2 и H3 на нашем server-side rules path.
+
+### 5.2.1. Outbound `clientRandom` на H2/H3
+
+Подтверждено clean-HEAD runtime-retest на 2026-04-05 / `fc276340`:
+- `settings.clientRandom = "deadbeef"` на нашем Xray client приводит к allow-match на server-side rules как для H2, так и для H3;
+- несовпадающий `clientRandom` приводит к deny через `403` как для H2, так и для H3;
+- practically significant конфиги для такого retest:
+- `testing/trusttunnel/server_h2_rules.json`
+- `testing/trusttunnel/server_h3_rules.json`
+- `testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json`
+- `testing/trusttunnel/our_client_to_our_server_h2_clientrandom_deny.json`
+- `testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json`
+- `testing/trusttunnel/our_client_to_our_server_h3_clientrandom_deny.json`
 
 ### 5.3. `_check` на H2/H3
 
@@ -209,7 +226,6 @@
 ## 7. Практические ограничения текущего режима
 
 На текущем состоянии нельзя объявлять как завершённые функции:
-- outbound `clientRandom` как активную runtime-функцию;
 - `antiDpi` как рабочий product path;
 - `hasIpv6` / `ipv6Available` как активную готовую функцию;
 - server runtime host/cert selection через `settings.hosts[]`;

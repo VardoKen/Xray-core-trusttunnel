@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `worktree after auth semantics fix`
+Коммит состояния: `fc276340`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -16,6 +16,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - H3 UDP mux;
 - H2 rules по `client_random`;
 - H3 rules по `client_random`;
+- outbound `clientRandom` как реальная runtime-функция для H2 и H3;
 - H2 `_check` special path с корректными `200` / `407` / `403`;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
 - server-side traffic stats;
@@ -77,6 +78,14 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - H1 `_check` отвечает явным `200`, H1 `_udp2` отвечает явной HTTP-ошибкой вместо dispatch, а `_icmp` отвечает явным `501 Not Implemented` после auth/rules;
 - H2/H3 `_icmp` больше не уходит в обычный dispatch path и тоже отвечает явным `501 Not Implemented`.
 
+### 2.7. Outbound `clientRandom`
+
+Подтверждено clean-HEAD runtime-retest на 2026-04-05 / `fc276340`:
+- outbound `settings.clientRandom` реально участвует в формировании исходящего TLS ClientHello random;
+- H2 allow-case с `clientRandom = "deadbeef"` проходит через server-side rules и логирует `matched rule[0] action=allow clientRandom=deadbeef`;
+- H3 allow-case с `clientRandom = "deadbeef"` проходит через server-side rules и логирует тот же allow-match;
+- deny-case с несовпадающим `clientRandom` на H2 и H3 возвращает `403` и уходит в catch-all deny-rule.
+
 ## 3. Что считается текущей истиной
 
 Текущую истину по проекту определяют:
@@ -91,7 +100,6 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- outbound `clientRandom` как реальная runtime-функция;
 - `_icmp` client/server path;
 - привязка `ipv6_available`, private-network policy и timeout settings к реальному runtime;
 - полный UDP interop matrix;

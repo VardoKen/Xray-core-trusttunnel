@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `worktree after auth semantics fix`
+Коммит состояния: `fc276340`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -68,6 +68,11 @@
 - `testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml`
 - `testing/trusttunnel/official_client_rules_allow.toml`
 - `testing/trusttunnel/official_client_rules_deny.toml`
+- `testing/trusttunnel/server_h3_rules.json`
+- `testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json`
+- `testing/trusttunnel/our_client_to_our_server_h2_clientrandom_deny.json`
+- `testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json`
+- `testing/trusttunnel/our_client_to_our_server_h3_clientrandom_deny.json`
 
 ## 3. Config binding и модель протокола
 
@@ -125,11 +130,30 @@
 - `SkipVerification`
 - `CertificatePem`
 - `EnableUdp`
+- outbound `ClientRandom`
 
 Декларативны на текущем состоянии:
 - `HasIpv6`
 - `AntiDpi`
-- outbound `ClientRandom`
+
+### 4.4. Outbound `clientRandom` runtime-path
+
+Файлы:
+- `transport/internet/tls/client_random.go`
+- `transport/internet/tcp/dialer.go`
+- `proxy/trusttunnel/client.go`
+- `proxy/trusttunnel/h3_client.go`
+- `proxy/trusttunnel/udp_client.go`
+
+Реализовано:
+- `settings.clientRandom` нормализуется как TrustTunnel-style `prefix[/mask]`;
+- для H2 path spec прокидывается через context в TLS dialer;
+- для H3 path spec применяется напрямую к `tls.Config.Rand` перед QUIC/TLS handshake;
+- первые 32 байта случайного источника подменяются так, чтобы outgoing ClientHello random удовлетворял configured spec.
+
+Подтверждено clean-HEAD runtime-retest на `fc276340`:
+- H2 и H3 allow-case с `clientRandom = "deadbeef"` проходят server-side rules;
+- H2 и H3 deny-case с несовпадающим `clientRandom` получают `403`.
 
 ## 5. Карта серверного path
 
@@ -276,6 +300,7 @@ Client side:
 - `CertificatePem`
 - `EnableUdp`
 - `Transport`
+- outbound `ClientRandom`
 
 Server side:
 - `Users`
@@ -288,7 +313,6 @@ Server side:
 Client side:
 - `HasIpv6`
 - `AntiDpi`
-- outbound `ClientRandom`
 
 Server side:
 - `Hosts`

@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `worktree after auth semantics fix`
+Коммит состояния: `fc276340`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -145,6 +145,7 @@ Preflight:
 - session устанавливается;
 - H2 `_check` возвращает `200` / `407` / `403` согласно auth/rules сценарию;
 - reserved pseudo-hosts `_check`, `_udp2` и `_icmp` не падают из H1/H2/H3 обратно в обычный dispatch path;
+- outbound `clientRandom` на H2/H3 позволяет детерминированно проходить allow/deny по server-side rules;
 - TCP CONNECT проходит и держит двусторонний обмен;
 - UDP через `_udp2` проходит без развала session;
 - H3 allow/deny определяется rule match, а не глобальным запретом;
@@ -167,6 +168,7 @@ Preflight:
 
 На текущем состоянии не требуется повторная перепроверка как открытого дефекта:
 - H2 `_check` как отдельного special path с `200` / `407` / `403`;
+- outbound `clientRandom` как отдельного чисто декларативного поля на H2/H3;
 - transport-layer принадлежности рабочего H3 path;
 - server-side H3 rules по `client_random`;
 - ложного `H3_NO_ERROR` в H3 TCP path.
@@ -177,7 +179,6 @@ Preflight:
 
 Открытые блоки для следующих циклов проверки:
 - `_icmp`;
-- outbound `clientRandom`;
 - полный UDP interop matrix;
 - observable server behavior для `ipv6_available`, private-network и timeout settings;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
@@ -190,6 +191,24 @@ Preflight:
 - H1 `_check` отвечает `200` без dispatch;
 - H1 `_udp2` больше не уходит в обычный dispatch и отвечает явной HTTP-ошибкой;
 - H1 `_icmp` больше не уходит в обычный dispatch и отвечает `501 Not Implemented`.
+
+Clean-HEAD runtime-retest outbound `clientRandom` на 2026-04-05 / `fc276340`:
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- binary sha256: `34f191ae00a47b192eba5cce3117991008f5101a75a44dcfa557c67b0a531ad4`;
+- worktree: clean (`git-status.txt` size `0`);
+- log bundle: `/opt/lab/xray-tt/logs/clientrandom-retest-clean-20260405-085845`;
+- H2 allow-case: `matched rule[0] action=allow clientRandom=deadbeef` и `trusttunnel H2 CONNECT accepted for tcp:127.0.0.1:18080`;
+- H2 deny-case: client log содержит `trusttunnel CONNECT failed with status 403: connection rejected by rule`;
+- H3 allow-case: `matched rule[0] action=allow clientRandom=deadbeef` и `trusttunnel H3 CONNECT accepted for tcp:127.0.0.1:18080`;
+- H3 deny-case: client log содержит `trusttunnel CONNECT failed with status 403: connection rejected by rule`.
+
+Для воспроизводимости outbound `clientRandom` retest зафиксированы:
+- server H2 rules: `testing/trusttunnel/server_h2_rules.json`;
+- server H3 rules: `testing/trusttunnel/server_h3_rules.json`;
+- client H2 allow: `testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json`;
+- client H2 deny: `testing/trusttunnel/our_client_to_our_server_h2_clientrandom_deny.json`;
+- client H3 allow: `testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json`;
+- client H3 deny: `testing/trusttunnel/our_client_to_our_server_h3_clientrandom_deny.json`.
 
 Для воспроизводимости подтверждённого H2 `_check` retest зафиксированы:
 - server success/auth-fail: `testing/trusttunnel/server_h2_official_cert.json`, который в lab копируется в `/opt/lab/xray-tt/configs/server_h2_official_cert.json`
