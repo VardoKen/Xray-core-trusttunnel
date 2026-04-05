@@ -245,6 +245,7 @@ func (t *stackGVisor) writeRawICMPPacket(payload []byte, src net.Destination, ds
 	if err := t.stack.WriteRawPacket(defaultNIC, ipProto, buffer.MakeWithData(wire)); err != nil {
 		return errors.New("failed to write raw icmp packet back to stack", err)
 	}
+	errors.LogDebug(t.ctx, "proxy/tun: injected icmp reply src=", src, " dst=", dst, " bytes=", len(wire))
 
 	return nil
 }
