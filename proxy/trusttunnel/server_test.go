@@ -34,13 +34,14 @@ func (*testDispatcher) Close() error {
 	return nil
 }
 
-func (*testDispatcher) Dispatch(context.Context, xnet.Destination) (*transport.Link, error) {
-	panic("unexpected Dispatch call")
+func (d *testDispatcher) Dispatch(context.Context, xnet.Destination) (*transport.Link, error) {
+	d.dispatchCount++
+	return nil, goerrors.New("unexpected Dispatch call")
 }
 
 func (d *testDispatcher) DispatchLink(context.Context, xnet.Destination, *transport.Link) error {
 	d.dispatchCount++
-	panic("unexpected DispatchLink call")
+	return goerrors.New("unexpected DispatchLink call")
 }
 
 func newTestTrustTunnelServer(t *testing.T, cfg *ServerConfig) *Server {

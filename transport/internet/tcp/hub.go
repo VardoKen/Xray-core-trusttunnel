@@ -20,17 +20,18 @@ import (
 )
 
 type Listener struct {
-	listener      net.Listener
-	packetConn    net.PacketConn
-	h3listener    *quic.EarlyListener
-	h3server      *http3.Server
-	tlsConfig     *gotls.Config
-	realityConfig *goreality.Config
-	authConfig    internet.ConnectionAuthenticator
-	config        *Config
-	addConn       internet.ConnHandler
-	address       net.Address
-	port          net.Port
+	listener            net.Listener
+	packetConn          net.PacketConn
+	h3listener          *quic.EarlyListener
+	h3server            *http3.Server
+	trustTunnelTimeouts TrustTunnelServerTimeouts
+	tlsConfig           *gotls.Config
+	realityConfig       *goreality.Config
+	authConfig          internet.ConnectionAuthenticator
+	config              *Config
+	addConn             internet.ConnHandler
+	address             net.Address
+	port                net.Port
 }
 
 func isH3TLSConfig(cfg *gotls.Config) bool {
@@ -46,6 +47,7 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSe
 
 	tcpSettings := streamSettings.ProtocolSettings.(*Config)
 	l.config = tcpSettings
+	l.trustTunnelTimeouts = trustTunnelServerTimeoutsFromContext(ctx)
 	if l.config != nil {
 		if streamSettings.SocketSettings == nil {
 			streamSettings.SocketSettings = &internet.SocketConfig{}
@@ -89,7 +91,15 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSe
 			tracker:    clientRandomTracker,
 		}
 
-		h3listener, err := quic.ListenEarly(wrappedPacketConn, l.tlsConfig, &quic.Config{})
+		quicConfig := &quic.Config{}
+		if l.trustTunnelTimeouts.TLSHandshakeTimeout > 0 {
+			quicConfig.HandshakeIdleTimeout = l.trustTunnelTimeouts.TLSHandshakeTimeout
+		}
+		if l.trustTunnelTimeouts.ClientListenerTimeout > 0 {
+			quicConfig.MaxIdleTimeout = l.trustTunnelTimeouts.ClientListenerTimeout
+		}
+
+		h3listener, err := quic.ListenEarly(wrappedPacketConn, l.tlsConfig, quicConfig)
 		if err != nil {
 			_ = packetConn.Close()
 			return nil, errors.New("failed to listen QUIC on ", address, ":", port).Base(err)
@@ -112,6 +122,9 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSe
 				clientRandom := clientRandomTracker.Get(remoteAddr.String())
 				l.addConn(stat.Connection(newHTTP3RequestConn(req, w, remoteAddr, localAddr, clientRandom)))
 			}),
+		}
+		if l.trustTunnelTimeouts.ClientListenerTimeout > 0 {
+			l.h3server.IdleTimeout = l.trustTunnelTimeouts.ClientListenerTimeout
 		}
 
 		go l.keepAcceptingH3()
@@ -177,6 +190,18 @@ func (v *Listener) keepAccepting() {
 			if v.tlsConfig != nil {
 				conn = wrapTrustTunnelClientRandomConn(conn)
 				conn = tls.Server(conn, v.tlsConfig)
+				if handshakeTimeout := v.trustTunnelTimeouts.TLSHandshakeTimeout; handshakeTimeout > 0 {
+					if handshakeConn, ok := conn.(tls.Interface); ok {
+						handshakeCtx, cancel := context.WithTimeout(context.Background(), handshakeTimeout)
+						err := handshakeConn.HandshakeContext(handshakeCtx)
+						cancel()
+						if err != nil {
+							errors.LogInfoInner(context.Background(), err, "failed TLS handshake")
+							common.Close(conn)
+							return
+						}
+					}
+				}
 			} else if v.realityConfig != nil {
 				if conn, err = reality.Server(conn, v.realityConfig); err != nil {
 					errors.LogInfo(context.Background(), err.Error())

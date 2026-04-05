@@ -6,6 +6,7 @@ import (
 	stdnet "net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/xtls/xray-core/common/buf"
 	"github.com/xtls/xray-core/common/errors"
@@ -24,6 +25,46 @@ type trustTunnelUDPFlow struct {
 	clientSource *stdnet.UDPAddr
 	target       *stdnet.UDPAddr
 	dispatcher   *udp_transport.Dispatcher
+	timeout      time.Duration
+	onTimeout    func()
+	timer        *time.Timer
+	timerMu      sync.Mutex
+	closeOnce    sync.Once
+}
+
+func (f *trustTunnelUDPFlow) touch() {
+	if f == nil || f.timeout <= 0 || f.onTimeout == nil {
+		return
+	}
+
+	f.timerMu.Lock()
+	defer f.timerMu.Unlock()
+
+	if f.timer == nil {
+		f.timer = time.AfterFunc(f.timeout, f.onTimeout)
+		return
+	}
+
+	f.timer.Reset(f.timeout)
+}
+
+func (f *trustTunnelUDPFlow) close() {
+	if f == nil {
+		return
+	}
+
+	f.closeOnce.Do(func() {
+		f.timerMu.Lock()
+		if f.timer != nil {
+			f.timer.Stop()
+			f.timer = nil
+		}
+		f.timerMu.Unlock()
+
+		if f.dispatcher != nil {
+			f.dispatcher.RemoveRay()
+		}
+	})
 }
 
 func isTrustTunnelUDPHost(host string) bool {
@@ -63,6 +104,7 @@ func (s *Server) serveUDPMuxRequest(proto string, ctx context.Context, w http.Re
 	var writeMu sync.Mutex
 	var flowsMu sync.Mutex
 	flows := make(map[trustTunnelUDPFlowKey]*trustTunnelUDPFlow)
+	udpTimeout := s.config.udpConnectionsTimeout()
 
 	getOrCreateFlow := func(pkt trustTunnelUDPRequestPacket) (*trustTunnelUDPFlow, error) {
 		if pkt.Source == nil {
@@ -90,6 +132,15 @@ func (s *Server) serveUDPMuxRequest(proto string, ctx context.Context, w http.Re
 		flow := &trustTunnelUDPFlow{
 			clientSource: clientSource,
 			target:       target,
+			timeout:      udpTimeout,
+		}
+		flow.onTimeout = func() {
+			flowsMu.Lock()
+			if current, found := flows[key]; found && current == flow {
+				delete(flows, key)
+			}
+			flowsMu.Unlock()
+			flow.close()
 		}
 
 		flow.dispatcher = udp_transport.NewDispatcher(dispatcher, func(cbCtx context.Context, packet *udp_proto.Packet) {
@@ -117,9 +168,11 @@ func (s *Server) serveUDPMuxRequest(proto string, ctx context.Context, w http.Re
 			if err != nil {
 				errors.LogWarningInner(cbCtx, err, "failed to write trusttunnel udp response")
 			}
+			flow.touch()
 		})
 
 		flows[key] = flow
+		flow.touch()
 		return flow, nil
 	}
 
@@ -127,9 +180,7 @@ func (s *Server) serveUDPMuxRequest(proto string, ctx context.Context, w http.Re
 		flowsMu.Lock()
 		defer flowsMu.Unlock()
 		for _, flow := range flows {
-			if flow.dispatcher != nil {
-				flow.dispatcher.RemoveRay()
-			}
+			flow.close()
 		}
 	}()
 
@@ -151,6 +202,7 @@ func (s *Server) serveUDPMuxRequest(proto string, ctx context.Context, w http.Re
 					errors.LogWarningInner(ctx, ferr, "failed to create trusttunnel udp flow")
 					continue
 				}
+				flow.touch()
 
 				targetDest := xnet.DestinationFromAddr(flow.target)
 

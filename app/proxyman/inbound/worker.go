@@ -139,12 +139,19 @@ func (w *tcpWorker) Proxy() proxy.Inbound {
 }
 
 func (w *tcpWorker) Start() error {
-	ctx := context.Background()
+	ctx := w.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	type HysteriaInboundValidator interface{ HysteriaInboundValidator() *account.Validator }
 	if v, ok := w.proxy.(HysteriaInboundValidator); ok {
 		ctx = hyCtx.ContextWithRequireDatagram(ctx, true)
 		ctx = hyCtx.ContextWithValidator(ctx, v.HysteriaInboundValidator())
+	}
+
+	if provider, ok := w.proxy.(interface{ ListenerContext(context.Context) context.Context }); ok {
+		ctx = provider.ListenerContext(ctx)
 	}
 
 	hub, err := internet.ListenTCP(ctx, w.address, w.port, w.stream, func(conn stat.Connection) {

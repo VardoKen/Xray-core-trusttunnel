@@ -14,9 +14,14 @@ func TestTrustTunnelServerConfigBuildSupportsICMPSettings(t *testing.T) {
 				Password: "p1",
 			},
 		},
-		AllowPrivateNetworkConnections: true,
-		IPv6Available:                  true,
-		AuthFailureStatusCode:          407,
+		AllowPrivateNetworkConnections:     true,
+		IPv6Available:                      true,
+		AuthFailureStatusCode:              407,
+		TLSHandshakeTimeoutSecs:            10,
+		ClientListenerTimeoutSecs:          600,
+		ConnectionEstablishmentTimeoutSecs: 30,
+		TCPConnectionsTimeoutSecs:          604800,
+		UDPConnectionsTimeoutSecs:          300,
 		ICMP: &TrustTunnelICMPConfig{
 			InterfaceName:            "eth0",
 			RequestTimeoutSecs:       9,
@@ -42,5 +47,20 @@ func TestTrustTunnelServerConfigBuildSupportsICMPSettings(t *testing.T) {
 	}
 	if built.GetIcmpRecvMessageQueueCapacity() != 17 {
 		t.Fatalf("icmpRecvMessageQueueCapacity = %d, want 17", built.GetIcmpRecvMessageQueueCapacity())
+	}
+	if built.GetTlsHandshakeTimeoutSecs() != 10 {
+		t.Fatalf("tlsHandshakeTimeoutSecs = %d, want 10", built.GetTlsHandshakeTimeoutSecs())
+	}
+	if built.GetClientListenerTimeoutSecs() != 600 {
+		t.Fatalf("clientListenerTimeoutSecs = %d, want 600", built.GetClientListenerTimeoutSecs())
+	}
+	if built.GetConnectionEstablishmentTimeoutSecs() != 30 {
+		t.Fatalf("connectionEstablishmentTimeoutSecs = %d, want 30", built.GetConnectionEstablishmentTimeoutSecs())
+	}
+	if built.GetTcpConnectionsTimeoutSecs() != 604800 {
+		t.Fatalf("tcpConnectionsTimeoutSecs = %d, want 604800", built.GetTcpConnectionsTimeoutSecs())
+	}
+	if built.GetUdpConnectionsTimeoutSecs() != 300 {
+		t.Fatalf("udpConnectionsTimeoutSecs = %d, want 300", built.GetUdpConnectionsTimeoutSecs())
 	}
 }

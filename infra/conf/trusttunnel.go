@@ -157,27 +157,37 @@ type TrustTunnelICMPConfig struct {
 }
 
 type TrustTunnelServerConfig struct {
-	Users                          []*TrustTunnelUserConfig `json:"users"`
-	Hosts                          []*TrustTunnelHostConfig `json:"hosts"`
-	Transports                     []string                 `json:"transports"`
-	Rules                          []*TrustTunnelRuleConfig `json:"rules"`
-	IPv6Available                  bool                     `json:"ipv6Available"`
-	AllowPrivateNetworkConnections bool                     `json:"allowPrivateNetworkConnections"`
-	AuthFailureStatusCode          uint32                   `json:"authFailureStatusCode"`
-	UDP                            bool                     `json:"udp"`
-	ICMP                           *TrustTunnelICMPConfig   `json:"icmp"`
+	Users                              []*TrustTunnelUserConfig `json:"users"`
+	Hosts                              []*TrustTunnelHostConfig `json:"hosts"`
+	Transports                         []string                 `json:"transports"`
+	Rules                              []*TrustTunnelRuleConfig `json:"rules"`
+	IPv6Available                      bool                     `json:"ipv6Available"`
+	AllowPrivateNetworkConnections     bool                     `json:"allowPrivateNetworkConnections"`
+	AuthFailureStatusCode              uint32                   `json:"authFailureStatusCode"`
+	TLSHandshakeTimeoutSecs            uint32                   `json:"tlsHandshakeTimeoutSecs"`
+	ClientListenerTimeoutSecs          uint32                   `json:"clientListenerTimeoutSecs"`
+	ConnectionEstablishmentTimeoutSecs uint32                   `json:"connectionEstablishmentTimeoutSecs"`
+	TCPConnectionsTimeoutSecs          uint32                   `json:"tcpConnectionsTimeoutSecs"`
+	UDPConnectionsTimeoutSecs          uint32                   `json:"udpConnectionsTimeoutSecs"`
+	UDP                                bool                     `json:"udp"`
+	ICMP                               *TrustTunnelICMPConfig   `json:"icmp"`
 }
 
 func (c *TrustTunnelServerConfig) Build() (proto.Message, error) {
 	config := &trusttunnel.ServerConfig{
-		Users:                          make([]*protocol.User, 0, len(c.Users)),
-		Hosts:                          make([]*trusttunnel.ServerHost, 0, len(c.Hosts)),
-		Transports:                     make([]trusttunnel.TransportProtocol, 0, len(c.Transports)),
-		Rules:                          make([]*trusttunnel.Rule, 0, len(c.Rules)),
-		Ipv6Available:                  c.IPv6Available,
-		AllowPrivateNetworkConnections: c.AllowPrivateNetworkConnections,
-		AuthFailureStatusCode:          c.AuthFailureStatusCode,
-		EnableUdp:                      c.UDP,
+		Users:                              make([]*protocol.User, 0, len(c.Users)),
+		Hosts:                              make([]*trusttunnel.ServerHost, 0, len(c.Hosts)),
+		Transports:                         make([]trusttunnel.TransportProtocol, 0, len(c.Transports)),
+		Rules:                              make([]*trusttunnel.Rule, 0, len(c.Rules)),
+		Ipv6Available:                      c.IPv6Available,
+		AllowPrivateNetworkConnections:     c.AllowPrivateNetworkConnections,
+		AuthFailureStatusCode:              c.AuthFailureStatusCode,
+		TlsHandshakeTimeoutSecs:            c.TLSHandshakeTimeoutSecs,
+		ClientListenerTimeoutSecs:          c.ClientListenerTimeoutSecs,
+		ConnectionEstablishmentTimeoutSecs: c.ConnectionEstablishmentTimeoutSecs,
+		TcpConnectionsTimeoutSecs:          c.TCPConnectionsTimeoutSecs,
+		UdpConnectionsTimeoutSecs:          c.UDPConnectionsTimeoutSecs,
+		EnableUdp:                          c.UDP,
 	}
 
 	if c.ICMP != nil {

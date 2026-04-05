@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	appdispatcher "github.com/xtls/xray-core/app/dispatcher"
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/buf"
 	"github.com/xtls/xray-core/common/errors"
@@ -19,11 +18,12 @@ import (
 	"github.com/xtls/xray-core/common/protocol"
 	http_proto "github.com/xtls/xray-core/common/protocol/http"
 	"github.com/xtls/xray-core/common/session"
+	"github.com/xtls/xray-core/common/signal"
+	"github.com/xtls/xray-core/common/task"
 	core "github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/policy"
 	"github.com/xtls/xray-core/features/routing"
 	"github.com/xtls/xray-core/features/stats"
-	"github.com/xtls/xray-core/transport"
 	"github.com/xtls/xray-core/transport/internet/stat"
 	tcptransport "github.com/xtls/xray-core/transport/internet/tcp"
 	"golang.org/x/net/http2"
@@ -153,6 +153,13 @@ func (s *Server) Network() []net.Network {
 	return []net.Network{net.Network_TCP, net.Network_UNIX}
 }
 
+func (s *Server) ListenerContext(ctx context.Context) context.Context {
+	return tcptransport.ContextWithTrustTunnelServerTimeouts(ctx, tcptransport.TrustTunnelServerTimeouts{
+		TLSHandshakeTimeout:   s.config.tlsHandshakeTimeout(),
+		ClientListenerTimeout: s.config.clientListenerTimeout(),
+	})
+}
+
 func isTimeout(err error) bool {
 	nerr, ok := errors.Cause(err).(net.Error)
 	return ok && nerr.Timeout()
@@ -180,7 +187,7 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		return s.processHTTP3(ctx, h3conn, conn, dispatcher, inbound)
 	}
 
-	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+	if err := conn.SetReadDeadline(time.Now().Add(s.config.clientListenerTimeout())); err != nil {
 		errors.LogInfoInner(ctx, err, "failed to set read deadline")
 	}
 
@@ -219,6 +226,10 @@ func (s *Server) processHTTP3(ctx context.Context, h3conn tcptransport.HTTP3Requ
 
 func (s *Server) processHTTP1(ctx context.Context, conn stat.Connection, reader *bufio.Reader, dispatcher routing.Dispatcher, inbound *session.Inbound, clientRandom string) error {
 Start:
+	if err := conn.SetReadDeadline(time.Now().Add(s.config.clientListenerTimeout())); err != nil {
+		errors.LogDebugInner(ctx, err, "failed to set trusttunnel H1 client listener deadline")
+	}
+
 	req, err := http.ReadRequest(reader)
 	if err != nil {
 		trace := errors.New("failed to read trusttunnel request").Base(err)
@@ -362,12 +373,8 @@ Start:
 		inbound.CanSpliceCopy = 1
 	}
 
-	wrappedLink := appdispatcher.WrapLink(ctx, s.policyManager, s.statsManager, &transport.Link{
-		Reader: linkReader,
-		Writer: buf.NewWriter(conn),
-	})
-	if err := dispatcher.DispatchLink(ctx, dest, wrappedLink); err != nil {
-		return errors.New("failed to dispatch trusttunnel CONNECT").Base(err).AtWarning()
+	if err := s.dispatchConnectSession(ctx, dispatcher, dest, linkReader, buf.NewWriter(conn)); err != nil {
+		return err
 	}
 
 	if strings.EqualFold(req.Header.Get("Proxy-Connection"), "keep-alive") {
@@ -386,7 +393,9 @@ func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatche
 
 	go func() {
 		defer close(done)
-		var h2s http2.Server
+		h2s := http2.Server{
+			IdleTimeout: s.config.clientListenerTimeout(),
+		}
 		h2s.ServeConn(conn, &http2.ServeConnOpts{
 			Context:          ctx,
 			Handler:          handler,
@@ -421,6 +430,84 @@ func isTrustTunnelICMPHost(host string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (s *Server) dispatchConnectSession(ctx context.Context, dispatcher routing.Dispatcher, dest net.Destination, input buf.Reader, output buf.Writer) error {
+	dispatchCtx := ctx
+	pinOnline := func() {}
+	if establishTimeout := s.config.connectionEstablishmentTimeout(); establishTimeout > 0 {
+		dispatchCtx = session.ContextWithTimeoutOnly(dispatchCtx, true)
+		var cancel context.CancelFunc
+		dispatchCtx, cancel = context.WithTimeout(dispatchCtx, establishTimeout)
+		defer cancel()
+		pinOnline = s.pinUserOnlineMap(ctx)
+	}
+	defer pinOnline()
+
+	link, err := dispatcher.Dispatch(dispatchCtx, dest)
+	if err != nil {
+		return errors.New("failed to dispatch trusttunnel CONNECT").Base(err).AtWarning()
+	}
+
+	sessionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var opts []buf.CopyOption
+	if idleTimeout := s.config.tcpConnectionsTimeout(); idleTimeout > 0 {
+		timer := signal.CancelAfterInactivity(sessionCtx, func() {
+			cancel()
+			common.Interrupt(link.Reader)
+			common.Interrupt(link.Writer)
+		}, idleTimeout)
+		opts = append(opts, buf.UpdateActivity(timer))
+	}
+
+	requestDone := func() error {
+		if err := buf.Copy(input, link.Writer, opts...); err != nil {
+			return errors.New("failed to transport trusttunnel CONNECT request").Base(err)
+		}
+		return nil
+	}
+
+	responseDone := func() error {
+		if err := buf.Copy(link.Reader, output, opts...); err != nil {
+			return errors.New("failed to transport trusttunnel CONNECT response").Base(err)
+		}
+		return nil
+	}
+
+	requestDoneAndCloseWriter := task.OnSuccess(requestDone, task.Close(link.Writer))
+	if err := task.Run(sessionCtx, requestDoneAndCloseWriter, responseDone); err != nil {
+		common.Interrupt(link.Reader)
+		common.Interrupt(link.Writer)
+		return errors.New("trusttunnel connection ends").Base(err)
+	}
+
+	return nil
+}
+
+func (s *Server) pinUserOnlineMap(ctx context.Context) func() {
+	inbound := session.InboundFromContext(ctx)
+	if inbound == nil || inbound.User == nil || inbound.User.Email == "" || inbound.Source.Address == nil || s.policyManager == nil || s.statsManager == nil {
+		return func() {}
+	}
+
+	userPolicy := s.policyManager.ForLevel(inbound.User.Level)
+	if !userPolicy.Stats.UserOnline {
+		return func() {}
+	}
+
+	userIP := inbound.Source.Address.String()
+	name := "user>>>" + inbound.User.Email + ">>>online"
+	onlineMap, _ := stats.GetOrRegisterOnlineMap(s.statsManager, name)
+	if onlineMap == nil {
+		return func() {}
+	}
+
+	onlineMap.AddIP(userIP)
+	return func() {
+		onlineMap.RemoveIP(userIP)
 	}
 }
 
@@ -547,11 +634,7 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 		f: flusher,
 	}
 
-	wrappedLink := appdispatcher.WrapLink(ctx, s.policyManager, s.statsManager, &transport.Link{
-		Reader: buf.NewReader(req.Body),
-		Writer: buf.NewWriter(writer),
-	})
-	if err := dispatcher.DispatchLink(ctx, dest, wrappedLink); err != nil {
+	if err := s.dispatchConnectSession(ctx, dispatcher, dest, buf.NewReader(req.Body), buf.NewWriter(writer)); err != nil {
 		errors.LogWarningInner(ctx, err, "failed to dispatch trusttunnel "+strings.ToLower(proto)+" CONNECT")
 	}
 }
