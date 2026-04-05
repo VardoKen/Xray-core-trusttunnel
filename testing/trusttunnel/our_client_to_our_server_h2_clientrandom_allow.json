@@ -1,0 +1,52 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-out",
+      "protocol": "trusttunnel",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": 9443,
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.lab.local",
+        "transport": "http2",
+        "hasIpv6": true,
+        "skipVerification": true,
+        "clientRandom": "deadbeef",
+        "antiDpi": false,
+        "udp": false
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.lab.local",
+          "allowInsecure": true,
+          "alpn": ["h2"]
+        }
+      }
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["socks-in"],
+        "outboundTag": "tt-out"
+      }
+    ]
+  }
+}

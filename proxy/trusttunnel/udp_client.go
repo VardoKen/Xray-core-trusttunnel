@@ -133,6 +133,8 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer, a
 		return tunnelConn, nil
 	}
 
+	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
+
 	rawConn, err := dialer.Dial(ctx, c.server.Destination)
 	if err != nil {
 		return nil, errors.New("failed to dial trusttunnel server").Base(err).AtWarning()

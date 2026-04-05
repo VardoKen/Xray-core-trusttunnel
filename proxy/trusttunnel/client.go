@@ -238,6 +238,8 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		return nil
 	}
 
+	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
+
 	rawConn, err := dialer.Dial(ctx, c.server.Destination)
 	if err != nil {
 		return errors.New("failed to dial trusttunnel server").Base(err).AtWarning()

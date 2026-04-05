@@ -9,6 +9,7 @@ import (
 	"github.com/apernet/quic-go"
 	"github.com/apernet/quic-go/http3"
 	"github.com/xtls/xray-core/common/errors"
+	xtlstls "github.com/xtls/xray-core/transport/internet/tls"
 )
 
 func buildHTTP3ConnectRequest(serverAddr string, targetHost string, account *MemoryAccount) (*http.Request, error) {
@@ -65,6 +66,15 @@ func connectHTTP3(ctx context.Context, serverAddr string, targetHost string, acc
 		VerifyConnection: func(cs tls.ConnectionState) error {
 			return verifyTrustTunnelTLS(cs.PeerCertificates, cfg)
 		},
+	}
+	if spec := cfg.GetClientRandom(); spec != "" {
+		reader, err := xtlstls.NewClientHelloRandomReader(spec, tlsCfg.Rand)
+		if err != nil {
+			_ = pr.Close()
+			_ = pw.Close()
+			return nil, errors.New("failed to apply trusttunnel HTTP/3 clientRandom").Base(err)
+		}
+		tlsCfg.Rand = reader
 	}
 
 	transport := &http3.Transport{

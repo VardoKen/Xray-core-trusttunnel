@@ -42,6 +42,14 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 		} else {
 			tlsConfig = config.GetTLSConfig(tls.WithDestination(dest))
 		}
+		if spec := tls.ClientHelloRandomSpecFromContext(ctx); spec != "" {
+			reader, err := tls.NewClientHelloRandomReader(spec, tlsConfig.Rand)
+			if err != nil {
+				conn.Close()
+				return nil, errors.New("failed to apply TLS client hello random").Base(err).AtWarning()
+			}
+			tlsConfig.Rand = reader
+		}
 
 		isFromMitmVerify := false
 		if r, ok := tlsConfig.Rand.(*tls.RandCarrier); ok && len(r.VerifyPeerCertByName) > 0 {

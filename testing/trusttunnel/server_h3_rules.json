@@ -1,0 +1,47 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "tt-in-h3",
+      "listen": "0.0.0.0",
+      "port": 9443,
+      "protocol": "trusttunnel",
+      "settings": {
+        "users": [
+          { "username": "u1", "password": "p1" }
+        ],
+        "hosts": [
+          {
+            "hostname": "vpn.lab.local",
+            "certificateFile": "/opt/lab/xray-tt/official-endpoint-lab/certs/cert.pem",
+            "keyFile": "/opt/lab/xray-tt/official-endpoint-lab/certs/key.pem"
+          }
+        ],
+        "transports": ["http3"],
+        "rules": [
+          { "clientRandom": "deadbeef", "allow": true },
+          { "allow": false }
+        ],
+        "ipv6Available": true,
+        "authFailureStatusCode": 407,
+        "udp": false
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": ["h3"],
+          "certificates": [
+            {
+              "certificateFile": "/opt/lab/xray-tt/official-endpoint-lab/certs/cert.pem",
+              "keyFile": "/opt/lab/xray-tt/official-endpoint-lab/certs/key.pem"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ]
+}
