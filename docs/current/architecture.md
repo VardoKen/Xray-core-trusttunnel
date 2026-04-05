@@ -188,13 +188,14 @@
 - reserved pseudo-host `_icmp` на H2/H3 перехватывается до обычного target parsing;
 - H2/H3 `_icmp` использует отдельный fixed-size codec по official wire-format;
 - серверный path создаёт per-stream raw ICMP session и пишет обратно reply-frames без участия обычного Xray dispatcher;
-- на подтверждённом состоянии echo-reply path работает для IPv4 loopback; ICMP error-type parity и official interop ещё не подтверждены.
+- на подтверждённом состоянии echo-reply path работает для IPv4 loopback; clean-HEAD official H2 interop подтверждён на 2026-04-05 / `5a21fd31`, а H3 official interop и ICMP error-type parity ещё не подтверждены.
 
 ### 5.3.1. H2/H3 `_icmp` runtime-path
 
 Файлы:
 - `proxy/trusttunnel/icmp_codec.go`
 - `proxy/trusttunnel/icmp_server.go`
+- `proxy/trusttunnel/client_random.go`
 
 Реализовано:
 - CONNECT на `_icmp:0` после auth/rules переводится в отдельный H2/H3 mux path;
@@ -203,6 +204,7 @@
 - сервер создаёт echo-request в raw ICMP socket и ждёт reply в пределах фиксированного timeout;
 - исходящий stream пишет fixed-size reply frames:
   `id(2) + source(16) + type(1) + code(1) + sequence(2)`;
+- attachment `trusttunnel.client_random` перед special-path dispatch клонирует `session.Content`, чтобы параллельные H2/H3 streams не делили один mutable `Attributes` map;
 - если raw ICMP недоступен, H2/H3 path отвечает `503 Service Unavailable`.
 
 Ограничения текущего состояния:

@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `32b2eff2`
+Коммит состояния: `5a21fd31`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -137,6 +137,29 @@ Preflight:
 - повторный H3 TCP тест проходит успешно;
 - ложный хвост `... > H3_NO_ERROR` отсутствует.
 
+### 2.8. Official client ↔ our server H2 `_icmp`
+
+Preflight:
+- commit: `5a21fd31dc19b3eee23b789f3a5b11338cddb117`;
+- worktree: clean;
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- binary sha256: `d529ea54e25941c25121d216f84fd741c7a586e95d355ba9577359ba55404b2c`;
+- official client binary: `/opt/lab/xray-tt/bin/trusttunnel_client/trusttunnel_client`;
+- runtime server config: `/opt/lab/xray-tt/configs/server_h2_official_cert.json`;
+- repo-local server config source: `testing/trusttunnel/server_h2_official_cert.json`;
+- runtime client config: `/opt/lab/xray-tt/configs/official_client_to_our_server_h2_icmp_test.toml`;
+- repo-local client config source: `testing/trusttunnel/official_client_to_our_server_h2_icmp.toml`;
+- server certificate fingerprint: `F1:22:FD:22:AF:B0:C9:2B:03:05:A9:55:9B:F7:5E:8F:80:43:00:B9:7C:22:34:EA:6B:34:F9:24:7A:AD:64:9C`;
+- log bundle: `/opt/lab/xray-tt/logs/icmp-h2-official-20260405-114407`.
+
+Подтверждено:
+- official client логирует `Certificate verified successfully`;
+- сервер логирует `trusttunnel H2 health-check accepted` и `trusttunnel H2 ICMP mux accepted`;
+- client log содержит `ICMP register_request` и `ICMP register_reply` с `type=0 code=0`;
+- `ping 1.1.1.1` из namespace `tun` проходит с `3 packets transmitted, 3 received, 0% packet loss`;
+- `server-errors.txt` пустой;
+- сигнатура `fatal error: concurrent map writes` больше не воспроизводится на параллельных H2 stream `_check` + `_icmp`.
+
 ## 3. Что считать pass/fail на текущем этапе
 
 ### 3.1. Pass
@@ -161,6 +184,7 @@ Preflight:
 - `failed to open connection to tcp:_check:443`;
 - `lookup _check: no such host`;
 - `failed to read trusttunnel request > H3_NO_ERROR (local)`;
+- `fatal error: concurrent map writes`;
 - `connect: connection refused` при ошибочном заходе TCP на QUIC listener;
 - `peer certificate is missing` при неправильном порядке TLS verify в H3;
 - `unknown transport protocol: trusttunnelh3`;
@@ -170,6 +194,7 @@ Preflight:
 
 На текущем состоянии не требуется повторная перепроверка как открытого дефекта:
 - H2 `_check` как отдельного special path с `200` / `407` / `403`;
+- official H2 `_icmp` interop как отдельного незакрытого server-side дефекта;
 - outbound `clientRandom` как отдельного чисто декларативного поля на H2/H3;
 - transport-layer принадлежности рабочего H3 path;
 - server-side H3 rules по `client_random`;
@@ -180,7 +205,7 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- official interop для `_icmp`;
+- official interop для H3 `_icmp`;
 - Xray-side/runtime-модель `_icmp` после server-side mux;
 - полный UDP interop matrix;
 - observable server behavior для `ipv6_available`, private-network и timeout settings;
@@ -188,6 +213,7 @@ Preflight:
 
 Локально подтверждённые regression-тесты на 2026-04-05:
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
+- `TestAttachTrustTunnelClientRandomClonesSharedContent` защищает H2/H3 parallel streams от shared `session.Content.Attributes`;
 - обычный H2 CONNECT auth-fail возвращает `407` и `Proxy-Authenticate`;
 - H2 `_udp2` auth-fail возвращает `407` до UDP mux;
 - H2 `_icmp` auth-fail возвращает `407`;
@@ -214,6 +240,19 @@ Clean-HEAD runtime-retest outbound `clientRandom` на 2026-04-05 / `fc276340`:
 - H3 allow-case: `matched rule[0] action=allow clientRandom=deadbeef` и `trusttunnel H3 CONNECT accepted for tcp:127.0.0.1:18080`;
 - H3 deny-case: client log содержит `trusttunnel CONNECT failed with status 403: connection rejected by rule`.
 
+Clean-HEAD official client ↔ our server H2 `_icmp` runtime-retest на 2026-04-05 / `5a21fd31`:
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- binary sha256: `d529ea54e25941c25121d216f84fd741c7a586e95d355ba9577359ba55404b2c`;
+- worktree: clean (`git status --short` output empty);
+- log bundle: `/opt/lab/xray-tt/logs/icmp-h2-official-20260405-114407`;
+- runtime server config: `/opt/lab/xray-tt/configs/server_h2_official_cert.json`;
+- runtime client config: `/opt/lab/xray-tt/configs/official_client_to_our_server_h2_icmp_test.toml`;
+- repo-local client template: `testing/trusttunnel/official_client_to_our_server_h2_icmp.toml`;
+- server log содержит `trusttunnel H2 health-check accepted` и `trusttunnel H2 ICMP mux accepted`;
+- client log содержит `Certificate verified successfully`, `ICMP register_request` и `ICMP register_reply` с `type=0 code=0`;
+- ping из namespace `tun`: `3 packets transmitted, 3 received, 0% packet loss`;
+- `server-errors.txt` пустой, `fatal error: concurrent map writes` отсутствует.
+
 Для воспроизводимости outbound `clientRandom` retest зафиксированы:
 - server H2 rules: `testing/trusttunnel/server_h2_rules.json`;
 - server H3 rules: `testing/trusttunnel/server_h3_rules.json`;
@@ -229,6 +268,10 @@ Clean-HEAD runtime-retest outbound `clientRandom` на 2026-04-05 / `fc276340`:
 - official client auth-fail: `testing/trusttunnel/official_client_to_our_server_h2_check_authfail.toml`
 - official client rule-allow: `testing/trusttunnel/official_client_rules_allow.toml`
 - official client rule-deny: `testing/trusttunnel/official_client_rules_deny.toml`
+
+Для воспроизводимости подтверждённого H2 `_icmp` retest зафиксированы:
+- server: `testing/trusttunnel/server_h2_official_cert.json`, который в lab копируется в `/opt/lab/xray-tt/configs/server_h2_official_cert.json`
+- official client template: `testing/trusttunnel/official_client_to_our_server_h2_icmp.toml`, который в clean-head retest использовался как runtime-copy `/opt/lab/xray-tt/configs/official_client_to_our_server_h2_icmp_test.toml`
 
 ### 5.1. Debian lab runbook для H2 `_check`
 
@@ -428,3 +471,84 @@ wait "$CLIENT_PID" "$SERVER_PID" 2>/dev/null || true
 Ожидание:
 - allow-rule пропускает и health-check, и CONNECT;
 - success path логируется без возврата к историческим `_check`-ошибкам.
+
+### 5.2. Debian lab runbook для H2 `_icmp`
+
+Предпосылки:
+- рабочее дерево находится в `/opt/lab/xray-tt/src/xray-core-trusttunnel`;
+- тестируемый Xray binary собирается в `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- official CLI client доступен как `/opt/lab/xray-tt/bin/trusttunnel_client/trusttunnel_client`;
+- runtime-конфиги кладутся в `/opt/lab/xray-tt/configs`;
+- raw ICMP запускается под `root`, а official client поднимает `ip netns exec tun`.
+
+Подготовка и preflight:
+
+```bash
+export LAB_ROOT=/opt/lab/xray-tt
+export XRAY_REPO=$LAB_ROOT/src/xray-core-trusttunnel
+export XRAY_BIN=$LAB_ROOT/tmp/xray-tt-current
+export OFFICIAL_CLIENT_BIN=$LAB_ROOT/bin/trusttunnel_client/trusttunnel_client
+export CONFIG_DIR=$LAB_ROOT/configs
+export LOG_DIR=$LAB_ROOT/logs
+
+cd "$XRAY_REPO"
+
+git rev-parse HEAD
+git status --short
+go build -buildvcs=false -o "$XRAY_BIN" ./main
+
+install -m 0644 testing/trusttunnel/server_h2_official_cert.json \
+  "$CONFIG_DIR/server_h2_official_cert.json"
+install -m 0644 testing/trusttunnel/official_client_to_our_server_h2_icmp.toml \
+  "$CONFIG_DIR/official_client_to_our_server_h2_icmp_test.toml"
+
+sha256sum "$XRAY_BIN"
+ls -l \
+  "$CONFIG_DIR/server_h2_official_cert.json" \
+  "$CONFIG_DIR/official_client_to_our_server_h2_icmp_test.toml"
+```
+
+Success case:
+
+```bash
+export SERVER_LOG=$LOG_DIR/h2-icmp-server.log
+export CLIENT_LOG=$LOG_DIR/h2-icmp-client.log
+export PING_LOG=$LOG_DIR/h2-icmp-ping.log
+
+pkill -f "$XRAY_BIN" || true
+pkill -f "$OFFICIAL_CLIENT_BIN" || true
+
+: >"$SERVER_LOG"
+: >"$CLIENT_LOG"
+: >"$PING_LOG"
+
+"$XRAY_BIN" run -c "$CONFIG_DIR/server_h2_official_cert.json" >"$SERVER_LOG" 2>&1 &
+SERVER_PID=$!
+sleep 2
+
+"$OFFICIAL_CLIENT_BIN" -c "$CONFIG_DIR/official_client_to_our_server_h2_icmp_test.toml" >"$CLIENT_LOG" 2>&1 &
+CLIENT_PID=$!
+sleep 3
+
+ip netns exec tun ip a show tun0
+ip netns exec tun ping -n -c 3 -W 3 1.1.1.1 | tee "$PING_LOG"
+
+grep -n 'Certificate verified successfully' "$CLIENT_LOG"
+grep -n 'ICMP register_request' "$CLIENT_LOG"
+grep -n 'ICMP register_reply' "$CLIENT_LOG"
+grep -n 'trusttunnel H2 health-check accepted' "$SERVER_LOG"
+grep -n 'trusttunnel H2 ICMP mux accepted' "$SERVER_LOG"
+if grep -n 'fatal error: concurrent map writes' "$SERVER_LOG"; then
+  false
+fi
+
+kill "$CLIENT_PID" "$SERVER_PID"
+wait "$CLIENT_PID" "$SERVER_PID" 2>/dev/null || true
+```
+
+Ожидание:
+- official client проходит certificate verification;
+- H2 `_check` и `_icmp` не разваливаются на параллельных stream;
+- server log содержит `trusttunnel H2 health-check accepted` и `trusttunnel H2 ICMP mux accepted`;
+- client log содержит `ICMP register_request` и `ICMP register_reply`;
+- `ping` из namespace `tun` проходит с ненулевым RTT и без packet loss.

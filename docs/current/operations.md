@@ -210,6 +210,16 @@
 - reserved pseudo-hosts больше не падают из H1/H2/H3 в обычный dispatch path;
 - H2/H3 `_icmp` больше не является заглушкой `501`: при доступном raw ICMP сервер открывает отдельный mux path и отвечает `200`, а при недоступном raw socket отвечает `503`.
 
+### 5.3.1. Official H2 `_icmp` interop
+
+Подтверждено clean-HEAD runtime-retest на 2026-04-05 / `5a21fd31`:
+- server config: `testing/trusttunnel/server_h2_official_cert.json`, который в lab копируется в `/opt/lab/xray-tt/configs/server_h2_official_cert.json`;
+- repo-local template official client: `testing/trusttunnel/official_client_to_our_server_h2_icmp.toml`, в clean-head retest использовалась runtime-copy `/opt/lab/xray-tt/configs/official_client_to_our_server_h2_icmp_test.toml`;
+- official client поднимает `[listener.tun]` с `netns = "tun"` и проходит certificate verification для `vpn.lab.local`;
+- сервер логирует `trusttunnel H2 health-check accepted` и `trusttunnel H2 ICMP mux accepted`;
+- `ping 1.1.1.1` из namespace `tun` проходит с `3/3 received`;
+- H3 official `_icmp` interop всё ещё не подтверждён.
+
 ## 6. UDP path
 
 Реализовано:
@@ -231,7 +241,7 @@
 - server runtime host/cert selection через `settings.hosts[]`;
 - server runtime routing H2/H3 только через `settings.transports[]` без корректных `streamSettings`;
 - `_icmp` как полностью закрытый outbound/Xray product path;
-- `_icmp` official interop как подтверждённый retest;
+- H3 `_icmp` official interop как подтверждённый retest;
 - доменные UDP targets.
 
 ## 8. Как использовать старые документы

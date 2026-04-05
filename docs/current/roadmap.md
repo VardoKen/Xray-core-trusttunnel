@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-База roadmap: состояние проекта после server-side `_icmp` mux, закрытия auth semantics на pseudo-host path и outbound clientRandom
+База roadmap: состояние проекта после clean-HEAD H2 official `_icmp` interop, server-side `_icmp` mux, закрытия auth semantics на pseudo-host path и outbound clientRandom
 Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom и server-side `_icmp` mux
 Не использовать для: фиксации уже закрытых багов и исторической хронологии
 
@@ -21,10 +21,10 @@
 
 ### 2.1. `_icmp`
 
-Server-side H2/H3 `_icmp` mux по official wire-format уже реализован на `32b2eff2`, включая raw ICMP echo-reply path и `503` при недоступном raw socket.
+Server-side H2/H3 `_icmp` mux по official wire-format уже реализован на `32b2eff2`, включая raw ICMP echo-reply path и `503` при недоступном raw socket. Clean-HEAD official client ↔ our server H2 interop подтверждён на `5a21fd31`.
 
 Открытым остаётся:
-- official client ↔ our server interop-retest для `_icmp`;
+- official client ↔ our server interop-retest для H3 `_icmp`;
 - Xray-side/client-side модель `_icmp`, потому что в текущем core нет отдельного `Network_ICMP`;
 - explicit config surface для ICMP timeout/interface/private-network semantics;
 - error-type parity сверх подтверждённого echo-reply path.
