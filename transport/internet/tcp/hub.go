@@ -191,15 +191,10 @@ func (v *Listener) keepAccepting() {
 				conn = wrapTrustTunnelClientRandomConn(conn)
 				conn = tls.Server(conn, v.tlsConfig)
 				if handshakeTimeout := v.trustTunnelTimeouts.TLSHandshakeTimeout; handshakeTimeout > 0 {
-					if handshakeConn, ok := conn.(tls.Interface); ok {
-						handshakeCtx, cancel := context.WithTimeout(context.Background(), handshakeTimeout)
-						err := handshakeConn.HandshakeContext(handshakeCtx)
-						cancel()
-						if err != nil {
-							errors.LogInfoInner(context.Background(), err, "failed TLS handshake")
-							common.Close(conn)
-							return
-						}
+					if err := trustTunnelServerHandshake(conn, handshakeTimeout); err != nil {
+						errors.LogInfoInner(context.Background(), err, "failed TLS handshake")
+						common.Close(conn)
+						return
 					}
 				}
 			} else if v.realityConfig != nil {
