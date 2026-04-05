@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — эксплуатационная база
 
 Статус: current
-Дата фиксации: 2026-04-05
-Коммит состояния: `6fcb3a28`
+Дата фиксации: 2026-04-06
+Коммит состояния: `57d8d5e1`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -162,6 +162,11 @@
 - `icmp.interfaceName`
 - `icmp.requestTimeoutSecs`
 - `icmp.recvMessageQueueCapacity`
+- `tlsHandshakeTimeoutSecs`
+- `clientListenerTimeoutSecs`
+- `connectionEstablishmentTimeoutSecs`
+- `tcpConnectionsTimeoutSecs`
+- `udpConnectionsTimeoutSecs`
 - `ipv6Available` для `_icmp`
 
 Пока не образуют самостоятельный server runtime-path:
@@ -172,6 +177,14 @@
 - серверный режим H2/H3 задаётся через transport listener, TLS ALPN и `streamSettings`;
 - сертификаты listener задаются через `streamSettings.tlsSettings.certificates`;
 - `settings.hosts[]` и `settings.transports[]` нельзя описывать как завершённый product-level механизм.
+
+### 4.2.1. Практическая семантика timeout-полей
+
+- `tlsHandshakeTimeoutSecs` теперь ограничивает и pre-handshake `client_random` extraction, и сам TLS handshake; silent TLS peer downstream-observable закрывается в пределах configured timeout.
+- `clientListenerTimeoutSecs` на H2 нужно трактовать как idle timeout до server-side GOAWAY; итоговый transport-close происходит примерно через секунду после GOAWAY из-за `http2` shutdown timer.
+- `connectionEstablishmentTimeoutSecs` закрывает зависший upstream establishment на CONNECT path; downstream marker на текущем lab retest — `Empty reply from server` примерно через configured timeout.
+- `tcpConnectionsTimeoutSecs` закрывает inactive TCP tunnel после configured idle interval и даёт downstream close примерно в тот же срок.
+- `udpConnectionsTimeoutSecs` проявляется не через TCP EOF, а через reopen semantics: новый UDP flow после idle timeout должен снова проходить в том же сценарии.
 
 ### 4.3. Правила по user stats
 

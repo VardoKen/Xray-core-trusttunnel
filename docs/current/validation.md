@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — подтверждённые проверки и границы тестирования
 
 Статус: current
-Дата фиксации: 2026-04-05
-Коммит состояния: `6fcb3a28`
+Дата фиксации: 2026-04-06
+Коммит состояния: `57d8d5e1`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -231,7 +231,6 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- observable server behavior вне уже закрытого `_icmp` surface: `tls_handshake_timeout_secs`, `client_listener_timeout_secs`, `connection_establishment_timeout_secs`, `tcp_connections_timeout_secs`, `udp_connections_timeout_secs`;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
 
 Локально подтверждённые regression-тесты на 2026-04-05:
@@ -262,6 +261,14 @@ Preflight:
 - H1 `_check` отвечает `200` без dispatch;
 - H1 `_udp2` больше не уходит в обычный dispatch и отвечает явной HTTP-ошибкой;
 - H1 `_icmp` больше не уходит в обычный dispatch и отвечает `501 Not Implemented`.
+
+Расширенный local regression sweep на 2026-04-06 / `57d8d5e1`:
+- `go test ./common/signal ./common/net ./common/mux ./common/singbridge ./transport/internet/tcp ./transport/internet/tls ./app/dispatcher ./app/proxyman/inbound ./app/proxyman/outbound ./transport/internet ./proxy/trusttunnel/...` проходит;
+- `go test ./proxy/freedom ./proxy/http ./proxy/socks ./proxy/trojan ./proxy/vmess/... ./proxy/vless/... ./proxy/shadowsocks ./proxy/hysteria ./proxy/wireguard ./transport/internet/udp ./app/reverse` проходит;
+- `GOFLAGS=-buildvcs=false go test -run '^$' ./...` проходит как compile-only sweep по всему дереву;
+- `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main` проходит;
+- `GOFLAGS=-buildvcs=false go test ./...` на Windows не показывает массового regress по дереву, но падает в `testing/scenarios` на KCP scenarios: `TestProxyOverKCP`, `TestTLSOverKCP`, `TestVMessKCP`, `TestVMessKCPLarge`;
+- быстрый A/B check в temporary worktree на pre-`common/signal` commit `1f70e1ac` воспроизводит `go test ./testing/scenarios -run '^TestProxyOverKCP$' -count=1` с тем же `read tcp ... i/o timeout`, поэтому этот KCP fail не является новым эффектом transport/tcp timeout-fix `57d8d5e1`.
 
 Linux package verification на Debian lab 2026-04-05 / `0fbc2ed5`:
 - repo HEAD: `0fbc2ed5d5ad701c4cb554c184144f56e2f22859`;
@@ -448,28 +455,29 @@ Pass markers:
 - our client → official endpoint H3 IPv4/IPv6 проходит: локальные probes на `127.0.0.1:5305` и `127.0.0.1:5307` дают `answers=2`;
 - previous H2 outbound interop breakage закрыта practically significant fix: UDP CONNECT authority выровнен с official protocol на `_udp2`, при этом server-side backward-compat на `_udp2:0` сохранён.
 
-### 2.18. Observable timeout surface вне `_icmp` остаётся частично подтверждённым
+### 2.18. Observable timeout surface подтверждён downstream-observable retest
 
-Подтверждено на 2026-04-05 / `7c92c5c5`:
+Подтверждено на 2026-04-06 / `57d8d5e1`:
 - worktree: clean;
 - binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
-- binary sha256: `debe8b2ec309aab0afca50607ca51fa7ce30bc7bf02656be4ed320ff7e05d132`;
+- binary sha256: `465ab69d760ce440e81431b9dfbb246bdba929e92a359befc59dbc86b59c7662`;
 - base config dir: `/opt/lab/xray-tt/configs/timeout-retest-20260405-210405`;
 - client config: `/opt/lab/xray-tt/src/xray-core-trusttunnel/testing/trusttunnel/our_client_to_our_server.json`;
 - udp client config: `/opt/lab/xray-tt/src/xray-core-trusttunnel/testing/trusttunnel/our_client_udp_to_our_server_h2.json`;
 - server cert fingerprint: `F1:22:FD:22:AF:B0:C9:2B:03:05:A9:55:9B:F7:5E:8F:80:43:00:B9:7C:22:34:EA:6B:34:F9:24:7A:AD:64:9C`;
-- log bundles: `/opt/lab/xray-tt/logs/timeout-retest-20260405-210405`, `/opt/lab/xray-tt/logs/timeout-retest-20260405-214512`.
+- log bundles: `/opt/lab/xray-tt/logs/timeout-observability-20260406-010625`, `/opt/lab/xray-tt/logs/timeout-listener-tls-20260406-010206`, `/opt/lab/xray-tt/logs/h2-client-listener-raw-20260406-010548`, плюс сохранённый UDP reopen bundle `/opt/lab/xray-tt/logs/timeout-retest-20260405-210405`.
 
 Подтверждено:
-- `udp_connections_timeout_secs` имеет downstream-observable reopen marker: `h2_udp_timeout_dig1.txt` и `h2_udp_timeout_dig2.txt` оба успешны, а `h2_udp_timeout_reopen_count.txt` содержит `2`;
-- `tls_handshake_timeout_secs` observable на probe `h2_tls_handshake_probe.txt` как `closed_after=timeout`;
-- `client_listener_timeout_secs` даёт частичный marker: `h2_client_listener_probe.txt` фиксирует `alpn=h2`, `initial_bytes=45`, `closed_after=9.01`;
-- `connection_establishment_timeout_secs` и `tcp_connections_timeout_secs` остаются неполностью подтверждёнными: probes `h2_connect_establish_probe.txt` и `h2_tcp_idle_probe.txt` завершаются curl-side timeout после ~10s без downstream bytes.
+- `udp_connections_timeout_secs` сохраняет downstream-observable reopen marker: `h2_udp_timeout_dig1.txt` и `h2_udp_timeout_dig2.txt` оба успешны, а `h2_udp_timeout_reopen_count.txt` содержит `2`;
+- `tls_handshake_timeout_secs = 3` downstream-observable на probe `h2-tls-handshake-probe.txt`: `first_read_bytes=0`, `closed_after=3.00`; server log показывает, что silent peer больше не зависает в pre-handshake `client_random` extraction path;
+- `client_listener_timeout_secs = 3` подтверждён общим probe `h2-client-listener-probe.txt`: `alpn=h2`, `initial_bytes=45`, `closed_after=4.00`; raw H2 trace `probe.txt` из bundle `/opt/lab/xray-tt/logs/h2-client-listener-raw-20260406-010548` дополнительно показывает GOAWAY frame `0000080700000000000000000000000000` через `tail_after=3.00`, а финальный transport-close наступает примерно через секунду;
+- `connection_establishment_timeout_secs = 4` downstream-observable на probe `h2-connect-establish-probe.txt`: `elapsed_ms=4064`, `returncode=52`, `Empty reply from server`; server log фиксирует `trusttunnel H2 CONNECT accepted` и последующий fail примерно через четыре секунды;
+- `tcp_connections_timeout_secs = 3` downstream-observable на probe `h2-tcp-idle-probe.txt`: `elapsed_ms=3026`, `returncode=52`, `Empty reply from server`; server log фиксирует `trusttunnel H2 CONNECT accepted for tcp:127.0.0.1:18080` в `01:06:41.504810` и close в `01:06:44.507383`.
 
 Вывод:
-- timeout block вне `_icmp` не закрыт;
-- practically significant закрытым на текущем состоянии можно считать только `udp_connections_timeout_secs`;
-- для остальных четырёх timeout fields нужен более чистый downstream-observable retest.
+- timeout block вне `_icmp` на текущем состоянии закрыт;
+- downstream-observable markers теперь есть для всех пяти timeout fields;
+- practically significant bug заключался в том, что pre-handshake ClientHello extraction раньше обходил `tls_handshake_timeout_secs`; он закрыт transport-fix на `57d8d5e1`.
 
 ### 2.19. Clean-HEAD auth и stats sanity-check
 

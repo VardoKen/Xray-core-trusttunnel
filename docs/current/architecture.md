@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — архитектура и runtime-path
 
 Статус: current
-Дата фиксации: 2026-04-05
-Коммит состояния: `6fcb3a28`
+Дата фиксации: 2026-04-06
+Коммит состояния: `57d8d5e1`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -265,7 +265,8 @@
 
 Использование:
 - `transport/internet/tcp/hub.go`
-- перед TLS server wrapping вызывается `wrapTrustTunnelClientRandomConn(conn)`.
+- перед TLS server wrapping вызывается `wrapTrustTunnelClientRandomConnWithTimeout(conn, tls_handshake_timeout_secs)`, чтобы pre-handshake ClientHello extraction не обходил configured TLS handshake timeout;
+- после этого уже выполняется TLS server wrapping и `trustTunnelServerHandshake(...)`.
 
 ### 6.2. H3 через QUIC Initial / TLS ClientHello
 
@@ -352,9 +353,25 @@
 - `app/stats/online_map.go` намеренно игнорирует `127.0.0.1` и `[::1]`, поэтому localhost-only lab probes не могут подтверждать `onlineMap` как ненулевой;
 - `api statsonlineiplist` возвращает IP/time map для `onlineMap`, а `api statsgetallonlineusers` возвращает полные onlineMap keys вида `user>>>u1>>>online`, а не bare usernames.
 
-## 10. Активные и декларативные поля
+## 10. Observable timeout runtime
 
-### 10.1. Реально активные
+Ключевые файлы:
+- `transport/internet/tcp/hub.go`
+- `transport/internet/tcp/trusttunnel_handshake.go`
+- `transport/internet/tcp/trusttunnel_listener_context.go`
+- `proxy/trusttunnel/server.go`
+- `proxy/trusttunnel/client.go`
+
+Подтверждённое состояние на clean-HEAD runtime-retest `57d8d5e1`:
+- `tlsHandshakeTimeoutSecs` распространяется не только на `tls.Server(...).HandshakeContext(...)`, но и на pre-handshake `client_random` extraction path; silent peer downstream-observable закрывается через `3.00s`;
+- `clientListenerTimeoutSecs` на H2 работает через preface/read deadline и `http2.Server.IdleTimeout`; downstream raw trace получает GOAWAY через `3.00s` idle, а transport-close примерно через секунду;
+- `connectionEstablishmentTimeoutSecs` downstream-observable на H2 CONNECT path и завершает зависший establishment примерно через configured deadline;
+- `tcpConnectionsTimeoutSecs` downstream-observable как close inactive TCP tunnel после configured idle interval;
+- `udpConnectionsTimeoutSecs` downstream-observable через reopen marker на H2/H3 UDP mux.
+
+## 11. Активные и декларативные поля
+
+### 11.1. Реально активные
 
 Client side:
 - `Hostname`
@@ -373,9 +390,14 @@ Server side:
 - `IcmpInterfaceName`
 - `IcmpRequestTimeoutSecs`
 - `IcmpRecvMessageQueueCapacity`
+- `TlsHandshakeTimeoutSecs`
+- `ClientListenerTimeoutSecs`
+- `ConnectionEstablishmentTimeoutSecs`
+- `TcpConnectionsTimeoutSecs`
+- `UdpConnectionsTimeoutSecs`
 - `Ipv6Available` для `_icmp`
 
-### 10.2. Пока декларативные
+### 11.2. Пока декларативные
 
 Client side:
 - `HasIpv6`
@@ -388,7 +410,7 @@ Server side:
 Следствие:
 - эти поля нельзя описывать как завершённый самостоятельный функциональный блок без отдельной доработки или подтверждения runtime-поведением.
 
-## 11. Практически важный interop по сертификатам
+## 12. Практически важный interop по сертификатам
 
 Для H2 interop с official TrustTunnel client нельзя ограничиваться фразой «сертификат проходит проверку».
 
@@ -401,7 +423,7 @@ Server side:
 Следствие:
 - H2 interop следует описывать вместе с certificate/trust-chain условием, а не как абстрактную transport-проверку.
 
-## 12. Диагностические сигнатуры, которые нельзя терять
+## 13. Диагностические сигнатуры, которые нельзя терять
 
 Ниже перечислены сигнатуры, которые должны оставаться в технической документации для будущей отладки регрессий.
 
@@ -433,7 +455,7 @@ Server side:
 Симптом:
 - import cycle с участием `transport/internet/udp`, `app/dispatcher`, `core`
 
-## 13. Граница применения документа
+## 14. Граница применения документа
 
 Этот документ отвечает на вопросы:
 - где проходит реальный runtime path;

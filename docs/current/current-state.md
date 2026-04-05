@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — текущее состояние проекта
 
 Статус: current
-Дата фиксации: 2026-04-05
-Коммит состояния: `6fcb3a28`
+Дата фиксации: 2026-04-06
+Коммит состояния: `57d8d5e1`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -25,6 +25,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - client-side/outbound `_icmp` packet contract поверх `transport.Link` для H2/H3 echo-request и representable reply path;
 - server-side `_icmp` config surface wired к runtime через `allowPrivateNetworkConnections`, `icmp.interfaceName`, `icmp.requestTimeoutSecs`, `icmp.recvMessageQueueCapacity` и observable `ipv6Available`;
 - representable `_icmp` error-type parity подтверждена для echo-reply, destination-unreachable и time-exceeded; extra MTU/pointer fields остаются ограничением fixed-size reply frame;
+- server-side observable timeout surface подтверждён downstream-observable runtime-retest для `tlsHandshakeTimeoutSecs`, `clientListenerTimeoutSecs`, `connectionEstablishmentTimeoutSecs`, `tcpConnectionsTimeoutSecs` и `udpConnectionsTimeoutSecs`;
 - core network model распознаёт `icmp` в `common/net`, config parsing и routing/API semantics;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
 - server-side inbound/outbound/user traffic counters и `onlineMap` sanity-check;
@@ -127,6 +128,15 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - our client → official endpoint на H2 и H3 проходит для IPv4 и IPv6 targets через runtime ports `5304/5305/5306/5307`, а прежний H2 outbound fail `trusttunnel CONNECT failed with status 502` больше не воспроизводится;
 - practically significant interop-fix: outbound UDP CONNECT теперь использует official authority `_udp2`, при этом server-side matcher сохраняет backward-compat и принимает как `_udp2`, так и legacy `_udp2:0`.
 
+### 2.11. Observable timeout surface
+
+Подтверждено clean-HEAD runtime-retest на 2026-04-06 / `57d8d5e1`:
+- `tls_handshake_timeout_secs = 3` теперь реально обрывает silent TLS peer на downstream probe `first_read_bytes=0`, `closed_after=3.00`; прошлый gap был закрыт transport-fix, который распространил timeout и на pre-handshake ClientHello extraction path;
+- `client_listener_timeout_secs = 3` на H2 подтверждён двумя downstream markers: общий probe даёт `alpn=h2`, `initial_bytes=45`, `closed_after=4.00`, а raw H2 trace показывает GOAWAY frame ровно через `3.00s` idle и финальное закрытие transport примерно через секунду;
+- `connection_establishment_timeout_secs = 4` даёт downstream `Empty reply from server` с `elapsed_ms=4064`, а server log завершает CONNECT примерно через четыре секунды после `trusttunnel H2 CONNECT accepted`;
+- `tcp_connections_timeout_secs = 3` даёт downstream `Empty reply from server` с `elapsed_ms=3026`, а server log фиксирует close примерно через `3.00s` после `trusttunnel H2 CONNECT accepted`;
+- `udp_connections_timeout_secs` остаётся подтверждённым через reopen marker: два последовательных UDP probe после `udpConnectionsTimeoutSecs = 1` проходят в одном и том же сценарии, а reopen-count остаётся `2`.
+
 ## 3. Что считается текущей истиной
 
 Текущую истину по проекту определяют:
@@ -141,7 +151,6 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- observable server behavior вне уже подтверждённого `_icmp` surface: bundle `/opt/lab/xray-tt/logs/timeout-retest-20260405-210405` и `/opt/lab/xray-tt/logs/timeout-retest-20260405-214512` пока дают downstream-observable подтверждение только для `udp_connections_timeout_secs`; `tls_handshake_timeout_secs`, `client_listener_timeout_secs`, `connection_establishment_timeout_secs` и `tcp_connections_timeout_secs` остаются частично подтверждёнными;
 - REALITY;
 - нормализация TrustTunnel вокруг `streamSettings` и общей модели Xray.
 
