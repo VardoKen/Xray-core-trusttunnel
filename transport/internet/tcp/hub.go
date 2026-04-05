@@ -188,7 +188,7 @@ func (v *Listener) keepAccepting() {
 
 		go func() {
 			if v.tlsConfig != nil {
-				conn = wrapTrustTunnelClientRandomConn(conn)
+				conn = wrapTrustTunnelClientRandomConnWithTimeout(conn, v.trustTunnelTimeouts.TLSHandshakeTimeout)
 				conn = tls.Server(conn, v.tlsConfig)
 				if handshakeTimeout := v.trustTunnelTimeouts.TLSHandshakeTimeout; handshakeTimeout > 0 {
 					if err := trustTunnelServerHandshake(conn, handshakeTimeout); err != nil {

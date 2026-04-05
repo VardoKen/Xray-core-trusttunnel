@@ -3,6 +3,7 @@ package tcp
 import (
 	"context"
 	"io"
+	"net"
 	gonet "net"
 	"testing"
 	"time"
@@ -72,5 +73,28 @@ func TestTrustTunnelServerHandshakeSetsAndClearsDeadline(t *testing.T) {
 	}
 	if conn.timeoutSeen < 2*time.Second || conn.timeoutSeen > 4*time.Second {
 		t.Fatalf("handshake context timeout = %v, want around 3s", conn.timeoutSeen)
+	}
+}
+
+func TestWrapTrustTunnelClientRandomConnWithTimeoutSilentPeer(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		defer close(done)
+		_ = wrapTrustTunnelClientRandomConnWithTimeout(serverConn, 100*time.Millisecond)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("wrapTrustTunnelClientRandomConnWithTimeout() did not return")
+	}
+
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("wrapTrustTunnelClientRandomConnWithTimeout() took too long: %v", elapsed)
 	}
 }

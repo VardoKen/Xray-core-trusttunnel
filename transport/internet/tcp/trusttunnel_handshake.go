@@ -37,6 +37,27 @@ func trustTunnelServerHandshake(conn gonet.Conn, timeout time.Duration) error {
 	return handshakeConn.HandshakeContext(handshakeCtx)
 }
 
+func wrapTrustTunnelClientRandomConnWithTimeout(conn gonet.Conn, timeout time.Duration) gonet.Conn {
+	if timeout <= 0 {
+		return wrapTrustTunnelClientRandomConn(conn)
+	}
+
+	abortTimer := time.AfterFunc(timeout, func() {
+		_ = forceCloseTrustTunnelConn(conn)
+	})
+	defer abortTimer.Stop()
+
+	deadlineSet := false
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err == nil {
+		deadlineSet = true
+	}
+	if deadlineSet {
+		defer conn.SetDeadline(time.Time{})
+	}
+
+	return wrapTrustTunnelClientRandomConn(conn)
+}
+
 func forceCloseTrustTunnelConn(conn gonet.Conn) error {
 	if conn == nil {
 		return nil
