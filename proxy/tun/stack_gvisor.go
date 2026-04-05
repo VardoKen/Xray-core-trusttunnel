@@ -14,6 +14,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
+	gicmp "gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 	"gvisor.dev/gvisor/pkg/waiter"
@@ -118,6 +119,20 @@ func (t *stackGVisor) Start() error {
 		return udpForwarder.HandlePacket(src, dst, data)
 	})
 
+	icmpForwarder := newICMPConnectionHandler(t.handler.HandleConnection, t.writeRawICMPPacket)
+	icmpHandler := func(id stack.TransportEndpointID, pkt *stack.PacketBuffer) bool {
+		wire := extractRawICMPPacket(pkt)
+		if len(wire) == 0 {
+			return false
+		}
+
+		src := net.ICMPDestination(net.IPAddress(id.RemoteAddress.AsSlice()))
+		dst := net.ICMPDestination(net.IPAddress(id.LocalAddress.AsSlice()))
+		return icmpForwarder.HandlePacket(src, dst, wire)
+	}
+	ipStack.SetTransportProtocolHandler(gicmp.ProtocolNumber4, icmpHandler)
+	ipStack.SetTransportProtocolHandler(gicmp.ProtocolNumber6, icmpHandler)
+
 	t.stack = ipStack
 	t.endpoint = linkEndpoint
 
@@ -205,7 +220,7 @@ func (t *stackGVisor) Close() error {
 func createStack(ep stack.LinkEndpoint) (*stack.Stack, error) {
 	opts := stack.Options{
 		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
-		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol},
+		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol, gicmp.NewProtocol4, gicmp.NewProtocol6},
 		HandleLocal:        false,
 	}
 	gStack := stack.New(opts)
