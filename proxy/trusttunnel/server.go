@@ -188,6 +188,10 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 	}
 
 	negotiatedProto := trustTunnelNegotiatedProtocol(conn)
+	var h2PrefaceAbortTimer *time.Timer
+	if strings.EqualFold(negotiatedProto, "h2") {
+		h2PrefaceAbortTimer = startTrustTunnelConnAbortTimer(conn, s.config.clientListenerTimeout())
+	}
 
 	if err := conn.SetReadDeadline(time.Now().Add(s.config.clientListenerTimeout())); err != nil {
 		errors.LogInfoInner(ctx, err, "failed to set read deadline")
@@ -197,6 +201,9 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 
 	preface, err := reader.Peek(len(h2ClientPreface))
 	if err == nil && bytes.Equal(preface, []byte(h2ClientPreface)) {
+		if h2PrefaceAbortTimer != nil {
+			h2PrefaceAbortTimer.Stop()
+		}
 		if _, err := reader.Discard(len(h2ClientPreface)); err != nil {
 			return errors.New("failed to discard http2 preface").Base(err).AtWarning()
 		}
@@ -207,6 +214,9 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 	}
 
 	if strings.EqualFold(negotiatedProto, "h2") {
+		if h2PrefaceAbortTimer != nil {
+			h2PrefaceAbortTimer.Stop()
+		}
 		if err == nil {
 			return errors.New("invalid trusttunnel http2 client preface").AtWarning()
 		}
@@ -219,6 +229,9 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 	}
 
 	if err != nil {
+		if h2PrefaceAbortTimer != nil {
+			h2PrefaceAbortTimer.Stop()
+		}
 		trace := errors.New("failed to read trusttunnel request").Base(err)
 		if errors.Cause(err) != io.EOF && !isTimeout(errors.Cause(err)) {
 			trace = trace.AtWarning()
@@ -245,6 +258,15 @@ func trustTunnelNegotiatedProtocol(conn stat.Connection) string {
 	return ""
 }
 
+func startTrustTunnelConnAbortTimer(conn stat.Connection, timeout time.Duration) *time.Timer {
+	if conn == nil || timeout <= 0 {
+		return nil
+	}
+	return time.AfterFunc(timeout, func() {
+		_ = common.Close(conn)
+	})
+}
+
 func (s *Server) processHTTP3(ctx context.Context, h3conn tcptransport.HTTP3RequestConn, conn stat.Connection, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) error {
 	req := &http.Request{
 		Method:     h3conn.H3Method(),
@@ -258,7 +280,7 @@ func (s *Server) processHTTP3(ctx context.Context, h3conn tcptransport.HTTP3Requ
 		writer: conn,
 	}
 
-	s.serveHTTPConnectRequest("H3", ctx, rw, req.WithContext(ctx), dispatcher, inboundTemplate, h3conn.H3ClientRandom())
+	s.serveHTTPConnectRequest("H3", ctx, rw, req.WithContext(ctx), dispatcher, inboundTemplate, h3conn.H3ClientRandom(), nil)
 	return nil
 }
 
@@ -426,7 +448,7 @@ func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatche
 	done := make(chan struct{})
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		s.serveHTTP2Request(w, req, dispatcher, inboundTemplate, clientRandom)
+		s.serveHTTP2Request(conn, w, req, dispatcher, inboundTemplate, clientRandom)
 	})
 
 	go func() {
@@ -445,12 +467,12 @@ func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatche
 	return nil
 }
 
-func (s *Server) serveHTTP2Request(w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) {
-	s.serveHTTPConnectRequest("H2", req.Context(), w, req, dispatcher, inboundTemplate, clientRandom)
+func (s *Server) serveHTTP2Request(conn stat.Connection, w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) {
+	s.serveHTTPConnectRequest("H2", req.Context(), w, req, dispatcher, inboundTemplate, clientRandom, conn)
 }
 
 func (s *Server) ServeHTTP3(ctx context.Context, w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) {
-	s.serveHTTPConnectRequest("H3", ctx, w, req.WithContext(ctx), dispatcher, inboundTemplate, "")
+	s.serveHTTPConnectRequest("H3", ctx, w, req.WithContext(ctx), dispatcher, inboundTemplate, "", nil)
 }
 
 func isTrustTunnelHealthcheckHost(host string) bool {
@@ -565,7 +587,7 @@ func hasTrustTunnelClientRandomRules(rules []*Rule) bool {
 	return false
 }
 
-func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) {
+func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w http.ResponseWriter, req *http.Request, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string, cleanupConn stat.Connection) {
 	if !strings.EqualFold(req.Method, http.MethodConnect) {
 		writeH2Response(w, http.StatusMethodNotAllowed, "trusttunnel supports CONNECT only\n", nil)
 		return
@@ -682,6 +704,7 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 	if err := s.dispatchConnectSession(ctx, dispatcher, dest, buf.NewReader(req.Body), buf.NewWriter(writer), req.Body); err != nil {
 		errors.LogWarningInner(ctx, err, "failed to dispatch trusttunnel "+strings.ToLower(proto)+" CONNECT")
 		if proto == "H2" {
+			_ = common.Close(cleanupConn)
 			panic(http.ErrAbortHandler)
 		}
 	}

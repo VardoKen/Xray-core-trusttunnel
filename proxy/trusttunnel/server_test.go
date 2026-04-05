@@ -167,7 +167,7 @@ func TestServeHTTP2ConnectAuthFailureUsesConfiguredStatus(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	req := newTestConnectRequest("example.com:443", "")
 
-	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
 
 	if recorder.Code != http.StatusProxyAuthRequired {
 		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusProxyAuthRequired)
@@ -186,7 +186,7 @@ func TestServeHTTP2CheckReturnsOKWithoutDispatch(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	req := newTestConnectRequest("_check:443", buildBasicAuthValue("u1", "p1"))
 
-	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusOK)
@@ -223,7 +223,7 @@ func TestServeHTTP2ConnectDispatchFailureAbortsHandlerAndClosesRequestBody(t *te
 		}
 	}()
 
-	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
 }
 
 func TestTrustTunnelNegotiatedProtocolUnwrapsStatsConn(t *testing.T) {
@@ -250,7 +250,7 @@ func TestServeHTTP2CheckAuthFailureUsesConfiguredStatus(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	req := newTestConnectRequest("_check:443", "")
 
-	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
 
 	if recorder.Code != http.StatusProxyAuthRequired {
 		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusProxyAuthRequired)
@@ -272,7 +272,7 @@ func TestServeHTTP2UDPAuthFailureUsesConfiguredStatus(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	req := newTestConnectRequest("_udp2:0", "")
 
-	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
 
 	if recorder.Code != http.StatusProxyAuthRequired {
 		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusProxyAuthRequired)
@@ -293,7 +293,7 @@ func TestServeHTTP2ICMPAuthFailureUsesConfiguredStatus(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	req := newTestConnectRequest("_icmp:0", "")
 
-	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
 
 	if recorder.Code != http.StatusProxyAuthRequired {
 		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusProxyAuthRequired)
@@ -312,7 +312,7 @@ func TestServeHTTP2ICMPUnavailableReturnsServiceUnavailableWithoutDispatch(t *te
 	recorder := httptest.NewRecorder()
 	req := newTestConnectRequest("_icmp:0", buildBasicAuthValue("u1", "p1"))
 
-	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
 
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusServiceUnavailable)
@@ -370,7 +370,7 @@ func TestServeHTTP2ICMPReturnsReplyFrameWithoutDispatch(t *testing.T) {
 	req := newTestConnectRequest("_icmp:0", buildBasicAuthValue("u1", "p1"))
 	req.Body = io.NopCloser(bytes.NewReader(reqBody))
 
-	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusOK)
@@ -402,7 +402,7 @@ func TestServeHTTP2CheckRuleDenyBlocksBeforeHealthcheck(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	req := newTestConnectRequest("_check:443", buildBasicAuthValue("u1", "p1"))
 
-	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
 
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusForbidden)
