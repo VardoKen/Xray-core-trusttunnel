@@ -15,7 +15,9 @@ func TestTrustTunnelICMPSessionEchoV4Loopback(t *testing.T) {
 		t.Skip("root privileges required for raw ICMP")
 	}
 
-	session, err := newTrustTunnelICMPSession(false)
+	session, err := newTrustTunnelICMPSession(trustTunnelICMPSessionOptions{
+		allowPrivateNetworkConnections: true,
+	})
 	if err != nil {
 		t.Fatalf("failed to create ICMP session: %v", err)
 	}
