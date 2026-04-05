@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `81dfc323`
+Коммит состояния: `0fbc2ed5`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -176,7 +176,7 @@
 Ограничения текущего состояния:
 - client-side contract пока покрывает только echo-request/echo-reply semantics, а не полный ICMP error-type parity;
 - validated product path пока относится к Linux TUN deployment с внешним OS-managed routing; host-namespace схема вида `ip addr add 192.0.2.10/32 dev xraytunh2` + `ip route add 1.1.1.1/32 dev xraytunh2` воспроизводит request storm и считается unsafe wiring pattern;
-- явной config surface для ICMP timeout/interface/private-network semantics пока нет.
+- server-side config surface для ICMP timeout/interface/private-network semantics пока закрыта только частично: wired `allowPrivateNetworkConnections`, `icmp.interfaceName` и `icmp.requestTimeoutSecs`, но аналога official `recv_message_queue_capacity` пока нет.
 
 ## 5. Карта серверного path
 
@@ -225,6 +225,8 @@
 - входящий stream разбирается как последовательность fixed-size request frames:
   `id(2) + destination(16) + sequence(2) + ttl/hop_limit(1) + data_size(2)`;
 - сервер создаёт echo-request в raw ICMP socket и ждёт reply в пределах фиксированного timeout;
+- `settings.allowPrivateNetworkConnections`, `settings.icmp.interfaceName` и `settings.icmp.requestTimeoutSecs` уже подключены к server-side `_icmp` runtime;
+- по текущей реализации private-network destinations по умолчанию режутся до raw-send path, `icmp.interfaceName` задаёт `IfIndex` для raw ICMP socket, а `icmp.requestTimeoutSecs` переопределяет timeout ожидания reply;
 - исходящий stream пишет fixed-size reply frames:
   `id(2) + source(16) + type(1) + code(1) + sequence(2)`;
 - attachment `trusttunnel.client_random` перед special-path dispatch клонирует `session.Content`, чтобы параллельные H2/H3 streams не делили один mutable `Attributes` map;
@@ -232,9 +234,9 @@
 
 Ограничения текущего состояния:
 - H1 `_icmp` остаётся не transport path и отвечает `501 Not Implemented`;
-- TrustTunnel config model пока не имеет отдельных ICMP settings;
-- `ipv6Available` пока влияет только на попытку открыть IPv6 raw socket, а не образует полноценный product-level ICMP config surface;
-- clean-HEAD H2/H3 retest подтверждает product-level `_icmp` source path через `proxy/tun` на Linux с OS-managed routing, но не закрывает error-type parity и config surface для timeouts/interface/private-network semantics.
+- TrustTunnel config model пока покрывает только часть ICMP settings: есть `allowPrivateNetworkConnections`, `icmp.interfaceName` и `icmp.requestTimeoutSecs`, но нет аналога official `recv_message_queue_capacity`;
+- `ipv6Available` пока влияет только на попытку открыть IPv6 raw socket и ещё не образует полный product-level ICMP surface;
+- clean-HEAD H2/H3 retest подтверждает product-level `_icmp` source path через `proxy/tun` на Linux с OS-managed routing, но не закрывает error-type parity и не содержит отдельного lab-retest для timeout/interface/private-network settings.
 
 ### 5.4. H3 path
 

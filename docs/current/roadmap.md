@@ -24,7 +24,8 @@
 Server-side H2/H3 `_icmp` mux по official wire-format уже реализован на `32b2eff2`, включая raw ICMP echo-reply path и `503` при недоступном raw socket. Clean-HEAD official client ↔ our server H2/H3 interop подтверждён на `5a21fd31` и `6c46922c`. Clean-HEAD product-level source path через `proxy/tun` на Linux подтверждён на `96a9d053` при OS-managed routing через выделенный network namespace.
 
 Открытым остаётся:
-- explicit config surface для ICMP timeout/interface/private-network semantics;
+- завершение `_icmp` config surface: уже wired `settings.allowPrivateNetworkConnections`, `settings.icmp.interfaceName`, `settings.icmp.requestTimeoutSecs`, но отсутствует аналог official `recv_message_queue_capacity`;
+- отдельный lab/runtime-retest для timeout/interface/private-network semantics;
 - error-type parity сверх подтверждённого echo-reply path.
 
 ### 2.2. Observable server behavior

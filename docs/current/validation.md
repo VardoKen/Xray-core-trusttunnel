@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `81dfc323`
+Коммит состояния: `0fbc2ed5`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -229,34 +229,40 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- explicit config surface для ICMP timeout/interface/private-network semantics;
+- завершение `_icmp` config surface: сейчас локально wired `settings.allowPrivateNetworkConnections`, `settings.icmp.interfaceName` и `settings.icmp.requestTimeoutSecs`, но нет аналога official `recv_message_queue_capacity`;
 - error-type parity для `_icmp` сверх подтверждённого echo-request/echo-reply path;
 - полный UDP interop matrix;
-- observable server behavior для `ipv6_available`, private-network и timeout settings;
+- отдельный lab/runtime-retest для `ipv6_available`, private-network и timeout settings;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
 
 Локально подтверждённые regression-тесты на 2026-04-05:
 - `go test ./common/net` проходит, включая `Network_ICMP` string/destination coverage;
 - `go test ./infra/conf -run 'TestNetwork(BuildSupportsICMP|ListBuildSupportsICMP)$'` проходит;
+- `go test ./infra/conf -run '^TestTrustTunnelServerConfigBuildSupportsICMPSettings$'` проходит;
 - `go test ./app/router -run '^$'` проходит как compile-only sanity-check для routing layer после добавления `Network_ICMP`;
 - `TestClientProcessRejectsIncompleteICMPLink` подтверждает, что новый `_icmp` path не пытается работать с неполным `transport.Link`;
 - `TestTrustTunnelICMPRequestFromBufferUsesFallbackDestination` подтверждает разбор raw echo-request с fallback destination;
 - `TestTrustTunnelICMPRequestFromBufferRejectsNonEchoRequest` подтверждает, что client-side contract пока ограничен echo-request path;
 - `TestRunTrustTunnelICMPTunnelEchoRoundTrip` подтверждает, что outbound `_icmp` path кодирует fixed-size request frame и локально восстанавливает raw echo-reply packet по сохранённому payload;
+- `TestBuildTrustTunnelICMPSessionOptionsDefaults` и `TestBuildTrustTunnelICMPSessionOptionsUsesConfiguredValues` подтверждают binding `allowPrivateNetworkConnections`, `icmp.interfaceName`, `icmp.requestTimeoutSecs`;
+- `TestOpenICMPSessionUsesConfiguredOptions` подтверждает, что `Server.openICMPSession()` прокидывает эти значения в session factory;
+- `TestTrustTunnelValidateICMPDestination` и `TestTrustTunnelICMPSessionRejectsPrivateDestinationWhenDisabled` подтверждают global-only policy по умолчанию и reject private destinations до raw-send path;
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
 - `GOFLAGS=-buildvcs=false go test -run '^$' ./...` проходит как compile-only sweep по дереву после добавления outbound `_icmp` path;
+- `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main` проходит;
 - `TestAttachTrustTunnelClientRandomClonesSharedContent` защищает H2/H3 parallel streams от shared `session.Content.Attributes`;
 - обычный H2 CONNECT auth-fail возвращает `407` и `Proxy-Authenticate`;
 - H2 `_udp2` auth-fail возвращает `407` до UDP mux;
 - H2 `_icmp` auth-fail возвращает `407`;
 - H2 `_icmp` при недоступной ICMP session отвечает `503 Service Unavailable`;
 - H2 `_icmp` при доступной fake-session возвращает `200` и reply-frame без dispatch;
+- `settings.allowPrivateNetworkConnections = false` режет private/loopback/link-local destinations до raw ICMP path;
 - H1 `_check` отвечает `200` без dispatch;
 - H1 `_udp2` больше не уходит в обычный dispatch и отвечает явной HTTP-ошибкой;
 - H1 `_icmp` больше не уходит в обычный dispatch и отвечает `501 Not Implemented`.
 
-Linux package verification на Debian lab 2026-04-05 / `81dfc323`:
-- repo HEAD: `81dfc3238ebe1ff342dc2330d5b276a501e740ef`;
+Linux package verification на Debian lab 2026-04-05 / `0fbc2ed5`:
+- repo HEAD: `0fbc2ed5d5ad701c4cb554c184144f56e2f22859`;
 - worktree: clean;
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
 - `go build -buildvcs=false -o /opt/lab/xray-tt/tmp/xray-tt-current ./main` проходит.

@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `81dfc323`
+Коммит состояния: `0fbc2ed5`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -223,15 +223,18 @@
 
 ### 5.3.2. `icmp` в core config/routing layer
 
-Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f` и `81dfc323`:
+Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f`, `81dfc323` и `0fbc2ed5`:
 - `common/net` содержит `Network_ICMP` и строковую форму `icmp`;
 - `common/net.ParseDestination(...)` принимает `icmp:1.2.3.4` и `icmp:[2001:4860:4860::8888]`;
 - `infra/conf.Network` и `NetworkList` принимают `icmp` в JSON-конфигах;
 - routing/API/webhook layer видит `icmp` как отдельное network-значение.
 - TrustTunnel outbound для такого target больше не возвращает ранний reject: H2/H3 path открывает `_icmp:0`, кодирует fixed-size request frames и локально восстанавливает echo-reply packet из reply-frame и сохранённого payload.
 - Практически подтверждённый client-side contract пока покрывает только echo-request/echo-reply semantics.
+- server-side JSON config теперь частично подаёт `_icmp` runtime-settings: `allowPrivateNetworkConnections`, `icmp.interfaceName`, `icmp.requestTimeoutSecs`;
+- по текущей реализации `allowPrivateNetworkConnections = false` ограничивает `_icmp` global-unicast destination-адресами, `icmp.interfaceName` задаёт raw-socket `IfIndex`, а `icmp.requestTimeoutSecs` переопределяет timeout ожидания reply;
 - На Linux это уже образует рабочий Xray product path через `proxy/tun`, если TUN interface управляется ОС с явной адресацией и routing. Подтверждённый clean-HEAD шаблон: выделенный namespace `tunxrayh2` / `tunxrayh3`, адрес `192.0.2.10/32` на `xraytunh*` и маршрут `1.1.1.1/32 dev xraytunh*`.
 - Host-namespace схема вида `ip addr add 192.0.2.10/32 dev xraytunh2` + `ip route add 1.1.1.1/32 dev xraytunh2` считается unsafe wiring pattern: в диагностическом retest она воспроизвела ICMP request storm без egress.
+- Полной parity по official ICMP settings пока нет: `recv_message_queue_capacity` в config model и runtime отсутствует.
 
 ## 6. UDP path
 
@@ -253,7 +256,7 @@
 - `hasIpv6` / `ipv6Available` как активную готовую функцию;
 - server runtime host/cert selection через `settings.hosts[]`;
 - server runtime routing H2/H3 только через `settings.transports[]` без корректных `streamSettings`;
-- `_icmp` как полностью закрытый path за пределами Linux echo-request/echo-reply и без OS-managed TUN routing assumptions;
+- `_icmp` как полностью закрытый path за пределами Linux echo-request/echo-reply, без OS-managed TUN routing assumptions и без полного official config surface;
 - доменные UDP targets.
 
 ## 8. Как использовать старые документы
