@@ -17,6 +17,10 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
+type outboundPacketInjector interface {
+	InjectOutbound(dest tcpip.Address, packet *buffer.View) tcpip.Error
+}
+
 type icmpFlowKey struct {
 	src net.Destination
 	dst net.Destination
@@ -245,6 +249,17 @@ func (t *stackGVisor) writeRawICMPPacket(payload []byte, src net.Destination, ds
 	wire, ipProto, err := buildRawICMPNetworkPacket(payload, src, dst)
 	if err != nil {
 		return err
+	}
+
+	if injector, ok := t.endpoint.(outboundPacketInjector); ok {
+		view := buffer.NewViewWithData(wire)
+		defer view.Release()
+
+		if err := injector.InjectOutbound(tcpip.AddrFromSlice(dst.Address.IP()), view); err != nil {
+			return errors.New("failed to inject raw icmp packet to link endpoint", err)
+		}
+		errors.LogDebug(t.ctx, "proxy/tun: injected icmp reply src=", src, " dst=", dst, " bytes=", len(wire))
+		return nil
 	}
 
 	if err := t.stack.WriteRawPacket(defaultNIC, ipProto, buffer.MakeWithData(wire)); err != nil {

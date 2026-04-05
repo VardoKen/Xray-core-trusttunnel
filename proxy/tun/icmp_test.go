@@ -11,6 +11,7 @@ import (
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 	"gvisor.dev/gvisor/pkg/buffer"
+	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
@@ -240,6 +241,38 @@ func TestExtractRawICMPPacket(t *testing.T) {
 	}
 }
 
+func TestWriteRawICMPPacketUsesLinkEndpointInjection(t *testing.T) {
+	endpoint := &capturingInjectableEndpoint{}
+	stack := &stackGVisor{endpoint: endpoint}
+
+	src := xnet.ICMPDestination(xnet.ParseAddress("1.1.1.1"))
+	dst := xnet.ICMPDestination(xnet.ParseAddress("192.0.2.10"))
+	payload := mustMarshalICMPMessage(t, &icmp.Message{
+		Type: ipv4.ICMPTypeEchoReply,
+		Code: 0,
+		Body: &icmp.Echo{
+			ID:   0x1234,
+			Seq:  7,
+			Data: []byte("pong4"),
+		},
+	})
+
+	if err := stack.writeRawICMPPacket(payload, src, dst); err != nil {
+		t.Fatalf("writeRawICMPPacket() failed: %v", err)
+	}
+
+	wire, _, err := buildRawICMPNetworkPacket(payload, src, dst)
+	if err != nil {
+		t.Fatalf("buildRawICMPNetworkPacket() failed: %v", err)
+	}
+	if got := endpoint.dest.AsSlice(); string(got) != string(dst.Address.IP()) {
+		t.Fatalf("InjectOutbound dest = %v, want %v", got, dst.Address.IP())
+	}
+	if got := endpoint.packet; string(got) != string(wire) {
+		t.Fatalf("InjectOutbound packet = %v, want %v", got, wire)
+	}
+}
+
 func mustReceiveCreatedFlow(t *testing.T, ch <-chan createdFlow) createdFlow {
 	t.Helper()
 
@@ -265,6 +298,49 @@ func assertNoCreatedFlow(t *testing.T, ch <-chan createdFlow) {
 type createdFlow struct {
 	conn *icmpConn
 	dst  xnet.Destination
+}
+
+type capturingInjectableEndpoint struct {
+	dest   tcpip.Address
+	packet []byte
+}
+
+func (*capturingInjectableEndpoint) MTU() uint32 { return 0 }
+
+func (*capturingInjectableEndpoint) SetMTU(uint32) {}
+
+func (*capturingInjectableEndpoint) MaxHeaderLength() uint16 { return 0 }
+
+func (*capturingInjectableEndpoint) LinkAddress() tcpip.LinkAddress { return "" }
+
+func (*capturingInjectableEndpoint) SetLinkAddress(tcpip.LinkAddress) {}
+
+func (*capturingInjectableEndpoint) Capabilities() stack.LinkEndpointCapabilities { return 0 }
+
+func (*capturingInjectableEndpoint) Attach(stack.NetworkDispatcher) {}
+
+func (*capturingInjectableEndpoint) IsAttached() bool { return true }
+
+func (*capturingInjectableEndpoint) Wait() {}
+
+func (*capturingInjectableEndpoint) ARPHardwareType() header.ARPHardwareType { return header.ARPHardwareNone }
+
+func (*capturingInjectableEndpoint) AddHeader(*stack.PacketBuffer) {}
+
+func (*capturingInjectableEndpoint) ParseHeader(*stack.PacketBuffer) bool { return true }
+
+func (*capturingInjectableEndpoint) Close() {}
+
+func (*capturingInjectableEndpoint) SetOnCloseAction(func()) {}
+
+func (*capturingInjectableEndpoint) WritePackets(stack.PacketBufferList) (int, tcpip.Error) {
+	return 0, nil
+}
+
+func (e *capturingInjectableEndpoint) InjectOutbound(dest tcpip.Address, packet *buffer.View) tcpip.Error {
+	e.dest = dest
+	e.packet = append([]byte(nil), packet.AsSlice()...)
+	return nil
 }
 
 func mustMarshalICMPMessage(t *testing.T, msg *icmp.Message) []byte {
