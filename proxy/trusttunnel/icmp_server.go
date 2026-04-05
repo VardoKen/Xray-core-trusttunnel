@@ -115,6 +115,8 @@ func (s *Server) serveICMPMuxRequest(proto string, ctx context.Context, w http.R
 				go func() {
 					defer workers.Done()
 
+					errors.LogDebug(ctx, "trusttunnel ", proto, " icmp request id=", pkt.ID, " dst=", pkt.Destination.String(), " seq=", pkt.Sequence, " size=", pkt.DataSize)
+
 					reply, ok, handleErr := session.HandleRequest(ctx, pkt)
 					if handleErr != nil {
 						errors.LogWarningInner(ctx, handleErr, "failed to handle trusttunnel icmp request")
@@ -129,6 +131,8 @@ func (s *Server) serveICMPMuxRequest(proto string, ctx context.Context, w http.R
 						errors.LogWarningInner(ctx, err, "failed to encode trusttunnel icmp reply")
 						return
 					}
+
+					errors.LogDebug(ctx, "trusttunnel ", proto, " icmp reply id=", reply.ID, " src=", reply.Source.String(), " type=", reply.Type, " code=", reply.Code, " seq=", reply.Sequence)
 
 					writeMu.Lock()
 					_, err = writer.Write(wire)
@@ -196,6 +200,7 @@ func (s *trustTunnelICMPSession) HandleRequest(ctx context.Context, pkt trustTun
 		if _, err := s.v4pc.WriteTo(wire, &ipv4.ControlMessage{TTL: int(ttl)}, &stdnet.IPAddr{IP: dst}); err != nil {
 			return zero, false, err
 		}
+		errors.LogDebug(ctx, "trusttunnel icmp raw send v4 dst=", dst.String(), " id=", pkt.ID, " seq=", pkt.Sequence)
 	} else {
 		if s.v6pc == nil {
 			return zero, false, stdnet.InvalidAddrError("IPv6 ICMP is unavailable")
@@ -216,6 +221,7 @@ func (s *trustTunnelICMPSession) HandleRequest(ctx context.Context, pkt trustTun
 		if _, err := s.v6pc.WriteTo(wire, &ipv6.ControlMessage{HopLimit: int(ttl)}, &stdnet.IPAddr{IP: dst}); err != nil {
 			return zero, false, err
 		}
+		errors.LogDebug(ctx, "trusttunnel icmp raw send v6 dst=", dst.String(), " id=", pkt.ID, " seq=", pkt.Sequence)
 	}
 
 	timer := time.NewTimer(s.timeout)
@@ -225,6 +231,7 @@ func (s *trustTunnelICMPSession) HandleRequest(ctx context.Context, pkt trustTun
 	case <-ctx.Done():
 		return zero, false, ctx.Err()
 	case <-timer.C:
+		errors.LogDebug(ctx, "trusttunnel icmp request timed out dst=", dst.String(), " id=", pkt.ID, " seq=", pkt.Sequence)
 		return zero, false, nil
 	case reply := <-ch:
 		return reply, true, nil
@@ -316,6 +323,7 @@ func (s *trustTunnelICMPSession) readLoop(conn *icmp.PacketConn, proto int, v6 b
 			Code:     uint8(msg.Code),
 			Sequence: uint16(echo.Seq),
 		}
+		errors.LogDebug(context.Background(), "trusttunnel icmp raw reply src=", reply.Source.String(), " id=", reply.ID, " seq=", reply.Sequence, " type=", reply.Type, " code=", reply.Code)
 
 		key := trustTunnelICMPWaitKey{
 			peer: reply.Source.String(),
