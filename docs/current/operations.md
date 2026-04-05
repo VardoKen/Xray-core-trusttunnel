@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `32b2eff2`
+Коммит состояния: `81dfc323`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -223,12 +223,14 @@
 
 ### 5.3.2. `icmp` в core config/routing layer
 
-Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f` и `6ee33de3`:
+Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f` и `81dfc323`:
 - `common/net` содержит `Network_ICMP` и строковую форму `icmp`;
 - `common/net.ParseDestination(...)` принимает `icmp:1.2.3.4` и `icmp:[2001:4860:4860::8888]`;
 - `infra/conf.Network` и `NetworkList` принимают `icmp` в JSON-конфигах;
 - routing/API/webhook layer видит `icmp` как отдельное network-значение.
-- TrustTunnel outbound для такого target пока возвращает явную ошибку `trusttunnel client-side icmp packet contract is not implemented`.
+- TrustTunnel outbound для такого target больше не возвращает ранний reject: H2/H3 path открывает `_icmp:0`, кодирует fixed-size request frames и локально восстанавливает echo-reply packet из reply-frame и сохранённого payload.
+- Практически подтверждённый client-side contract пока покрывает только echo-request/echo-reply semantics.
+- Это всё ещё не равняется полноценному Xray product path: `proxy/tun/README.md` по-прежнему фиксирует `No ICMP support`, а gVisor stack в `proxy/tun/stack_gvisor.go` поднимает только TCP/UDP.
 
 ## 6. UDP path
 

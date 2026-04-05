@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `6ee33de3`
+Коммит состояния: `81dfc323`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -20,6 +20,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - H2 `_check` special path с корректными `200` / `407` / `403`;
 - server-side H2/H3 `_icmp` mux по official wire-format с raw ICMP echo-reply path;
 - official client → our server H2/H3 `_icmp` interop через TUN-mode и raw ICMP echo-reply;
+- client-side/outbound `_icmp` packet contract поверх `transport.Link` для H2/H3 echo-request/echo-reply path;
 - core network model распознаёт `icmp` в `common/net`, config parsing и routing/API semantics;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
 - server-side traffic stats;
@@ -99,12 +100,13 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 
 ### 2.9. `Network_ICMP` в core model
 
-Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f` и `6ee33de3`:
+Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f` и `81dfc323`:
 - `common/net.Network` теперь содержит отдельный `Network_ICMP`;
 - `common/net.ParseDestination(...)` и `DestinationFromAddr(...)` распознают `icmp:` и `net.IPAddr`;
 - `infra/conf.Network` / `NetworkList` принимают `icmp`;
 - routing/API/webhook layer получает `icmp` через общий `SystemString()` и `net.Network` plumbing.
-- TrustTunnel outbound сейчас не пытается молча увести `Network_ICMP` в обычный CONNECT path, а возвращает явную ошибку до появления packet contract.
+- TrustTunnel outbound больше не пытается молча увести `Network_ICMP` в обычный CONNECT path: он открывает `_icmp:0`, кодирует fixed-size request frames и локально восстанавливает echo-reply packet по сохранённому payload.
+- Этот outbound path пока покрывает только echo-request/echo-reply semantics и ещё не образует полный Xray product path, потому что `proxy/tun` по-прежнему фиксирует `No ICMP support`.
 
 ## 3. Что считается текущей истиной
 
@@ -120,7 +122,7 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- outbound/client-side `_icmp` packet contract и снятие временного explicit reject guard для `Network_ICMP` после server-side mux реализации;
+- product-level source path для outbound/client-side `_icmp`: TrustTunnel packet contract уже есть, но `proxy/tun` по-прежнему не даёт ICMP source traffic;
 - привязка `ipv6_available`, private-network policy и timeout settings к реальному runtime;
 - полный UDP interop matrix;
 - REALITY;

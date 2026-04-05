@@ -24,7 +24,7 @@
 Server-side H2/H3 `_icmp` mux по official wire-format уже реализован на `32b2eff2`, включая raw ICMP echo-reply path и `503` при недоступном raw socket. Clean-HEAD official client ↔ our server H2/H3 interop подтверждён на `5a21fd31` и `6c46922c`.
 
 Открытым остаётся:
-- client-side/outbound `_icmp` packet contract поверх `transport.Link`, хотя в `common/net` уже есть отдельный `Network_ICMP` на `1810939f`, а TrustTunnel outbound на `6ee33de3` уже имеет explicit reject guard;
+- product-level source path для outbound/client-side `_icmp`: concrete TrustTunnel packet contract поверх `transport.Link` уже есть, но `proxy/tun` всё ещё не даёт ICMP source traffic и продолжает документировать `No ICMP support`;
 - explicit config surface для ICMP timeout/interface/private-network semantics;
 - error-type parity сверх подтверждённого echo-reply path.
 
@@ -143,7 +143,7 @@ REALITY должен внедряться через общий Xray `streamSett
 
 ## 5. Порядок выполнения
 
-1. `_icmp` interop и Xray-side model
+1. product-level `_icmp` source path и остаточная Xray-side интеграция
 2. observable server behavior
 3. полный UDP interop matrix
 4. auth/stats sanity-check

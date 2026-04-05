@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `32b2eff2`
+Коммит состояния: `81dfc323`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -121,6 +121,7 @@
 - H3 CONNECT через `apernet/quic-go/http3.Transport`
 - ручная TLS verify semantics в `verifyTrustTunnelTLS()`
 - UDP CONNECT на `_udp2:0`
+- ICMP CONNECT на `_icmp:0` для H2 и H3
 
 ### 4.3. Поля outbound, реально участвующие в runtime
 
@@ -154,6 +155,25 @@
 Подтверждено clean-HEAD runtime-retest на `fc276340`:
 - H2 и H3 allow-case с `clientRandom = "deadbeef"` проходят server-side rules;
 - H2 и H3 deny-case с несовпадающим `clientRandom` получают `403`.
+
+### 4.5. Outbound `_icmp` runtime-path
+
+Файлы:
+- `proxy/trusttunnel/client.go`
+- `proxy/trusttunnel/icmp_client.go`
+- `proxy/trusttunnel/icmp_codec.go`
+
+Реализовано:
+- `common/net.Network_ICMP` на outbound стороне переводит `Client.Process(...)` в отдельный `_icmp:0` path вместо обычного CONNECT target;
+- request-side contract читает raw ICMP echo-request packet из `transport.Link`, извлекает `id`, `sequence`, `destination`, `ttl/hop_limit` и `data_size`, после чего пишет fixed-size TrustTunnel request frame;
+- response-side contract читает fixed-size TrustTunnel reply frame и локально восстанавливает raw ICMP echo-reply packet по сохранённому исходному payload;
+- path работает для H2 и H3 и использует те же transport-specific CONNECT routines, что и TCP/UDP path.
+
+Ограничения текущего состояния:
+- client-side contract пока покрывает только echo-request/echo-reply semantics, а не полный ICMP error-type parity;
+- `proxy/tun/README.md` по-прежнему фиксирует `No ICMP support`;
+- `proxy/tun/stack_gvisor.go` регистрирует только `tcp` и `udp` transport protocols, без ICMP protocol handler;
+- поэтому concrete packet contract внутри TrustTunnel уже есть, но product-level Xray source path для `Network_ICMP` ещё не закрыт.
 
 ## 5. Карта серверного path
 
@@ -211,7 +231,7 @@
 - H1 `_icmp` остаётся не transport path и отвечает `501 Not Implemented`;
 - TrustTunnel config model пока не имеет отдельных ICMP settings;
 - `ipv6Available` пока влияет только на попытку открыть IPv6 raw socket, а не образует полноценный product-level ICMP config surface;
-- `common/net.Network_ICMP` уже существует как core primitive для config/routing/API semantics, но client-side TrustTunnel `_icmp` path вне server-side mux пока не интегрирован в concrete packet contract поверх `transport.Link`; на `6ee33de3` outbound client поэтому явно отклоняет такие targets вместо падения в обычный CONNECT path.
+- client-side TrustTunnel `_icmp` contract уже существует, но не превращает `_icmp` в полный Xray product path, пока `proxy/tun` остаётся без ICMP support и transport-level ICMP source traffic.
 
 ### 5.4. H3 path
 

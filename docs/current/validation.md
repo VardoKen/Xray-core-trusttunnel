@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `6ee33de3`
+Коммит состояния: `81dfc323`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -229,7 +229,7 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- client-side/outbound `_icmp` packet contract после появления `Network_ICMP` в core model;
+- product-level outbound `_icmp` path после появления client-side packet contract: сейчас concrete TrustTunnel contract уже есть, но `proxy/tun` всё ещё не даёт ICMP source traffic;
 - полный UDP interop matrix;
 - observable server behavior для `ipv6_available`, private-network и timeout settings;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
@@ -238,8 +238,12 @@ Preflight:
 - `go test ./common/net` проходит, включая `Network_ICMP` string/destination coverage;
 - `go test ./infra/conf -run 'TestNetwork(BuildSupportsICMP|ListBuildSupportsICMP)$'` проходит;
 - `go test ./app/router -run '^$'` проходит как compile-only sanity-check для routing layer после добавления `Network_ICMP`;
-- `TestClientProcessRejectsICMPTargetWithoutPacketContract` подтверждает, что TrustTunnel outbound явно отклоняет `Network_ICMP` до появления packet contract;
+- `TestClientProcessRejectsIncompleteICMPLink` подтверждает, что новый `_icmp` path не пытается работать с неполным `transport.Link`;
+- `TestTrustTunnelICMPRequestFromBufferUsesFallbackDestination` подтверждает разбор raw echo-request с fallback destination;
+- `TestTrustTunnelICMPRequestFromBufferRejectsNonEchoRequest` подтверждает, что client-side contract пока ограничен echo-request path;
+- `TestRunTrustTunnelICMPTunnelEchoRoundTrip` подтверждает, что outbound `_icmp` path кодирует fixed-size request frame и локально восстанавливает raw echo-reply packet по сохранённому payload;
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
+- `GOFLAGS=-buildvcs=false go test -run '^$' ./...` проходит как compile-only sweep по дереву после добавления outbound `_icmp` path;
 - `TestAttachTrustTunnelClientRandomClonesSharedContent` защищает H2/H3 parallel streams от shared `session.Content.Attributes`;
 - обычный H2 CONNECT auth-fail возвращает `407` и `Proxy-Authenticate`;
 - H2 `_udp2` auth-fail возвращает `407` до UDP mux;
@@ -249,6 +253,12 @@ Preflight:
 - H1 `_check` отвечает `200` без dispatch;
 - H1 `_udp2` больше не уходит в обычный dispatch и отвечает явной HTTP-ошибкой;
 - H1 `_icmp` больше не уходит в обычный dispatch и отвечает `501 Not Implemented`.
+
+Linux package verification на Debian lab 2026-04-05 / `81dfc323`:
+- repo HEAD: `81dfc3238ebe1ff342dc2330d5b276a501e740ef`;
+- worktree: clean;
+- `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
+- `go build -buildvcs=false -o /opt/lab/xray-tt/tmp/xray-tt-current ./main` проходит.
 
 Linux root verification на Debian lab 2026-04-05 / `32b2eff2`:
 - repo HEAD: `32b2eff2527e9da632c980823d8435166f38d75f`;
