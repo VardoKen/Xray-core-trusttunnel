@@ -100,7 +100,7 @@ func (c *icmpConn) Read(p []byte) (int, error) {
 
 func (c *icmpConn) Write(p []byte) (int, error) {
 	if err := c.handler.writePacket(p, c.dst, c.src); err != nil {
-		return len(p), nil
+		return 0, err
 	}
 	return len(p), nil
 }
