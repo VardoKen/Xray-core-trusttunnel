@@ -55,4 +55,5 @@ message ServerConfig {
   string icmp_interface_name = 8;
   uint32 icmp_request_timeout_secs = 9;
   bool allow_private_network_connections = 10;
+  uint32 icmp_recv_message_queue_capacity = 11;
 }

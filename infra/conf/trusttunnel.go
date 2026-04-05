@@ -151,8 +151,9 @@ type TrustTunnelRuleConfig struct {
 }
 
 type TrustTunnelICMPConfig struct {
-	InterfaceName      string `json:"interfaceName"`
-	RequestTimeoutSecs uint32 `json:"requestTimeoutSecs"`
+	InterfaceName            string `json:"interfaceName"`
+	RequestTimeoutSecs       uint32 `json:"requestTimeoutSecs"`
+	RecvMessageQueueCapacity uint32 `json:"recvMessageQueueCapacity"`
 }
 
 type TrustTunnelServerConfig struct {
@@ -182,6 +183,7 @@ func (c *TrustTunnelServerConfig) Build() (proto.Message, error) {
 	if c.ICMP != nil {
 		config.IcmpInterfaceName = c.ICMP.InterfaceName
 		config.IcmpRequestTimeoutSecs = c.ICMP.RequestTimeoutSecs
+		config.IcmpRecvMessageQueueCapacity = c.ICMP.RecvMessageQueueCapacity
 	}
 
 	for _, u := range c.Users {

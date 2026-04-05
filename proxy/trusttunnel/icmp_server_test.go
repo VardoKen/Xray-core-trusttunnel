@@ -1,8 +1,10 @@
 package trusttunnel
 
 import (
+	"bytes"
 	"context"
 	"net"
+	"net/http"
 	"testing"
 	"time"
 
@@ -25,6 +27,9 @@ func TestBuildTrustTunnelICMPSessionOptionsDefaults(t *testing.T) {
 	if options.requestTimeout != trustTunnelICMPRequestTimeout {
 		t.Fatalf("requestTimeout = %v, want %v", options.requestTimeout, trustTunnelICMPRequestTimeout)
 	}
+	if options.recvMessageQueueCapacity != trustTunnelICMPDefaultRecvMessageQueueCapacity {
+		t.Fatalf("recvMessageQueueCapacity = %d, want %d", options.recvMessageQueueCapacity, trustTunnelICMPDefaultRecvMessageQueueCapacity)
+	}
 }
 
 func TestBuildTrustTunnelICMPSessionOptionsUsesConfiguredValues(t *testing.T) {
@@ -32,6 +37,7 @@ func TestBuildTrustTunnelICMPSessionOptionsUsesConfiguredValues(t *testing.T) {
 		Ipv6Available:                  true,
 		IcmpInterfaceName:              "eth-test0",
 		IcmpRequestTimeoutSecs:         9,
+		IcmpRecvMessageQueueCapacity:   7,
 		AllowPrivateNetworkConnections: true,
 	})
 
@@ -47,6 +53,9 @@ func TestBuildTrustTunnelICMPSessionOptionsUsesConfiguredValues(t *testing.T) {
 	if options.requestTimeout != 9*time.Second {
 		t.Fatalf("requestTimeout = %v, want %v", options.requestTimeout, 9*time.Second)
 	}
+	if options.recvMessageQueueCapacity != 7 {
+		t.Fatalf("recvMessageQueueCapacity = %d, want 7", options.recvMessageQueueCapacity)
+	}
 }
 
 func TestOpenICMPSessionUsesConfiguredOptions(t *testing.T) {
@@ -54,6 +63,7 @@ func TestOpenICMPSessionUsesConfiguredOptions(t *testing.T) {
 		Ipv6Available:                  true,
 		IcmpInterfaceName:              "eth-test1",
 		IcmpRequestTimeoutSecs:         11,
+		IcmpRecvMessageQueueCapacity:   5,
 		AllowPrivateNetworkConnections: true,
 	})
 
@@ -80,6 +90,9 @@ func TestOpenICMPSessionUsesConfiguredOptions(t *testing.T) {
 	}
 	if got.requestTimeout != 11*time.Second {
 		t.Fatalf("requestTimeout = %v, want %v", got.requestTimeout, 11*time.Second)
+	}
+	if got.recvMessageQueueCapacity != 5 {
+		t.Fatalf("recvMessageQueueCapacity = %d, want 5", got.recvMessageQueueCapacity)
 	}
 }
 
@@ -178,5 +191,120 @@ func TestTrustTunnelICMPReplyFromMessageMatchesDestinationUnreachable(t *testing
 func TestTrustTunnelQuotedICMPEchoRequestRejectsInvalidPayload(t *testing.T) {
 	if _, _, _, ok := trustTunnelQuotedICMPEchoRequest([]byte{1, 2, 3}, false); ok {
 		t.Fatal("trustTunnelQuotedICMPEchoRequest() = true, want false")
+	}
+}
+
+type blockingTrustTunnelICMPReplyWriter struct {
+	header     http.Header
+	statusCode int
+	buf        bytes.Buffer
+	writeStart chan struct{}
+	release    chan struct{}
+}
+
+func newBlockingTrustTunnelICMPReplyWriter() *blockingTrustTunnelICMPReplyWriter {
+	return &blockingTrustTunnelICMPReplyWriter{
+		header:     make(http.Header),
+		writeStart: make(chan struct{}, 1),
+		release:    make(chan struct{}),
+	}
+}
+
+func (w *blockingTrustTunnelICMPReplyWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *blockingTrustTunnelICMPReplyWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+}
+
+func (w *blockingTrustTunnelICMPReplyWriter) Write(p []byte) (int, error) {
+	select {
+	case w.writeStart <- struct{}{}:
+	default:
+	}
+	<-w.release
+	if w.statusCode == 0 {
+		w.statusCode = http.StatusOK
+	}
+	return w.buf.Write(p)
+}
+
+func (w *blockingTrustTunnelICMPReplyWriter) Flush() {}
+
+type fastFakeTrustTunnelICMPSession struct{}
+
+func (*fastFakeTrustTunnelICMPSession) HandleRequest(_ context.Context, pkt trustTunnelICMPRequestPacket) (trustTunnelICMPReplyPacket, bool, error) {
+	return trustTunnelICMPReplyPacket{
+		ID:       pkt.ID,
+		Source:   net.IPv4(127, 0, 0, 1),
+		Type:     uint8(ipv4.ICMPTypeEchoReply),
+		Code:     0,
+		Sequence: pkt.Sequence,
+	}, true, nil
+}
+
+func (*fastFakeTrustTunnelICMPSession) Close() error {
+	return nil
+}
+
+func TestTrustTunnelICMPReplyQueueDropsOnOverflow(t *testing.T) {
+	replyQueue := make(chan trustTunnelICMPReplyPacket, 1)
+	writer := newBlockingTrustTunnelICMPReplyWriter()
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		trustTunnelWriteICMPReplyQueue(context.Background(), "H2", writer, replyQueue)
+	}()
+
+	replyQueue <- trustTunnelICMPReplyPacket{
+		ID:       1,
+		Source:   net.IPv4(127, 0, 0, 1),
+		Type:     uint8(ipv4.ICMPTypeEchoReply),
+		Code:     0,
+		Sequence: 1,
+	}
+
+	select {
+	case <-writer.writeStart:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer did not start first write")
+	}
+
+	replyQueue <- trustTunnelICMPReplyPacket{
+		ID:       2,
+		Source:   net.IPv4(127, 0, 0, 1),
+		Type:     uint8(ipv4.ICMPTypeEchoReply),
+		Code:     0,
+		Sequence: 2,
+	}
+
+	if trustTunnelEnqueueICMPReply(replyQueue, trustTunnelICMPReplyPacket{
+		ID:       3,
+		Source:   net.IPv4(127, 0, 0, 1),
+		Type:     uint8(ipv4.ICMPTypeEchoReply),
+		Code:     0,
+		Sequence: 3,
+	}) {
+		t.Fatal("trustTunnelEnqueueICMPReply() = true, want false on full queue")
+	}
+
+	close(writer.release)
+	close(replyQueue)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer did not finish")
+	}
+
+	var decoder trustTunnelICMPReplyDecoder
+	packets, err := decoder.Feed(writer.buf.Bytes())
+	if err != nil {
+		t.Fatalf("failed to decode written replies: %v", err)
+	}
+	if len(packets) != 2 {
+		t.Fatalf("written reply count = %d, want 2", len(packets))
 	}
 }

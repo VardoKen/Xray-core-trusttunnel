@@ -17,12 +17,14 @@ import (
 )
 
 const trustTunnelICMPRequestTimeout = 3 * time.Second
+const trustTunnelICMPDefaultRecvMessageQueueCapacity = 256
 
 type trustTunnelICMPSessionOptions struct {
 	ipv6Available                  bool
 	interfaceName                  string
 	requestTimeout                 time.Duration
 	allowPrivateNetworkConnections bool
+	recvMessageQueueCapacity       int
 }
 
 type trustTunnelICMPHandler interface {
@@ -60,9 +62,13 @@ func buildTrustTunnelICMPSessionOptions(config *ServerConfig) trustTunnelICMPSes
 		interfaceName:                  config.GetIcmpInterfaceName(),
 		allowPrivateNetworkConnections: config.GetAllowPrivateNetworkConnections(),
 		requestTimeout:                 trustTunnelICMPRequestTimeout,
+		recvMessageQueueCapacity:       trustTunnelICMPDefaultRecvMessageQueueCapacity,
 	}
 	if secs := config.GetIcmpRequestTimeoutSecs(); secs > 0 {
 		options.requestTimeout = time.Duration(secs) * time.Second
+	}
+	if capacity := config.GetIcmpRecvMessageQueueCapacity(); capacity > 0 {
+		options.recvMessageQueueCapacity = int(capacity)
 	}
 	return options
 }
@@ -107,7 +113,10 @@ func newTrustTunnelICMPSession(options trustTunnelICMPSessionOptions) (trustTunn
 }
 
 func (s *Server) openICMPSession() (trustTunnelICMPHandler, error) {
-	options := buildTrustTunnelICMPSessionOptions(s.config)
+	return s.openICMPSessionWithOptions(buildTrustTunnelICMPSessionOptions(s.config))
+}
+
+func (s *Server) openICMPSessionWithOptions(options trustTunnelICMPSessionOptions) (trustTunnelICMPHandler, error) {
 	if s.newICMPSession != nil {
 		return s.newICMPSession(options)
 	}
@@ -115,7 +124,8 @@ func (s *Server) openICMPSession() (trustTunnelICMPHandler, error) {
 }
 
 func (s *Server) serveICMPMuxRequest(proto string, ctx context.Context, w http.ResponseWriter, req *http.Request) {
-	session, err := s.openICMPSession()
+	options := buildTrustTunnelICMPSessionOptions(s.config)
+	session, err := s.openICMPSessionWithOptions(options)
 	if err != nil {
 		writeH2Response(w, http.StatusServiceUnavailable, "icmp is unavailable\n", nil)
 		errors.LogWarningInner(ctx, err, "trusttunnel "+proto+" ICMP unavailable")
@@ -134,9 +144,14 @@ func (s *Server) serveICMPMuxRequest(proto string, ctx context.Context, w http.R
 		flusher = f
 	}
 	writer := &flushWriter{w: w, f: flusher}
+	replyQueue := make(chan trustTunnelICMPReplyPacket, options.recvMessageQueueCapacity)
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		trustTunnelWriteICMPReplyQueue(ctx, proto, writer, replyQueue)
+	}()
 
 	var decoder trustTunnelICMPRequestDecoder
-	var writeMu sync.Mutex
 	var workers sync.WaitGroup
 	tmp := make([]byte, 64*1024)
 
@@ -166,19 +181,10 @@ func (s *Server) serveICMPMuxRequest(proto string, ctx context.Context, w http.R
 						return
 					}
 
-					wire, err := encodeTrustTunnelICMPReply(reply)
-					if err != nil {
-						errors.LogWarningInner(ctx, err, "failed to encode trusttunnel icmp reply")
-						return
-					}
-
 					errors.LogDebug(ctx, "trusttunnel ", proto, " icmp reply id=", reply.ID, " src=", reply.Source.String(), " type=", reply.Type, " code=", reply.Code, " seq=", reply.Sequence)
 
-					writeMu.Lock()
-					_, err = writer.Write(wire)
-					writeMu.Unlock()
-					if err != nil {
-						errors.LogWarningInner(ctx, err, "failed to write trusttunnel icmp reply")
+					if !trustTunnelEnqueueICMPReply(replyQueue, reply) {
+						errors.LogWarning(ctx, "trusttunnel ", proto, " ICMP reply queue is full; dropping id=", reply.ID, " src=", reply.Source.String(), " type=", reply.Type, " code=", reply.Code, " seq=", reply.Sequence)
 					}
 				}()
 			}
@@ -193,6 +199,30 @@ func (s *Server) serveICMPMuxRequest(proto string, ctx context.Context, w http.R
 	}
 
 	workers.Wait()
+	close(replyQueue)
+	<-writerDone
+}
+
+func trustTunnelEnqueueICMPReply(replyQueue chan<- trustTunnelICMPReplyPacket, reply trustTunnelICMPReplyPacket) bool {
+	select {
+	case replyQueue <- reply:
+		return true
+	default:
+		return false
+	}
+}
+
+func trustTunnelWriteICMPReplyQueue(ctx context.Context, proto string, writer io.Writer, replyQueue <-chan trustTunnelICMPReplyPacket) {
+	for reply := range replyQueue {
+		wire, err := encodeTrustTunnelICMPReply(reply)
+		if err != nil {
+			errors.LogWarningInner(ctx, err, "failed to encode trusttunnel icmp reply")
+			continue
+		}
+		if _, err := writer.Write(wire); err != nil {
+			errors.LogWarningInner(ctx, err, "failed to write trusttunnel icmp reply")
+		}
+	}
 }
 
 func (s *trustTunnelICMPSession) HandleRequest(ctx context.Context, pkt trustTunnelICMPRequestPacket) (trustTunnelICMPReplyPacket, bool, error) {

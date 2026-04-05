@@ -18,8 +18,9 @@ func TestTrustTunnelServerConfigBuildSupportsICMPSettings(t *testing.T) {
 		IPv6Available:                  true,
 		AuthFailureStatusCode:          407,
 		ICMP: &TrustTunnelICMPConfig{
-			InterfaceName:      "eth0",
-			RequestTimeoutSecs: 9,
+			InterfaceName:            "eth0",
+			RequestTimeoutSecs:       9,
+			RecvMessageQueueCapacity: 17,
 		},
 	}).Build()
 	if err != nil {
@@ -38,5 +39,8 @@ func TestTrustTunnelServerConfigBuildSupportsICMPSettings(t *testing.T) {
 	}
 	if built.GetIcmpRequestTimeoutSecs() != 9 {
 		t.Fatalf("icmpRequestTimeoutSecs = %d, want 9", built.GetIcmpRequestTimeoutSecs())
+	}
+	if built.GetIcmpRecvMessageQueueCapacity() != 17 {
+		t.Fatalf("icmpRecvMessageQueueCapacity = %d, want 17", built.GetIcmpRecvMessageQueueCapacity())
 	}
 }
