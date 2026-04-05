@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xtls/xray-core/common/buf"
 	xnet "github.com/xtls/xray-core/common/net"
@@ -116,5 +117,41 @@ func TestRunTrustTunnelStreamTunnelRoundTrip(t *testing.T) {
 	}
 	if got := gotResponse.Bytes(); !bytes.Equal(got, responsePayload) {
 		t.Fatalf("response payload = %q, want %q", string(got), string(responsePayload))
+	}
+}
+
+func TestRunTrustTunnelStreamTunnelStopsWhenResponseSideCloses(t *testing.T) {
+	reqReader, _ := pipe.New()
+	respReader, respWriter := pipe.New()
+	link := &transport.Link{
+		Reader: reqReader,
+		Writer: respWriter,
+	}
+
+	tunnelConn := newFakeTrustTunnelStreamConn(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runTrustTunnelStreamTunnel() error = %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("runTrustTunnelStreamTunnel() did not return after clean response-side EOF")
+	}
+
+	mb, err := respReader.ReadMultiBuffer()
+	buf.ReleaseMulti(mb)
+	if err != io.EOF {
+		t.Fatalf("respReader.ReadMultiBuffer() error = %v, want EOF", err)
+	}
+	if !tunnelConn.closed {
+		t.Fatal("tunnelConn.Close() was not called")
 	}
 }

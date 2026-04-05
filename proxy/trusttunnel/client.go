@@ -150,6 +150,7 @@ func (h *http2Conn) Close() error {
 func runTrustTunnelStreamTunnel(ctx context.Context, link *transport.Link, tunnelConn io.ReadWriteCloser) error {
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	responseClosed := make(chan struct{})
 
 	abortTunnel := func() {
 		cancel()
@@ -159,11 +160,30 @@ func runTrustTunnelStreamTunnel(ctx context.Context, link *transport.Link, tunne
 	}
 
 	requestDone := func() error {
-		return buf.Copy(link.Reader, buf.NewWriter(tunnelConn))
+		err := buf.Copy(link.Reader, buf.NewWriter(tunnelConn))
+		if err == nil {
+			return nil
+		}
+
+		select {
+		case <-responseClosed:
+			// The remote side has already closed cleanly, so any local interruption
+			// used to tear down the opposite direction is expected.
+			return nil
+		default:
+		}
+
+		return err
 	}
 
 	responseDone := func() error {
-		return buf.Copy(buf.NewReader(tunnelConn), link.Writer)
+		err := buf.Copy(buf.NewReader(tunnelConn), link.Writer)
+		if err == nil {
+			close(responseClosed)
+			common.Interrupt(link.Reader)
+			_ = tunnelConn.Close()
+		}
+		return err
 	}
 
 	responseDonePost := task.OnSuccess(responseDone, task.Close(link.Writer))
