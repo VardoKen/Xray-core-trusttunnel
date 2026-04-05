@@ -223,11 +223,12 @@
 
 ### 5.3.2. `icmp` в core config/routing layer
 
-Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f`:
+Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f` и `6ee33de3`:
 - `common/net` содержит `Network_ICMP` и строковую форму `icmp`;
 - `common/net.ParseDestination(...)` принимает `icmp:1.2.3.4` и `icmp:[2001:4860:4860::8888]`;
 - `infra/conf.Network` и `NetworkList` принимают `icmp` в JSON-конфигах;
 - routing/API/webhook layer видит `icmp` как отдельное network-значение.
+- TrustTunnel outbound для такого target пока возвращает явную ошибку `trusttunnel client-side icmp packet contract is not implemented`.
 
 ## 6. UDP path
 

@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `1810939f`
+Коммит состояния: `6ee33de3`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -99,11 +99,12 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 
 ### 2.9. `Network_ICMP` в core model
 
-Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f`:
+Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f` и `6ee33de3`:
 - `common/net.Network` теперь содержит отдельный `Network_ICMP`;
 - `common/net.ParseDestination(...)` и `DestinationFromAddr(...)` распознают `icmp:` и `net.IPAddr`;
 - `infra/conf.Network` / `NetworkList` принимают `icmp`;
 - routing/API/webhook layer получает `icmp` через общий `SystemString()` и `net.Network` plumbing.
+- TrustTunnel outbound сейчас не пытается молча увести `Network_ICMP` в обычный CONNECT path, а возвращает явную ошибку до появления packet contract.
 
 ## 3. Что считается текущей истиной
 
@@ -119,7 +120,7 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- outbound/client-side `_icmp` packet contract и полная runtime-интеграция `Network_ICMP` после server-side mux реализации;
+- outbound/client-side `_icmp` packet contract и снятие временного explicit reject guard для `Network_ICMP` после server-side mux реализации;
 - привязка `ipv6_available`, private-network policy и timeout settings к реальному runtime;
 - полный UDP interop matrix;
 - REALITY;

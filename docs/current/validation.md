@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `1810939f`
+Коммит состояния: `6ee33de3`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -238,6 +238,7 @@ Preflight:
 - `go test ./common/net` проходит, включая `Network_ICMP` string/destination coverage;
 - `go test ./infra/conf -run 'TestNetwork(BuildSupportsICMP|ListBuildSupportsICMP)$'` проходит;
 - `go test ./app/router -run '^$'` проходит как compile-only sanity-check для routing layer после добавления `Network_ICMP`;
+- `TestClientProcessRejectsICMPTargetWithoutPacketContract` подтверждает, что TrustTunnel outbound явно отклоняет `Network_ICMP` до появления packet contract;
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
 - `TestAttachTrustTunnelClientRandomClonesSharedContent` защищает H2/H3 parallel streams от shared `session.Content.Attributes`;
 - обычный H2 CONNECT auth-fail возвращает `407` и `Proxy-Authenticate`;
