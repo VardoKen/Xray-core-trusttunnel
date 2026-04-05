@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `0fbc2ed5`
+Коммит состояния: `b1c14eb3`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -18,10 +18,11 @@ TrustTunnel в текущем дереве подтверждённо наход
 - H3 rules по `client_random`;
 - outbound `clientRandom` как реальная runtime-функция для H2 и H3;
 - H2 `_check` special path с корректными `200` / `407` / `403`;
-- server-side H2/H3 `_icmp` mux по official wire-format с raw ICMP echo-reply path;
+- server-side H2/H3 `_icmp` mux по official wire-format с representable raw ICMP reply path;
 - official client → our server H2/H3 `_icmp` interop через TUN-mode и raw ICMP echo-reply;
-- client-side/outbound `_icmp` packet contract поверх `transport.Link` для H2/H3 echo-request/echo-reply path;
-- server-side `_icmp` config surface частично подключена к runtime через `allowPrivateNetworkConnections`, `icmp.interfaceName` и `icmp.requestTimeoutSecs`;
+- client-side/outbound `_icmp` packet contract поверх `transport.Link` для H2/H3 echo-request и representable reply path;
+- server-side `_icmp` config surface wired к runtime через `allowPrivateNetworkConnections`, `icmp.interfaceName`, `icmp.requestTimeoutSecs`, `icmp.recvMessageQueueCapacity` и observable `ipv6Available`;
+- representable `_icmp` error-type parity подтверждена для echo-reply, destination-unreachable и time-exceeded; extra MTU/pointer fields остаются ограничением fixed-size reply frame;
 - core network model распознаёт `icmp` в `common/net`, config parsing и routing/API semantics;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
 - server-side traffic stats;
@@ -101,15 +102,19 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 
 ### 2.9. `Network_ICMP` в core model
 
-Подтверждено локальными test/build-проверками на 2026-04-05 / `1810939f`, `81dfc323` и `0fbc2ed5`:
+Подтверждено локальными test/build-проверками и lab runtime-retest на 2026-04-05 / `b1c14eb3`:
 - `common/net.Network` теперь содержит отдельный `Network_ICMP`;
 - `common/net.ParseDestination(...)` и `DestinationFromAddr(...)` распознают `icmp:` и `net.IPAddr`;
 - `infra/conf.Network` / `NetworkList` принимают `icmp`;
 - routing/API/webhook layer получает `icmp` через общий `SystemString()` и `net.Network` plumbing.
 - TrustTunnel outbound больше не пытается молча увести `Network_ICMP` в обычный CONNECT path: он открывает `_icmp:0`, кодирует fixed-size request frames и локально восстанавливает echo-reply packet по сохранённому payload.
-- server-side config model частично подключает `_icmp` runtime-surface: `allowPrivateNetworkConnections` по умолчанию ограничивает назначения глобальными адресами, `icmp.interfaceName` задаёт raw-socket `IfIndex`, а `icmp.requestTimeoutSecs` переопределяет timeout ожидания reply;
+- server-side config model подключает `_icmp` runtime-surface: `allowPrivateNetworkConnections` по умолчанию ограничивает назначения глобальными адресами, `icmp.interfaceName` задаёт raw-socket `IfIndex`, `icmp.requestTimeoutSecs` переопределяет timeout ожидания reply, а `icmp.recvMessageQueueCapacity` задаёт bounded per-stream reply queue с official-style default `256` и drop-on-overflow semantics;
 - H2 lab runtime-retest против `192.168.1.19` подтверждает, что `allowPrivateNetworkConnections = false` режет private target до raw-send path, а `true` возвращает `1/1 received`; отдельный retest с `icmp.interfaceName = "definitely-missing-if0"` даёт `trusttunnel H2 ICMP unavailable > route ip+net: no such network interface`;
-- Этот outbound path пока покрывает только echo-request/echo-reply semantics, но на Linux уже образует рабочий Xray product path через `proxy/tun`, если TUN interface управляется ОС с явной адресацией и routing. Clean-HEAD H2/H3 retest на 2026-04-05 / `96a9d053` подтверждён через выделенные namespace `tunxrayh2` / `tunxrayh3`, адрес `192.0.2.10/32` и маршрут `1.1.1.1/32 dev xraytunh*`.
+- dedicated H2 lab runtime-retest с `settings.icmp.requestTimeoutSecs = 1` подтверждает timeout-ветку через bundle `/opt/lab/xray-tt/logs/h2-icmp-timeout-1s-tc-20260405-183916`: server log содержит `trusttunnel icmp raw send v4 dst=1.1.1.1` и через ~1s `trusttunnel icmp request timed out ...`, а client-side ping даёт `0 received`;
+- direct H2 `_icmp` probe подтверждает observable `ipv6Available`: bundle `/opt/lab/xray-tt/logs/h2-icmp-ipv6-available-probe-20260405-190025` даёт `failed to handle trusttunnel icmp request > IPv6 ICMP is unavailable` при `false` и полноценный IPv6 echo-reply при `true`;
+- representable error-type parity теперь покрывает echo-reply, destination-unreachable и time-exceeded; отдельный H2 runtime bundle `/opt/lab/xray-tt/logs/h2-icmp-timeexceeded-rawping-20260405-185429` подтверждает `ICMP time exceeded in-transit`, а server log содержит `trusttunnel H2 icmp reply ... type=11 code=0`;
+- reply types, которым нужны дополнительные поля вне fixed-size reply frame, не считаются открытым runtime-дефектом текущей ветки: `PacketTooBig`/`ParameterProblem` server-side распознаются и матчятся по quoted echo-request, но MTU/pointer не могут быть переданы обратно без расширения протокола;
+- Этот outbound path на текущем wire-format покрывает echo-request и representable reply types, а на Linux уже образует рабочий Xray product path через `proxy/tun`, если TUN interface управляется ОС с явной адресацией и routing. Clean-HEAD H2/H3 retest на 2026-04-05 / `96a9d053` подтверждён через выделенные namespace `tunxrayh2` / `tunxrayh3`, адрес `192.0.2.10/32` и маршрут `1.1.1.1/32 dev xraytunh*`.
 
 ## 3. Что считается текущей истиной
 
@@ -125,9 +130,7 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- завершение `_icmp` config surface, включая отсутствующий аналог official `recv_message_queue_capacity`, и отдельный runtime-retest для `icmp.requestTimeoutSecs`;
-- error-type parity для `_icmp` сверх подтверждённого echo-request/echo-reply path;
-- довязка `ipv6_available` и timeout settings до полного observable runtime;
+- observable server behavior вне уже подтверждённого `_icmp` surface: `tls_handshake_timeout_secs`, `client_listener_timeout_secs`, `connection_establishment_timeout_secs`, `tcp_connections_timeout_secs`, `udp_connections_timeout_secs`;
 - полный UDP interop matrix;
 - REALITY;
 - нормализация TrustTunnel вокруг `streamSettings` и общей модели Xray.

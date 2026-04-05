@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `0fbc2ed5`
+Коммит состояния: `b1c14eb3`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -168,15 +168,15 @@
 Реализовано:
 - `common/net.Network_ICMP` на outbound стороне переводит `Client.Process(...)` в отдельный `_icmp:0` path вместо обычного CONNECT target;
 - request-side contract читает raw ICMP echo-request packet из `transport.Link`, извлекает `id`, `sequence`, `destination`, `ttl/hop_limit` и `data_size`, после чего пишет fixed-size TrustTunnel request frame;
-- response-side contract читает fixed-size TrustTunnel reply frame и локально восстанавливает raw ICMP echo-reply packet по сохранённому исходному payload;
+- response-side contract читает fixed-size TrustTunnel reply frame и локально восстанавливает representable raw ICMP replies: echo-reply, destination-unreachable и time-exceeded по сохранённому исходному payload и quoted request context;
 - path работает для H2 и H3 и использует те же transport-specific CONNECT routines, что и TCP/UDP path;
 - `proxy/tun` поднимает `gicmp.NewProtocol4/NewProtocol6`, принимает echo-request traffic в `icmpConnectionHandler` и инжектит echo-reply обратно в link endpoint;
 - clean-HEAD Linux retest на 2026-04-05 / `96a9d053` подтверждает, что этот path уже образует product-level source path через `proxy/tun`, если TUN interface вынесен в отдельный network namespace или иным образом получает явную OS-managed адресацию и routing.
 
 Ограничения текущего состояния:
-- client-side contract пока покрывает только echo-request/echo-reply semantics, а не полный ICMP error-type parity;
+- client-side contract ограничен representable fixed-size reply frame: он покрывает echo-reply, destination-unreachable и time-exceeded, но не может перенести MTU/pointer-специфику `PacketTooBig` / `ParameterProblem` без расширения протокола;
 - validated product path пока относится к Linux TUN deployment с внешним OS-managed routing; host-namespace схема вида `ip addr add 192.0.2.10/32 dev xraytunh2` + `ip route add 1.1.1.1/32 dev xraytunh2` воспроизводит request storm и считается unsafe wiring pattern;
-- server-side config surface для ICMP timeout/interface/private-network semantics пока закрыта только частично: wired `allowPrivateNetworkConnections`, `icmp.interfaceName` и `icmp.requestTimeoutSecs`, но аналога official `recv_message_queue_capacity` пока нет.
+- server-side config surface для `_icmp` now covers `allowPrivateNetworkConnections`, `icmp.interfaceName`, `icmp.requestTimeoutSecs`, `icmp.recvMessageQueueCapacity` и observable `ipv6Available`; `ipv6Available` при этом не должен трактоваться как общий server transport selector вне `_icmp`.
 
 ## 5. Карта серверного path
 
@@ -207,11 +207,12 @@
 - health-check special-case срабатывает до UDP mux и до обычного target parsing;
 - H2 `_check` больше не падает обратно в обычный dispatch path.
 
-Подтверждено локальными regression-тестами и Linux root loopback-тестом 2026-04-05 / `32b2eff2`:
+Подтверждено локальными regression-тестами, Linux root loopback-тестом и lab runtime-retest на 2026-04-05 / `b1c14eb3`:
 - reserved pseudo-host `_icmp` на H2/H3 перехватывается до обычного target parsing;
 - H2/H3 `_icmp` использует отдельный fixed-size codec по official wire-format;
 - серверный path создаёт per-stream raw ICMP session и пишет обратно reply-frames без участия обычного Xray dispatcher;
-- на подтверждённом состоянии echo-reply path работает для IPv4 loopback; clean-HEAD official H2/H3 interop подтверждён на 2026-04-05 / `5a21fd31` и `6c46922c`, а ICMP error-type parity ещё не подтверждён.
+- на подтверждённом состоянии echo-reply path работает для IPv4 loopback; clean-HEAD official H2/H3 interop подтверждён на 2026-04-05 / `5a21fd31` и `6c46922c`;
+- representable reply types echo-reply, destination-unreachable и time-exceeded подтверждены server/client-side unit-path, а `time exceeded` дополнительно подтверждён H2 runtime bundle `/opt/lab/xray-tt/logs/h2-icmp-timeexceeded-rawping-20260405-185429`.
 
 ### 5.3.1. H2/H3 `_icmp` runtime-path
 
@@ -225,18 +226,19 @@
 - входящий stream разбирается как последовательность fixed-size request frames:
   `id(2) + destination(16) + sequence(2) + ttl/hop_limit(1) + data_size(2)`;
 - сервер создаёт echo-request в raw ICMP socket и ждёт reply в пределах фиксированного timeout;
-- `settings.allowPrivateNetworkConnections`, `settings.icmp.interfaceName` и `settings.icmp.requestTimeoutSecs` уже подключены к server-side `_icmp` runtime;
-- по текущей реализации private-network destinations по умолчанию режутся до raw-send path, `icmp.interfaceName` задаёт `IfIndex` для raw ICMP socket, а `icmp.requestTimeoutSecs` переопределяет timeout ожидания reply;
+- `settings.allowPrivateNetworkConnections`, `settings.icmp.interfaceName`, `settings.icmp.requestTimeoutSecs` и `settings.icmp.recvMessageQueueCapacity` уже подключены к server-side `_icmp` runtime;
+- по текущей реализации private-network destinations по умолчанию режутся до raw-send path, `icmp.interfaceName` задаёт `IfIndex` для raw ICMP socket, `icmp.requestTimeoutSecs` переопределяет timeout ожидания reply, а `icmp.recvMessageQueueCapacity` задаёт bounded per-stream reply queue с default `256` и drop-on-overflow semantics;
 - исходящий stream пишет fixed-size reply frames:
   `id(2) + source(16) + type(1) + code(1) + sequence(2)`;
+- server-side reply parser и client-side reconstruction покрывают representable reply types echo-reply, destination-unreachable и time-exceeded; H2 runtime с raw ping `-e 0 -t 1` подтверждает `type=11 code=0`;
 - attachment `trusttunnel.client_random` перед special-path dispatch клонирует `session.Content`, чтобы параллельные H2/H3 streams не делили один mutable `Attributes` map;
+- `ipv6Available` для `_icmp` observable: при `false` H2 direct probe получает `IPv6 ICMP is unavailable`, при `true` path открывает IPv6 raw socket и возвращает echo-reply;
 - если raw ICMP недоступен, H2/H3 path отвечает `503 Service Unavailable`.
 
 Ограничения текущего состояния:
 - H1 `_icmp` остаётся не transport path и отвечает `501 Not Implemented`;
-- TrustTunnel config model пока покрывает только часть ICMP settings: есть `allowPrivateNetworkConnections`, `icmp.interfaceName` и `icmp.requestTimeoutSecs`, но нет аналога official `recv_message_queue_capacity`;
-- `ipv6Available` пока влияет только на попытку открыть IPv6 raw socket и ещё не образует полный product-level ICMP surface;
-- clean-HEAD H2/H3 retest подтверждает product-level `_icmp` source path через `proxy/tun` на Linux с OS-managed routing; отдельный H2 lab-retest уже подтвердил private-network policy и invalid `icmp.interfaceName`, но `icmp.requestTimeoutSecs` пока не закрыт dedicated runtime-retest и error-type parity остаётся открытым.
+- `PacketTooBig` / `ParameterProblem` server-side распознаются и матчатся по quoted echo-request, но fixed-size reply frame не может передать назад MTU/pointer-specific данные;
+- clean-HEAD H2/H3 retest подтверждает product-level `_icmp` source path через `proxy/tun` на Linux с OS-managed routing; host-namespace `/32` wiring остаётся unsafe pattern и не считается рекомендуемым product deployment.
 
 ### 5.4. H3 path
 
@@ -359,6 +361,11 @@ Server side:
 - `Rules`
 - `AuthFailureStatusCode`
 - `EnableUdp`
+- `AllowPrivateNetworkConnections` для `_icmp`
+- `IcmpInterfaceName`
+- `IcmpRequestTimeoutSecs`
+- `IcmpRecvMessageQueueCapacity`
+- `Ipv6Available` для `_icmp`
 
 ### 10.2. Пока декларативные
 
@@ -369,7 +376,6 @@ Client side:
 Server side:
 - `Hosts`
 - `Transports`
-- `Ipv6Available`
 
 Следствие:
 - эти поля нельзя описывать как завершённый самостоятельный функциональный блок без отдельной доработки или подтверждения runtime-поведением.

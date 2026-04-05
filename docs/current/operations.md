@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `0fbc2ed5`
+Коммит состояния: `b1c14eb3`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -140,11 +140,15 @@
 - `rules`
 - `authFailureStatusCode`
 - `udp`
+- `allowPrivateNetworkConnections` для `_icmp`
+- `icmp.interfaceName`
+- `icmp.requestTimeoutSecs`
+- `icmp.recvMessageQueueCapacity`
+- `ipv6Available` для `_icmp`
 
 Пока не образуют самостоятельный server runtime-path:
 - `hosts`
 - `transports`
-- `ipv6Available`
 
 Следствие:
 - серверный режим H2/H3 задаётся через transport listener, TLS ALPN и `streamSettings`;
@@ -229,14 +233,16 @@
 - `infra/conf.Network` и `NetworkList` принимают `icmp` в JSON-конфигах;
 - routing/API/webhook layer видит `icmp` как отдельное network-значение.
 - TrustTunnel outbound для такого target больше не возвращает ранний reject: H2/H3 path открывает `_icmp:0`, кодирует fixed-size request frames и локально восстанавливает echo-reply packet из reply-frame и сохранённого payload.
-- Практически подтверждённый client-side contract пока покрывает только echo-request/echo-reply semantics.
-- server-side JSON config теперь частично подаёт `_icmp` runtime-settings: `allowPrivateNetworkConnections`, `icmp.interfaceName`, `icmp.requestTimeoutSecs`;
-- по текущей реализации `allowPrivateNetworkConnections = false` ограничивает `_icmp` global-unicast destination-адресами, `icmp.interfaceName` задаёт raw-socket `IfIndex`, а `icmp.requestTimeoutSecs` переопределяет timeout ожидания reply;
+- Практически подтверждённый client-side contract покрывает echo-request и representable reply types текущего fixed-size reply frame.
+- server-side JSON config теперь подаёт `_icmp` runtime-settings: `allowPrivateNetworkConnections`, `icmp.interfaceName`, `icmp.requestTimeoutSecs`, `icmp.recvMessageQueueCapacity`, а `ipv6Available` observable на попытке открыть IPv6 raw socket;
+- по текущей реализации `allowPrivateNetworkConnections = false` ограничивает `_icmp` global-unicast destination-адресами, `icmp.interfaceName` задаёт raw-socket `IfIndex`, `icmp.requestTimeoutSecs` переопределяет timeout ожидания reply, а `icmp.recvMessageQueueCapacity` задаёт bounded per-stream reply queue с default `256`;
 - отдельный H2 lab runtime-retest против `192.168.1.19` подтверждает, что `allowPrivateNetworkConnections = false` даёт `0 received` и лог `private network connections are disabled`, а `true` возвращает `1 received`;
 - отдельный H2 lab runtime-retest с `icmp.interfaceName = "definitely-missing-if0"` подтверждает, что `_icmp` path доходит до `trusttunnel H2 ICMP unavailable > route ip+net: no such network interface`;
+- dedicated H2 lab runtime-retest подтверждает `icmp.requestTimeoutSecs = 1` через bundle `/opt/lab/xray-tt/logs/h2-icmp-timeout-1s-tc-20260405-183916`;
+- direct H2 `_icmp` probe подтверждает observable `ipv6Available` через bundle `/opt/lab/xray-tt/logs/h2-icmp-ipv6-available-probe-20260405-190025`;
+- representable reply types echo-reply, destination-unreachable и time-exceeded подтверждены; types с extra MTU/pointer fields ограничены fixed-size reply frame и не образуют отдельного runtime toggled feature;
 - На Linux это уже образует рабочий Xray product path через `proxy/tun`, если TUN interface управляется ОС с явной адресацией и routing. Подтверждённый clean-HEAD шаблон: выделенный namespace `tunxrayh2` / `tunxrayh3`, адрес `192.0.2.10/32` на `xraytunh*` и маршрут `1.1.1.1/32 dev xraytunh*`.
 - Host-namespace схема вида `ip addr add 192.0.2.10/32 dev xraytunh2` + `ip route add 1.1.1.1/32 dev xraytunh2` считается unsafe wiring pattern: в диагностическом retest она воспроизвела ICMP request storm без egress.
-- Полной parity по official ICMP settings пока нет: `recv_message_queue_capacity` в config model и runtime отсутствует.
 
 ## 6. UDP path
 
@@ -255,10 +261,11 @@
 
 На текущем состоянии нельзя объявлять как завершённые функции:
 - `antiDpi` как рабочий product path;
-- `hasIpv6` / `ipv6Available` как активную готовую функцию;
+- `hasIpv6` как активную готовую функцию;
+- `ipv6Available` как общий server transport selector вне `_icmp` raw-socket surface;
 - server runtime host/cert selection через `settings.hosts[]`;
 - server runtime routing H2/H3 только через `settings.transports[]` без корректных `streamSettings`;
-- `_icmp` как полностью закрытый path за пределами Linux echo-request/echo-reply, без OS-managed TUN routing assumptions и без полного official config surface;
+- `_icmp` за пределами Linux path с OS-managed TUN routing или за пределами fixed-size official reply frame, если нужны MTU/pointer-specific поля;
 - доменные UDP targets.
 
 ## 8. Как использовать старые документы

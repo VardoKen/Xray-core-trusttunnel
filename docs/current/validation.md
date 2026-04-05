@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-05
-Коммит состояния: `0fbc2ed5`
+Коммит состояния: `b1c14eb3`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -229,10 +229,8 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- завершение `_icmp` config surface: сейчас wired `settings.allowPrivateNetworkConnections`, `settings.icmp.interfaceName` и `settings.icmp.requestTimeoutSecs`, но нет аналога official `recv_message_queue_capacity`;
-- error-type parity для `_icmp` сверх подтверждённого echo-request/echo-reply path;
 - полный UDP interop matrix;
-- отдельный lab/runtime-retest для `ipv6_available` и `icmp.requestTimeoutSecs`;
+- observable server behavior вне уже закрытого `_icmp` surface: `tls_handshake_timeout_secs`, `client_listener_timeout_secs`, `connection_establishment_timeout_secs`, `tcp_connections_timeout_secs`, `udp_connections_timeout_secs`;
 - REALITY на H2 и исследовательский трек H3 + REALITY.
 
 Локально подтверждённые regression-тесты на 2026-04-05:
@@ -244,8 +242,11 @@ Preflight:
 - `TestTrustTunnelICMPRequestFromBufferUsesFallbackDestination` подтверждает разбор raw echo-request с fallback destination;
 - `TestTrustTunnelICMPRequestFromBufferRejectsNonEchoRequest` подтверждает, что client-side contract пока ограничен echo-request path;
 - `TestRunTrustTunnelICMPTunnelEchoRoundTrip` подтверждает, что outbound `_icmp` path кодирует fixed-size request frame и локально восстанавливает raw echo-reply packet по сохранённому payload;
-- `TestBuildTrustTunnelICMPSessionOptionsDefaults` и `TestBuildTrustTunnelICMPSessionOptionsUsesConfiguredValues` подтверждают binding `allowPrivateNetworkConnections`, `icmp.interfaceName`, `icmp.requestTimeoutSecs`;
+- `TestBuildTrustTunnelICMPSessionOptionsDefaults` и `TestBuildTrustTunnelICMPSessionOptionsUsesConfiguredValues` подтверждают binding `allowPrivateNetworkConnections`, `icmp.interfaceName`, `icmp.requestTimeoutSecs`, `icmp.recvMessageQueueCapacity`;
 - `TestOpenICMPSessionUsesConfiguredOptions` подтверждает, что `Server.openICMPSession()` прокидывает эти значения в session factory;
+- `TestRunTrustTunnelICMPTunnelTimeExceededRoundTrip` подтверждает representable client-side reconstruction для `time exceeded`;
+- `TestTrustTunnelICMPReplyFromMessageMatchesDestinationUnreachable` подтверждает quoted echo-request matching для `destination unreachable`;
+- `TestTrustTunnelICMPReplyQueueDropsOnOverflow` подтверждает bounded per-stream reply queue и drop-on-overflow semantics аналога official `recv_message_queue_capacity`;
 - `TestTrustTunnelValidateICMPDestination` и `TestTrustTunnelICMPSessionRejectsPrivateDestinationWhenDisabled` подтверждают global-only policy по умолчанию и reject private destinations до raw-send path;
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound` проходит;
 - `GOFLAGS=-buildvcs=false go test -run '^$' ./...` проходит как compile-only sweep по дереву после добавления outbound `_icmp` path;
@@ -375,6 +376,50 @@ Pass markers:
 Pass markers:
 - `ping -n -I 192.0.2.10 -c 1 -W 3 1.1.1.1` даёт `1 packets transmitted, 0 received, 100% packet loss`;
 - server log содержит `trusttunnel H2 ICMP unavailable > route ip+net: no such network interface`.
+
+### 2.14. H2 `_icmp` dedicated `requestTimeoutSecs` runtime
+
+Подтверждено на 2026-04-05 после code-state `aa9444f3`:
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- runtime server config: `/opt/lab/xray-tt/configs/server_h2_icmp_timeout_1s.json`;
+- runtime client config: `/opt/lab/xray-tt/configs/our_client_tun_to_our_server_h2_icmp_timeout_test.json`;
+- egress blackhole для raw ICMP создавался через `tc qdisc add dev eth0 clsact` и `tc filter add dev eth0 egress protocol ip prio 1 flower ip_proto icmp dst_ip 1.1.1.1 action drop`;
+- log bundle: `/opt/lab/xray-tt/logs/h2-icmp-timeout-1s-tc-20260405-183916`.
+
+Pass markers:
+- server log содержит `trusttunnel icmp raw send v4 dst=1.1.1.1` и примерно через одну секунду `trusttunnel icmp request timed out dst=1.1.1.1`;
+- ping log даёт `1 packets transmitted, 0 received, 100% packet loss`;
+- runtime подтверждает, что `settings.icmp.requestTimeoutSecs = 1` доходит именно до server-side timeout path, а не маскируется send failure.
+
+### 2.15. H2 `_icmp` `time exceeded` runtime
+
+Подтверждено на 2026-04-05 после code-state `aa9444f3`:
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- runtime server config: `/opt/lab/xray-tt/configs/server_h2.json`;
+- runtime client config: `/opt/lab/xray-tt/configs/our_client_tun_to_our_server_h2_icmp.json`;
+- raw source check выполнялся через `ip netns exec tunxrayh2 ping -n -e 0 -I 192.0.2.10 -c 1 -W 5 -t 1 1.1.1.1`;
+- log bundle: `/opt/lab/xray-tt/logs/h2-icmp-timeexceeded-rawping-20260405-185429`.
+
+Pass markers:
+- `tcpdump` на `xraytunh2` фиксирует request с `ttl 1`;
+- reply на той же трассе является `ICMP time exceeded in-transit`;
+- server log содержит `trusttunnel icmp raw reply src=192.168.1.1 id=0 seq=1 type=11 code=0` и `trusttunnel H2 icmp reply ... type=11 code=0`;
+- representable runtime parity для `time exceeded` подтверждена end-to-end.
+
+### 2.16. Direct H2 `_icmp` `ipv6Available` probe
+
+Подтверждено на 2026-04-05 после code-state `aa9444f3`:
+- binary: `/opt/lab/xray-tt/tmp/xray-tt-current`;
+- runtime server config false-case: `/opt/lab/xray-tt/configs/server_h2_icmp_ipv6_probe_false.json`;
+- runtime server config true-case: `/opt/lab/xray-tt/configs/server_h2_icmp_ipv6_probe_true.json`;
+- direct probe выполнялся lab-local helper scripts `/root/icmp_h2_probe.go` и `/root/lab_icmp_ipv6_probe.sh`;
+- log bundle: `/opt/lab/xray-tt/logs/h2-icmp-ipv6-available-probe-20260405-190025`.
+
+Pass markers:
+- false-case server log содержит `failed to handle trusttunnel icmp request > IPv6 ICMP is unavailable`, probe завершается `read_err=EOF`;
+- true-case server log содержит `trusttunnel icmp raw send v6 dst=2001:4860:4860::8888` и `trusttunnel H2 icmp reply ... type=129 code=0`;
+- probe получает `reply source=2001:4860:4860::8888 type=129 code=0 seq=1`;
+- `ipv6Available` подтверждён как observable server-side `_icmp` runtime setting.
 
 Отдельное внешнее ограничение локального test-run:
 - полный `go test ./infra/conf ./app/router` по-прежнему цепляется за отсутствие `geoip.dat`; это исторический fixture-gap текущего окружения, а не регрессия `Network_ICMP`.
