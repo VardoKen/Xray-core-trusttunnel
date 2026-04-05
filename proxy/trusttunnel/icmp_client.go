@@ -97,6 +97,7 @@ func runTrustTunnelICMPTunnel(ctx context.Context, link *transport.Link, tunnelC
 					buf.ReleaseMulti(mb)
 					return encErr
 				}
+				errors.LogDebug(ctx, "trusttunnel icmp request id=", req.ID, " dst=", req.Destination.String(), " seq=", req.Sequence, " size=", req.DataSize)
 				if _, writeErr := tunnelConn.Write(wire); writeErr != nil {
 					buf.ReleaseMulti(mb)
 					return writeErr
@@ -120,6 +121,7 @@ func runTrustTunnelICMPTunnel(ctx context.Context, link *transport.Link, tunnelC
 				}
 
 				for _, pkt := range packets {
+					errors.LogDebug(ctx, "trusttunnel icmp reply id=", pkt.ID, " src=", pkt.Source.String(), " type=", pkt.Type, " code=", pkt.Code, " seq=", pkt.Sequence)
 					mb, convErr := trustTunnelICMPReplyToMultiBuffer(pkt, store)
 					if convErr != nil {
 						return convErr
