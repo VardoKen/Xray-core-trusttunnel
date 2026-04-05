@@ -351,35 +351,11 @@ func (s *trustTunnelICMPSession) readLoop(conn *icmp.PacketConn, proto int, v6 b
 		if err != nil {
 			continue
 		}
-		if !trustTunnelICMPIsReplyType(msg.Type, v6) {
-			continue
-		}
-
-		echo, ok := msg.Body.(*icmp.Echo)
+		reply, key, ok := trustTunnelICMPReplyFromMessage(msg, peer, v6)
 		if !ok {
 			continue
-		}
-
-		ipAddr, ok := peer.(*stdnet.IPAddr)
-		if !ok {
-			continue
-		}
-
-		reply := trustTunnelICMPReplyPacket{
-			ID:       uint16(echo.ID),
-			Source:   trustTunnelCloneIP(ipAddr.IP),
-			Type:     trustTunnelICMPTypeValue(msg.Type, v6),
-			Code:     uint8(msg.Code),
-			Sequence: uint16(echo.Seq),
 		}
 		errors.LogDebug(context.Background(), "trusttunnel icmp raw reply src=", reply.Source.String(), " id=", reply.ID, " seq=", reply.Sequence, " type=", reply.Type, " code=", reply.Code)
-
-		key := trustTunnelICMPWaitKey{
-			peer: reply.Source.String(),
-			v6:   v6,
-			id:   reply.ID,
-			seq:  reply.Sequence,
-		}
 		s.deliverReply(key, reply)
 	}
 }
@@ -409,10 +385,121 @@ func trustTunnelICMPTypeValue(typ icmp.Type, v6 bool) uint8 {
 func trustTunnelICMPIsReplyType(typ icmp.Type, v6 bool) bool {
 	if v6 {
 		typed, ok := typ.(ipv6.ICMPType)
-		return ok && typed == ipv6.ICMPTypeEchoReply
+		if !ok {
+			return false
+		}
+		switch typed {
+		case ipv6.ICMPTypeEchoReply, ipv6.ICMPTypeDestinationUnreachable, ipv6.ICMPTypeTimeExceeded, ipv6.ICMPTypePacketTooBig, ipv6.ICMPTypeParameterProblem:
+			return true
+		default:
+			return false
+		}
 	}
 	typed, ok := typ.(ipv4.ICMPType)
-	return ok && typed == ipv4.ICMPTypeEchoReply
+	if !ok {
+		return false
+	}
+	switch typed {
+	case ipv4.ICMPTypeEchoReply, ipv4.ICMPTypeDestinationUnreachable, ipv4.ICMPTypeTimeExceeded, ipv4.ICMPTypeParameterProblem:
+		return true
+	default:
+		return false
+	}
+}
+
+func trustTunnelICMPReplyFromMessage(msg *icmp.Message, peer stdnet.Addr, v6 bool) (trustTunnelICMPReplyPacket, trustTunnelICMPWaitKey, bool) {
+	var zeroReply trustTunnelICMPReplyPacket
+	var zeroKey trustTunnelICMPWaitKey
+
+	if !trustTunnelICMPIsReplyType(msg.Type, v6) {
+		return zeroReply, zeroKey, false
+	}
+
+	ipAddr, ok := peer.(*stdnet.IPAddr)
+	if !ok {
+		return zeroReply, zeroKey, false
+	}
+
+	reply := trustTunnelICMPReplyPacket{
+		Source: trustTunnelCloneIP(ipAddr.IP),
+		Type:   trustTunnelICMPTypeValue(msg.Type, v6),
+		Code:   uint8(msg.Code),
+	}
+
+	if echo, ok := msg.Body.(*icmp.Echo); ok {
+		reply.ID = uint16(echo.ID)
+		reply.Sequence = uint16(echo.Seq)
+		return reply, trustTunnelICMPWaitKey{
+			peer: reply.Source.String(),
+			v6:   v6,
+			id:   reply.ID,
+			seq:  reply.Sequence,
+		}, true
+	}
+
+	matchPeer, id, seq, ok := trustTunnelICMPRespondedEchoRequest(msg.Body, v6)
+	if !ok {
+		return zeroReply, zeroKey, false
+	}
+	reply.ID = id
+	reply.Sequence = seq
+	return reply, trustTunnelICMPWaitKey{
+		peer: matchPeer,
+		v6:   v6,
+		id:   id,
+		seq:  seq,
+	}, true
+}
+
+func trustTunnelICMPRespondedEchoRequest(body icmp.MessageBody, v6 bool) (string, uint16, uint16, bool) {
+	switch typed := body.(type) {
+	case *icmp.DstUnreach:
+		return trustTunnelQuotedICMPEchoRequest(typed.Data, v6)
+	case *icmp.TimeExceeded:
+		return trustTunnelQuotedICMPEchoRequest(typed.Data, v6)
+	case *icmp.PacketTooBig:
+		return trustTunnelQuotedICMPEchoRequest(typed.Data, v6)
+	case *icmp.ParamProb:
+		return trustTunnelQuotedICMPEchoRequest(typed.Data, v6)
+	default:
+		return "", 0, 0, false
+	}
+}
+
+func trustTunnelQuotedICMPEchoRequest(data []byte, v6 bool) (string, uint16, uint16, bool) {
+	if v6 {
+		if len(data) < 40+8 {
+			return "", 0, 0, false
+		}
+		dst := trustTunnelCloneIP(stdnet.IP(data[24:40]))
+		msg, err := icmp.ParseMessage(58, data[40:])
+		if err != nil {
+			return "", 0, 0, false
+		}
+		echo, err := trustTunnelParseICMPEchoRequest(msg, true)
+		if err != nil {
+			return "", 0, 0, false
+		}
+		return dst.String(), uint16(echo.ID), uint16(echo.Seq), true
+	}
+
+	if len(data) < 20+8 {
+		return "", 0, 0, false
+	}
+	headerLen := int(data[0]&0x0f) * 4
+	if headerLen < 20 || len(data) < headerLen+8 {
+		return "", 0, 0, false
+	}
+	dst := trustTunnelCloneIP(stdnet.IP(data[16:20]))
+	msg, err := icmp.ParseMessage(1, data[headerLen:])
+	if err != nil {
+		return "", 0, 0, false
+	}
+	echo, err := trustTunnelParseICMPEchoRequest(msg, false)
+	if err != nil {
+		return "", 0, 0, false
+	}
+	return dst.String(), uint16(echo.ID), uint16(echo.Seq), true
 }
 
 func trustTunnelValidateICMPDestination(ip stdnet.IP, allowPrivateNetworkConnections bool) error {

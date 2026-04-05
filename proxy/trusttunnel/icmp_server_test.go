@@ -5,6 +5,9 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
 func TestBuildTrustTunnelICMPSessionOptionsDefaults(t *testing.T) {
@@ -128,5 +131,52 @@ func TestTrustTunnelICMPSessionRejectsPrivateDestinationWhenDisabled(t *testing.
 	}
 	if ok {
 		t.Fatal("HandleRequest() ok = true, want false")
+	}
+}
+
+func TestTrustTunnelICMPReplyFromMessageMatchesDestinationUnreachable(t *testing.T) {
+	requestWire := mustMarshalICMPMessage(t, &icmp.Message{
+		Type: ipv4.ICMPTypeEcho,
+		Code: 0,
+		Body: &icmp.Echo{
+			ID:   0x1234,
+			Seq:  6,
+			Data: []byte("payload"),
+		},
+	})
+
+	quoted, err := trustTunnelBuildICMPQuotedPacket(trustTunnelICMPStoredRequest{
+		requestWire:   requestWire,
+		sourceIP:      net.ParseIP("192.0.2.10"),
+		destinationIP: net.ParseIP("1.1.1.1"),
+		ttl:           64,
+	}, false)
+	if err != nil {
+		t.Fatalf("trustTunnelBuildICMPQuotedPacket() failed: %v", err)
+	}
+
+	msg := &icmp.Message{
+		Type: ipv4.ICMPTypeDestinationUnreachable,
+		Code: 1,
+		Body: &icmp.DstUnreach{Data: quoted},
+	}
+	reply, key, ok := trustTunnelICMPReplyFromMessage(msg, &net.IPAddr{IP: net.ParseIP("203.0.113.1")}, false)
+	if !ok {
+		t.Fatal("trustTunnelICMPReplyFromMessage() = false, want true")
+	}
+	if got := reply.Source.String(); got != "203.0.113.1" {
+		t.Fatalf("reply.Source = %q, want %q", got, "203.0.113.1")
+	}
+	if reply.Type != uint8(ipv4.ICMPTypeDestinationUnreachable) || reply.Code != 1 {
+		t.Fatalf("reply = %+v, want destination-unreachable/code=1", reply)
+	}
+	if key.peer != "1.1.1.1" || key.id != 0x1234 || key.seq != 6 {
+		t.Fatalf("key = %+v, want peer=1.1.1.1 id=0x1234 seq=6", key)
+	}
+}
+
+func TestTrustTunnelQuotedICMPEchoRequestRejectsInvalidPayload(t *testing.T) {
+	if _, _, _, ok := trustTunnelQuotedICMPEchoRequest([]byte{1, 2, 3}, false); ok {
+		t.Fatal("trustTunnelQuotedICMPEchoRequest() = true, want false")
 	}
 }

@@ -3,11 +3,13 @@ package trusttunnel
 import (
 	"context"
 	"io"
+	"net"
 	"sync"
 	"testing"
 
 	"github.com/xtls/xray-core/common/buf"
 	xnet "github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/common/session"
 	"github.com/xtls/xray-core/transport"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
@@ -224,7 +226,10 @@ func TestRunTrustTunnelICMPTunnelEchoRoundTrip(t *testing.T) {
 		})
 	})
 
-	if err := runTrustTunnelICMPTunnel(context.Background(), link, tunnelConn, xnet.ICMPDestination(xnet.ParseAddress("9.9.9.9"))); err != nil {
+	ctx := session.ContextWithInbound(context.Background(), &session.Inbound{
+		Source: xnet.ICMPDestination(xnet.ParseAddress("192.0.2.10")),
+	})
+	if err := runTrustTunnelICMPTunnel(ctx, link, tunnelConn, xnet.ICMPDestination(xnet.ParseAddress("9.9.9.9"))); err != nil {
 		t.Fatalf("runTrustTunnelICMPTunnel() failed: %v", err)
 	}
 
@@ -262,6 +267,166 @@ func TestRunTrustTunnelICMPTunnelEchoRoundTrip(t *testing.T) {
 	}
 	if string(echo.Data) != string(requestData) {
 		t.Fatalf("echo.Data = %q, want %q", string(echo.Data), string(requestData))
+	}
+}
+
+func TestRunTrustTunnelICMPTunnelDestinationUnreachableRoundTrip(t *testing.T) {
+	requestData := []byte("payload-err")
+	requestWire := mustMarshalICMPMessage(t, &icmp.Message{
+		Type: ipv4.ICMPTypeEcho,
+		Code: 0,
+		Body: &icmp.Echo{
+			ID:   0x1234,
+			Seq:  9,
+			Data: requestData,
+		},
+	})
+
+	b := buf.New()
+	if _, err := b.Write(requestWire); err != nil {
+		t.Fatalf("Write() failed: %v", err)
+	}
+	dest := xnet.ICMPDestination(xnet.ParseAddress("1.1.1.1"))
+	b.UDP = &dest
+
+	link := &transport.Link{
+		Reader: &testMultiBufferReader{mbs: []buf.MultiBuffer{{b}}},
+		Writer: &testMultiBufferWriter{},
+	}
+
+	tunnelConn := newScriptedICMPTunnelConn(func(written []byte) ([]byte, error) {
+		var decoder trustTunnelICMPRequestDecoder
+		packets, err := decoder.Feed(written)
+		if err != nil {
+			t.Fatalf("decoder.Feed() failed: %v", err)
+		}
+		pkt := packets[0]
+		return encodeTrustTunnelICMPReply(trustTunnelICMPReplyPacket{
+			ID:       pkt.ID,
+			Source:   net.ParseIP("203.0.113.1"),
+			Type:     uint8(ipv4.ICMPTypeDestinationUnreachable),
+			Code:     1,
+			Sequence: pkt.Sequence,
+		})
+	})
+
+	ctx := session.ContextWithInbound(context.Background(), &session.Inbound{
+		Source: xnet.ICMPDestination(xnet.ParseAddress("192.0.2.10")),
+	})
+	if err := runTrustTunnelICMPTunnel(ctx, link, tunnelConn, xnet.ICMPDestination(xnet.ParseAddress("9.9.9.9"))); err != nil {
+		t.Fatalf("runTrustTunnelICMPTunnel() failed: %v", err)
+	}
+
+	writer := link.Writer.(*testMultiBufferWriter)
+	if len(writer.mbs) != 1 || len(writer.mbs[0]) != 1 {
+		t.Fatalf("writer output = %d/%d, want 1/1", len(writer.mbs), len(writer.mbs[0]))
+	}
+
+	replyBuf := writer.mbs[0][0]
+	defer buf.ReleaseMulti(writer.mbs[0])
+
+	if replyBuf.UDP == nil {
+		t.Fatal("replyBuf.UDP is nil")
+	}
+	if got := replyBuf.UDP.Address.String(); got != "203.0.113.1" {
+		t.Fatalf("replyBuf.UDP.Address = %q, want %q", got, "203.0.113.1")
+	}
+
+	msg, err := icmp.ParseMessage(1, replyBuf.Bytes())
+	if err != nil {
+		t.Fatalf("ParseMessage() failed: %v", err)
+	}
+	if got := msg.Type.(ipv4.ICMPType); got != ipv4.ICMPTypeDestinationUnreachable {
+		t.Fatalf("Type = %v, want %v", got, ipv4.ICMPTypeDestinationUnreachable)
+	}
+	body, ok := msg.Body.(*icmp.DstUnreach)
+	if !ok {
+		t.Fatalf("Body type = %T, want *icmp.DstUnreach", msg.Body)
+	}
+	if len(body.Data) < 28 {
+		t.Fatalf("len(body.Data) = %d, want >= 28", len(body.Data))
+	}
+	if got := net.IP(body.Data[12:16]).String(); got != "192.0.2.10" {
+		t.Fatalf("quoted src = %q, want %q", got, "192.0.2.10")
+	}
+	if got := net.IP(body.Data[16:20]).String(); got != "1.1.1.1" {
+		t.Fatalf("quoted dst = %q, want %q", got, "1.1.1.1")
+	}
+	quoted, err := icmp.ParseMessage(1, body.Data[20:])
+	if err != nil {
+		t.Fatalf("ParseMessage(quoted) failed: %v", err)
+	}
+	echo, ok := quoted.Body.(*icmp.Echo)
+	if !ok {
+		t.Fatalf("quoted body type = %T, want *icmp.Echo", quoted.Body)
+	}
+	if echo.ID != 0x1234 || echo.Seq != 9 {
+		t.Fatalf("quoted echo = %+v, want id=0x1234 seq=9", echo)
+	}
+	if string(echo.Data) != string(requestData) {
+		t.Fatalf("quoted echo data = %q, want %q", string(echo.Data), string(requestData))
+	}
+}
+
+func TestRunTrustTunnelICMPTunnelTimeExceededRoundTrip(t *testing.T) {
+	requestWire := mustMarshalICMPMessage(t, &icmp.Message{
+		Type: ipv4.ICMPTypeEcho,
+		Code: 0,
+		Body: &icmp.Echo{
+			ID:   0x2345,
+			Seq:  4,
+			Data: []byte("ttl"),
+		},
+	})
+
+	b := buf.New()
+	if _, err := b.Write(requestWire); err != nil {
+		t.Fatalf("Write() failed: %v", err)
+	}
+	dest := xnet.ICMPDestination(xnet.ParseAddress("1.1.1.1"))
+	b.UDP = &dest
+
+	link := &transport.Link{
+		Reader: &testMultiBufferReader{mbs: []buf.MultiBuffer{{b}}},
+		Writer: &testMultiBufferWriter{},
+	}
+
+	tunnelConn := newScriptedICMPTunnelConn(func(written []byte) ([]byte, error) {
+		var decoder trustTunnelICMPRequestDecoder
+		packets, err := decoder.Feed(written)
+		if err != nil {
+			t.Fatalf("decoder.Feed() failed: %v", err)
+		}
+		pkt := packets[0]
+		return encodeTrustTunnelICMPReply(trustTunnelICMPReplyPacket{
+			ID:       pkt.ID,
+			Source:   net.ParseIP("203.0.113.254"),
+			Type:     uint8(ipv4.ICMPTypeTimeExceeded),
+			Code:     0,
+			Sequence: pkt.Sequence,
+		})
+	})
+
+	ctx := session.ContextWithInbound(context.Background(), &session.Inbound{
+		Source: xnet.ICMPDestination(xnet.ParseAddress("192.0.2.10")),
+	})
+	if err := runTrustTunnelICMPTunnel(ctx, link, tunnelConn, xnet.ICMPDestination(xnet.ParseAddress("9.9.9.9"))); err != nil {
+		t.Fatalf("runTrustTunnelICMPTunnel() failed: %v", err)
+	}
+
+	writer := link.Writer.(*testMultiBufferWriter)
+	replyBuf := writer.mbs[0][0]
+	defer buf.ReleaseMulti(writer.mbs[0])
+
+	msg, err := icmp.ParseMessage(1, replyBuf.Bytes())
+	if err != nil {
+		t.Fatalf("ParseMessage() failed: %v", err)
+	}
+	if got := msg.Type.(ipv4.ICMPType); got != ipv4.ICMPTypeTimeExceeded {
+		t.Fatalf("Type = %v, want %v", got, ipv4.ICMPTypeTimeExceeded)
+	}
+	if _, ok := msg.Body.(*icmp.TimeExceeded); !ok {
+		t.Fatalf("Body type = %T, want *icmp.TimeExceeded", msg.Body)
 	}
 }
 
