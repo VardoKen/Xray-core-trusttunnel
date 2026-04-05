@@ -1,6 +1,7 @@
 package net_test
 
 import (
+	stdnet "net"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -31,6 +32,12 @@ func TestDestinationProperty(t *testing.T) {
 			Network:   Network_UNIX,
 			String:    "unix:/tmp/test.sock",
 			NetString: "/tmp/test.sock",
+		},
+		{
+			Input:     ICMPDestination(IPAddress([]byte{1, 2, 3, 4})),
+			Network:   Network_ICMP,
+			String:    "icmp:1.2.3.4",
+			NetString: "1.2.3.4",
 		},
 	}
 
@@ -65,6 +72,14 @@ func TestDestinationParse(t *testing.T) {
 		{
 			Input:  "unix:/tmp/test.sock",
 			Output: UnixDestination(DomainAddress("/tmp/test.sock")),
+		},
+		{
+			Input:  "icmp:1.2.3.4",
+			Output: ICMPDestination(IPAddress([]byte{1, 2, 3, 4})),
+		},
+		{
+			Input:  "icmp:[2001:4860:4860::8888]",
+			Output: ICMPDestination(IPAddress([]byte{0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x88})),
 		},
 		{
 			Input: "8.8.8.8:53",
@@ -106,5 +121,13 @@ func TestDestinationParse(t *testing.T) {
 		} else if err == nil {
 			t.Error("for test case: ", testcase.Input, " expected error, but got nil")
 		}
+	}
+}
+
+func TestDestinationFromIPAddr(t *testing.T) {
+	got := DestinationFromAddr(&stdnet.IPAddr{IP: stdnet.IPv4(1, 2, 3, 4)})
+	want := ICMPDestination(IPAddress([]byte{1, 2, 3, 4}))
+	if got != want {
+		t.Fatalf("DestinationFromAddr(IPAddr) = %+v, want %+v", got, want)
 	}
 }

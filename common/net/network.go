@@ -8,6 +8,8 @@ func (n Network) SystemString() string {
 		return "udp"
 	case Network_UNIX:
 		return "unix"
+	case Network_ICMP:
+		return "icmp"
 	default:
 		return "unknown"
 	}
