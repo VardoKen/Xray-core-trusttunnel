@@ -147,6 +147,34 @@ func (h *http2Conn) Close() error {
 	return h.Connection.Close()
 }
 
+func runTrustTunnelStreamTunnel(ctx context.Context, link *transport.Link, tunnelConn io.ReadWriteCloser) error {
+	sessionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	abortTunnel := func() {
+		cancel()
+		common.Interrupt(link.Reader)
+		common.Interrupt(link.Writer)
+		_ = tunnelConn.Close()
+	}
+
+	requestDone := func() error {
+		return buf.Copy(link.Reader, buf.NewWriter(tunnelConn))
+	}
+
+	responseDone := func() error {
+		return buf.Copy(buf.NewReader(tunnelConn), link.Writer)
+	}
+
+	responseDonePost := task.OnSuccess(responseDone, task.Close(link.Writer))
+	if err := task.Run(sessionCtx, requestDone, responseDonePost); err != nil {
+		abortTunnel()
+		return errors.New("trusttunnel connection ends").Base(err).AtInfo()
+	}
+
+	return nil
+}
+
 func verifyTrustTunnelTLS(peerCerts []*x509.Certificate, cfg *ClientConfig) error {
 	if cfg.GetSkipVerification() {
 		return nil
@@ -225,21 +253,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 			return errors.New("failed to establish trusttunnel HTTP/3 CONNECT").Base(err).AtWarning()
 		}
 		defer tunnelConn.Close()
-
-		requestDone := func() error {
-			return buf.Copy(link.Reader, buf.NewWriter(tunnelConn))
-		}
-
-		responseDone := func() error {
-			return buf.Copy(buf.NewReader(tunnelConn), link.Writer)
-		}
-
-		requestDonePost := task.OnSuccess(requestDone, task.Close(link.Writer))
-		if err := task.Run(ctx, requestDonePost, responseDone); err != nil {
-			return errors.New("trusttunnel connection ends").Base(err).AtInfo()
-		}
-
-		return nil
+		return runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
 	}
 
 	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
@@ -309,19 +323,5 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	if err := conn.SetDeadline(time.Time{}); err != nil {
 		return errors.New("failed to clear deadline").Base(err).AtWarning()
 	}
-
-	requestDone := func() error {
-		return buf.Copy(link.Reader, buf.NewWriter(tunnelConn))
-	}
-
-	responseDone := func() error {
-		return buf.Copy(buf.NewReader(tunnelConn), link.Writer)
-	}
-
-	requestDonePost := task.OnSuccess(requestDone, task.Close(link.Writer))
-	if err := task.Run(ctx, requestDonePost, responseDone); err != nil {
-		return errors.New("trusttunnel connection ends").Base(err).AtInfo()
-	}
-
-	return nil
+	return runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
 }

@@ -187,12 +187,7 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		return s.processHTTP3(ctx, h3conn, conn, dispatcher, inbound)
 	}
 
-	if strings.EqualFold(trustTunnelNegotiatedProtocol(conn), "h2") {
-		if err := conn.SetReadDeadline(time.Time{}); err != nil {
-			errors.LogDebugInner(ctx, err, "failed to clear read deadline")
-		}
-		return s.processHTTP2(ctx, &bufferedConn{Connection: conn, reader: bufio.NewReaderSize(conn, 64*1024)}, dispatcher, inbound, clientRandom, false)
-	}
+	negotiatedProto := trustTunnelNegotiatedProtocol(conn)
 
 	if err := conn.SetReadDeadline(time.Now().Add(s.config.clientListenerTimeout())); err != nil {
 		errors.LogInfoInner(ctx, err, "failed to set read deadline")
@@ -208,7 +203,19 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 		if err := conn.SetReadDeadline(time.Time{}); err != nil {
 			errors.LogDebugInner(ctx, err, "failed to clear read deadline")
 		}
-		return s.processHTTP2(ctx, &bufferedConn{Connection: conn, reader: reader}, dispatcher, inbound, clientRandom, true)
+		return s.processHTTP2(ctx, &bufferedConn{Connection: conn, reader: reader}, dispatcher, inbound, clientRandom)
+	}
+
+	if strings.EqualFold(negotiatedProto, "h2") {
+		if err == nil {
+			return errors.New("invalid trusttunnel http2 client preface").AtWarning()
+		}
+
+		trace := errors.New("failed to read trusttunnel http2 client preface").Base(err)
+		if errors.Cause(err) != io.EOF && !isTimeout(errors.Cause(err)) {
+			trace = trace.AtWarning()
+		}
+		return trace
 	}
 
 	if err != nil {
@@ -415,7 +422,7 @@ Start:
 	return nil
 }
 
-func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string, sawClientPreface bool) error {
+func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) error {
 	done := make(chan struct{})
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -430,7 +437,7 @@ func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatche
 		h2s.ServeConn(conn, &http2.ServeConnOpts{
 			Context:          ctx,
 			Handler:          handler,
-			SawClientPreface: sawClientPreface,
+			SawClientPreface: true,
 		})
 	}()
 
@@ -674,6 +681,9 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 
 	if err := s.dispatchConnectSession(ctx, dispatcher, dest, buf.NewReader(req.Body), buf.NewWriter(writer), req.Body); err != nil {
 		errors.LogWarningInner(ctx, err, "failed to dispatch trusttunnel "+strings.ToLower(proto)+" CONNECT")
+		if proto == "H2" {
+			panic(http.ErrAbortHandler)
+		}
 	}
 }
 

@@ -196,7 +196,7 @@ func TestServeHTTP2CheckReturnsOKWithoutDispatch(t *testing.T) {
 	}
 }
 
-func TestServeHTTP2ConnectDispatchFailureClosesRequestBody(t *testing.T) {
+func TestServeHTTP2ConnectDispatchFailureAbortsHandlerAndClosesRequestBody(t *testing.T) {
 	server := newTestTrustTunnelServer(t, &ServerConfig{})
 	dispatcher := &testDispatcher{
 		dispatchFn: func(context.Context, xnet.Destination) (*transport.Link, error) {
@@ -208,17 +208,22 @@ func TestServeHTTP2ConnectDispatchFailureClosesRequestBody(t *testing.T) {
 	body := &closeTrackingBody{Reader: strings.NewReader("")}
 	req.Body = body
 
-	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
+	defer func() {
+		if r := recover(); r != http.ErrAbortHandler {
+			t.Fatalf("panic = %v, want %v", r, http.ErrAbortHandler)
+		}
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusOK)
+		}
+		if !body.closed {
+			t.Fatal("expected request body to be closed on CONNECT dispatch failure")
+		}
+		if dispatcher.dispatchCount != 1 {
+			t.Fatalf("unexpected dispatch count: got %d, want 1", dispatcher.dispatchCount)
+		}
+	}()
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusOK)
-	}
-	if !body.closed {
-		t.Fatal("expected request body to be closed on CONNECT dispatch failure")
-	}
-	if dispatcher.dispatchCount != 1 {
-		t.Fatalf("unexpected dispatch count: got %d, want 1", dispatcher.dispatchCount)
-	}
+	server.serveHTTP2Request(recorder, req, dispatcher, nil, "")
 }
 
 func TestTrustTunnelNegotiatedProtocolUnwrapsStatsConn(t *testing.T) {
