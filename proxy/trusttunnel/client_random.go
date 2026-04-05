@@ -42,9 +42,18 @@ func attachTrustTunnelClientRandom(ctx context.Context, value string) context.Co
 	content := session.ContentFromContext(ctx)
 	if content == nil {
 		content = &session.Content{}
-		ctx = session.ContextWithContent(ctx, content)
+	} else {
+		cloned := *content
+		if content.Attributes != nil {
+			cloned.Attributes = make(map[string]string, len(content.Attributes)+1)
+			for key, attrValue := range content.Attributes {
+				cloned.Attributes[key] = attrValue
+			}
+		}
+		content = &cloned
 	}
 
+	ctx = session.ContextWithContent(ctx, content)
 	content.SetAttribute("trusttunnel.client_random", value)
 	return ctx
 }
