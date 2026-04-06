@@ -267,6 +267,10 @@ func (h *Handler) DestIpAddress() net.IP {
 	return internet.DestIpAddress()
 }
 
+func (h *Handler) StreamSettings() *internet.MemoryStreamConfig {
+	return h.streamSettings
+}
+
 // Dial implements internet.Dialer.
 func (h *Handler) Dial(ctx context.Context, dest net.Destination) (stat.Connection, error) {
 	if h.senderSettings != nil {

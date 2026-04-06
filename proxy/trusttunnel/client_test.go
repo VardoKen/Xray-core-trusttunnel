@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,9 @@ import (
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/session"
 	"github.com/xtls/xray-core/transport"
+	"github.com/xtls/xray-core/transport/internet"
+	"github.com/xtls/xray-core/transport/internet/reality"
+	"github.com/xtls/xray-core/transport/internet/stat"
 	"github.com/xtls/xray-core/transport/pipe"
 )
 
@@ -42,6 +46,67 @@ func TestClientProcessRejectsIncompleteICMPLink(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "icmp link is incomplete") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+type fakeTrustTunnelDialerWithStreamSettings struct {
+	streamSettings *internet.MemoryStreamConfig
+	dialCalls      int
+}
+
+func (d *fakeTrustTunnelDialerWithStreamSettings) Dial(ctx context.Context, destination xnet.Destination) (stat.Connection, error) {
+	d.dialCalls++
+	return nil, io.EOF
+}
+
+func (*fakeTrustTunnelDialerWithStreamSettings) DestIpAddress() net.IP {
+	return nil
+}
+
+func (*fakeTrustTunnelDialerWithStreamSettings) SetOutboundGateway(ctx context.Context, ob *session.Outbound) {
+}
+
+func (d *fakeTrustTunnelDialerWithStreamSettings) StreamSettings() *internet.MemoryStreamConfig {
+	return d.streamSettings
+}
+
+func TestClientProcessRejectsHTTP3Reality(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			Transport: TransportProtocol_HTTP3,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType:     "reality",
+			SecuritySettings: &reality.Config{},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "http3 with REALITY is unsupported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 0 {
+		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
 	}
 }
 

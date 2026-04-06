@@ -272,6 +272,9 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	}
 
 	if c.config.GetTransport() == TransportProtocol_HTTP3 {
+		if trustTunnelHTTP3RealityUnsupported(dialer) {
+			return errors.New("trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only").AtWarning()
+		}
 		serverAddr := c.server.Destination.NetAddr()
 		if serverAddr == "" {
 			return errors.New("invalid trusttunnel server address")

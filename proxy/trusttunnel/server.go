@@ -155,10 +155,22 @@ func (s *Server) Network() []net.Network {
 }
 
 func (s *Server) ListenerContext(ctx context.Context) context.Context {
-	return tcptransport.ContextWithTrustTunnelServerTimeouts(ctx, tcptransport.TrustTunnelServerTimeouts{
+	ctx = tcptransport.ContextWithTrustTunnelServerTimeouts(ctx, tcptransport.TrustTunnelServerTimeouts{
 		TLSHandshakeTimeout:   s.config.tlsHandshakeTimeout(),
 		ClientListenerTimeout: s.config.clientListenerTimeout(),
 	})
+	return tcptransport.ContextWithTrustTunnelServerTransportHints(ctx, tcptransport.TrustTunnelServerTransportHints{
+		WantsHTTP3: trustTunnelServerWantsHTTP3(s.config.GetTransports()),
+	})
+}
+
+func trustTunnelServerWantsHTTP3(transports []TransportProtocol) bool {
+	for _, transport := range transports {
+		if transport == TransportProtocol_HTTP3 {
+			return true
+		}
+	}
+	return false
 }
 
 func isTimeout(err error) bool {

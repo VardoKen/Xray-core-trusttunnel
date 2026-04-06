@@ -19,3 +19,14 @@ func TestContextWithTrustTunnelServerTimeouts(t *testing.T) {
 		t.Fatalf("timeouts = %+v, want %+v", got, want)
 	}
 }
+
+func TestContextWithTrustTunnelServerTransportHints(t *testing.T) {
+	want := TrustTunnelServerTransportHints{WantsHTTP3: true}
+
+	ctx := ContextWithTrustTunnelServerTransportHints(context.Background(), want)
+	got := trustTunnelServerTransportHintsFromContext(ctx)
+
+	if got != want {
+		t.Fatalf("hints = %+v, want %+v", got, want)
+	}
+}

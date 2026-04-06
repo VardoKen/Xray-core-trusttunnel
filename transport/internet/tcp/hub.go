@@ -62,6 +62,9 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSe
 		l.realityConfig = config.GetREALITYConfig()
 		go goreality.DetectPostHandshakeRecordsLens(l.realityConfig)
 	}
+	if l.realityConfig != nil && trustTunnelServerTransportHintsFromContext(ctx).WantsHTTP3 {
+		return nil, errors.New("trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only").AtWarning()
+	}
 
 	if tcpSettings.HeaderSettings != nil {
 		headerConfig, err := tcpSettings.HeaderSettings.GetInstance()

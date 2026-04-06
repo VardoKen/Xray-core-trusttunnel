@@ -123,6 +123,9 @@ func (c *Client) processUDP(ctx context.Context, link *transport.Link, dialer in
 
 func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer, account *MemoryAccount) (io.ReadWriteCloser, error) {
 	if c.config.GetTransport() == TransportProtocol_HTTP3 {
+		if trustTunnelHTTP3RealityUnsupported(dialer) {
+			return nil, errors.New("trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only").AtWarning()
+		}
 		serverAddr := c.server.Destination.NetAddr()
 		if serverAddr == "" {
 			return nil, errors.New("invalid trusttunnel server address")

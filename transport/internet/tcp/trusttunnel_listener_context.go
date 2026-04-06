@@ -10,7 +10,12 @@ type TrustTunnelServerTimeouts struct {
 	ClientListenerTimeout time.Duration
 }
 
+type TrustTunnelServerTransportHints struct {
+	WantsHTTP3 bool
+}
+
 type trustTunnelServerTimeoutsKey struct{}
+type trustTunnelServerTransportHintsKey struct{}
 
 func ContextWithTrustTunnelServerTimeouts(ctx context.Context, timeouts TrustTunnelServerTimeouts) context.Context {
 	if timeouts.TLSHandshakeTimeout <= 0 && timeouts.ClientListenerTimeout <= 0 {
@@ -27,4 +32,21 @@ func trustTunnelServerTimeoutsFromContext(ctx context.Context) TrustTunnelServer
 		return timeouts
 	}
 	return TrustTunnelServerTimeouts{}
+}
+
+func ContextWithTrustTunnelServerTransportHints(ctx context.Context, hints TrustTunnelServerTransportHints) context.Context {
+	if !hints.WantsHTTP3 {
+		return ctx
+	}
+	return context.WithValue(ctx, trustTunnelServerTransportHintsKey{}, hints)
+}
+
+func trustTunnelServerTransportHintsFromContext(ctx context.Context) TrustTunnelServerTransportHints {
+	if ctx == nil {
+		return TrustTunnelServerTransportHints{}
+	}
+	if hints, ok := ctx.Value(trustTunnelServerTransportHintsKey{}).(TrustTunnelServerTransportHints); ok {
+		return hints
+	}
+	return TrustTunnelServerTransportHints{}
 }
