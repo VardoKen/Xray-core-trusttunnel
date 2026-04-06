@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `55c97b16`
+Коммит состояния: `effe1927`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -137,10 +137,13 @@
 - `CertificatePem`
 - `EnableUdp`
 - outbound `ClientRandom`
+- `HasIpv6` как client-side gate для явных IPv6 literal targets
 
-Декларативны на текущем состоянии:
-- `HasIpv6`
+Явно unsupported на текущем состоянии:
 - `AntiDpi`
+
+Пока отсутствует в текущем Xray TrustTunnel config surface:
+- `post_quantum_group_enabled`
 
 ### 4.4. H2 REALITY runtime-path
 
@@ -183,7 +186,22 @@
 - current runtime теперь явно режет её marker'ом `trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`;
 - для будущей реализации нужен новый transport/security layer для QUIC + REALITY, а не локальный фикс внутри TrustTunnel handler.
 
-### 4.6. Outbound `clientRandom` runtime-path
+### 4.6. Client-Side IPv6 / AntiDpi policy gates
+
+Файлы:
+- `proxy/trusttunnel/client.go`
+- `proxy/trusttunnel/client_test.go`
+
+Реализовано:
+- `hasIpv6=false` теперь реально участвует в client-side policy layer и режет явные IPv6 literal targets до dial marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`;
+- тот же guard не затрагивает явные IPv4 literal targets: live H2/REALITY retest подтверждает, что `tcp:1.1.1.1:443` продолжает идти через тот же working path;
+- `antiDpi=true` больше не остаётся декларативным no-op: runtime явно отклоняет его marker'ом `trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime`.
+
+Граница текущего состояния:
+- `hasIpv6` пока является literal-IP gate, а не полной domain-target semantics, потому что domain routing/resolution может происходить downstream в общей модели Xray;
+- `antiDpi` остаётся открытым parity-вопросом только как будущий transport-compatible feature, но не как silent compatibility field.
+
+### 4.7. Outbound `clientRandom` runtime-path
 
 Файлы:
 - `transport/internet/tls/client_random.go`
@@ -202,7 +220,7 @@
 - H2 и H3 allow-case с `clientRandom = "deadbeef"` проходят server-side rules;
 - H2 и H3 deny-case с несовпадающим `clientRandom` получают `403`.
 
-### 4.7. Outbound `_icmp` runtime-path
+### 4.8. Outbound `_icmp` runtime-path
 
 Файлы:
 - `proxy/trusttunnel/client.go`
@@ -444,11 +462,12 @@ Server side:
 - `UdpConnectionsTimeoutSecs`
 - `Ipv6Available` для `_icmp`
 
-### 11.2. Пока декларативные
+### 11.2. Пока не образуют полный product surface
 
 Client side:
-- `HasIpv6`
-- `AntiDpi`
+- `HasIpv6` beyond explicit literal-IPv6 gate
+- `AntiDpi` как transport feature; current runtime пока только явно режет `antiDpi=true`
+- `post_quantum_group_enabled`
 
 Server side:
 - `Hosts`

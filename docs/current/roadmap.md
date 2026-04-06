@@ -48,10 +48,10 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 ### 2.4. Client-side parity после REALITY
 
-После закрытия H2 production-ready REALITY остаются поля:
+После закрытия H2 production-ready REALITY остаются:
 - `post_quantum_group_enabled`;
-- `anti_dpi`;
-- `has_ipv6`.
+- `has_ipv6` beyond explicit literal-IPv6 gate, то есть domain-target semantics и интеграция с общей resolution/targetStrategy моделью Xray;
+- `anti_dpi` как потенциальный future transport-compatible feature; current runtime уже не держит его silent no-op и явно режет `antiDpi=true`.
 
 ## 3. Интеграция с общей моделью Xray
 

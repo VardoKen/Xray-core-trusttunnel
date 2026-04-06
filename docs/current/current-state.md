@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `55c97b16`
+Коммит состояния: `effe1927`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -31,6 +31,8 @@ TrustTunnel в текущем дереве подтверждённо наход
 - core network model распознаёт `icmp` в `common/net`, config parsing и routing/API semantics;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
 - H3 + REALITY больше не остаётся silent-misconfig: current runtime явно отклоняет эту комбинацию на client и server сторонах с marker `trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`;
+- `hasIpv6=false` больше не является чисто декларативным outbound-полем: client-side runtime режет явные IPv6 literal targets marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`, при этом явный IPv4 literal target продолжает проходить через тот же H2/REALITY live path;
+- `antiDpi=true` больше не остаётся silent no-op: current outbound runtime явно отклоняет его marker'ом `trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime`;
 - server-side inbound/outbound/user traffic counters и `onlineMap` sanity-check;
 - полный `testing/scenarios` проходит как локально, так и на Debian lab; текущие full-tree ограничения остаются только внешними для `app/dns` QUIC probe и asset-зависимыми для `geoip.dat`, а не branch-регрессиями TrustTunnel;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
@@ -165,7 +167,7 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги и не уже закрытый H2 REALITY production path, а следующие блоки:
-- client-side parity fields после закрытия H2 REALITY production path;
+- оставшаяся client-side parity surface после закрытия H2 REALITY production path: `post_quantum_group_enabled`, domain-target semantics для `hasIpv6` вне literal-IP gate и любая будущая transport-compatible реализация `antiDpi` сверх текущего explicit reject;
 - нормализация TrustTunnel вокруг `streamSettings` и общей модели Xray.
 
 H3 + REALITY на текущем этапе больше не считается обычным parity-gap: R&D завершён stop-factor verdict'ом. Любая будущая реализация потребует нового QUIC-capable REALITY transport в Xray core, а не локального патча в TrustTunnel.

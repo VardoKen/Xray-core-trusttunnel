@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `55c97b16`
+Коммит состояния: `effe1927`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -154,6 +154,19 @@
 - для H3 использовать обычный TLS path;
 - не считать `http3 + reality` вопросом “недостающего флага” в текущем Xray transport layer.
 
+### 2.15. Client-Side `hasIpv6` / `antiDpi`
+
+Подтверждено live runtime-retest через lab client bundle `/opt/lab/xray-tt/logs/client-parity-20260406-171758` и remote server bundle `/opt/trusttunnel-dev/logs/client-parity-remote-20260406-141747`:
+- baseline H2/REALITY config на `127.0.0.1:10831` даёт живой explicit-IPv4 path до `https://1.1.1.1/cdn-cgi/trace` с `ip=37.252.0.130`, `http=http/2`, `kex=X25519MLKEM768`;
+- config с `hasIpv6=false` на `127.0.0.1:10832` сохраняет тот же working path для explicit IPv4 literal target;
+- тот же config режет explicit IPv6 literal target `https://[2606:4700:4700::1111]/cdn-cgi/trace` marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`;
+- config с `antiDpi=true` на `127.0.0.1:10833` режет даже explicit IPv4 literal target marker'ом `trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime`.
+
+Практическое правило:
+- `hasIpv6=false` сейчас трактовать как guard для явных IPv6 literal targets;
+- не считать `hasIpv6=false` полной политикой для domain targets, пока resolution/targetStrategy semantics не закрыты в общей модели Xray;
+- `antiDpi=true` не использовать как рабочий product path: current runtime его явно отклоняет.
+
 ## 3. Как писать рабочие outbound-конфиги
 
 ### 3.1. Поддерживаемые поля
@@ -170,9 +183,14 @@
 - `certificatePemFile`
 - `udp`
 
-Присутствуют в модели, но не подтверждены как самостоятельная активная функция:
-- `hasIpv6`
+Подтверждены как ограниченная или guarded runtime-поверхность:
+- `hasIpv6` как client-side gate для явных IPv6 literal targets
+
+Явно unsupported:
 - `antiDpi`
+
+Пока отсутствует в текущем Xray TrustTunnel JSON-surface:
+- `postQuantumGroupEnabled`
 
 Подтверждённо активная runtime-функция:
 - `clientRandom` для H2 и H3 outbound
@@ -358,7 +376,7 @@
 
 На текущем состоянии нельзя объявлять как завершённые функции:
 - `antiDpi` как рабочий product path;
-- `hasIpv6` как активную готовую функцию;
+- `hasIpv6` как полную domain-resolution-aware функцию вне literal-IP gate;
 - TrustTunnel + H3 + REALITY как рабочий path в текущем transport layer; текущий runtime его явно отклоняет;
 - `ipv6Available` как общий server transport selector вне `_icmp` raw-socket surface;
 - server runtime host/cert selection через `settings.hosts[]`;

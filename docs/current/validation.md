@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `55c97b16`
+Коммит состояния: `effe1927`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -612,6 +612,30 @@ Preflight:
 Технический вывод:
 - это больше не “непроверенный H3 REALITY path”, а explicit unsupported combination;
 - future support потребует нового QUIC-capable REALITY transport/security layer в Xray core, а не локального TrustTunnel patch.
+
+### 2.24. Client-Side `hasIpv6` / `antiDpi` runtime gates
+
+Preflight:
+- origin repo HEAD: `effe19274b23e10c46a98833c9880fec23c8dca8`, tracked worktree clean;
+- lab repo HEAD: `effe19274b23e10c46a98833c9880fec23c8dca8`, tracked worktree clean;
+- local compile-only sweep: `GOFLAGS=-buildvcs=false go test -run '^$' ./...`;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-client-parity-linux`;
+- remote runtime binary: `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux`;
+- lab runtime configs: `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality_baseline.json`, `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality_hasipv6_false.json`, `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality_antidpi_true.json`;
+- lab bundle: `/opt/lab/xray-tt/logs/client-parity-20260406-171758`;
+- remote server bundle: `/opt/trusttunnel-dev/logs/client-parity-remote-20260406-141747`.
+
+Подтверждено:
+- baseline config на `127.0.0.1:10831` проходит explicit IPv4 literal probe `https://1.1.1.1/cdn-cgi/trace` с `curl exit=0`; downstream trace содержит `ip=37.252.0.130`, `http=http/2`, `kex=X25519MLKEM768`, а client log сохраняет REALITY marker `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`;
+- remote server log bundle фиксирует для baseline `trusttunnel H2 CONNECT accepted for tcp:1.1.1.1:443` и `proxy/freedom: connection opened to tcp:1.1.1.1:443`;
+- config с `hasIpv6=false` на `127.0.0.1:10832` сохраняет working path для explicit IPv4 literal target: `curl exit=0`, trace снова содержит `ip=37.252.0.130`, `http=http/2`, `kex=X25519MLKEM768`, а remote server log повторно фиксирует `trusttunnel H2 CONNECT accepted for tcp:1.1.1.1:443`;
+- тот же config с `hasIpv6=false` режет explicit IPv6 literal target `https://[2606:4700:4700::1111]/cdn-cgi/trace` с `curl exit=35` и client log marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`;
+- config с `antiDpi=true` на `127.0.0.1:10833` режет explicit IPv4 literal target `https://1.1.1.1/cdn-cgi/trace` с `curl exit=35` и client log marker'ом `trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime`.
+
+Технический вывод:
+- `hasIpv6` больше не является чисто декларативным полем: current runtime реально режет явные IPv6 literal targets и не ломает explicit IPv4 literal path;
+- это ещё не полная parity semantics для domain targets, потому что resolution/targetStrategy может происходить downstream в общей модели Xray;
+- `antiDpi` больше не остаётся silent no-op: current runtime явно отклоняет его как unsupported combination.
 
 Для воспроизводимости outbound `clientRandom` retest зафиксированы:
 - server H2 rules: `testing/trusttunnel/server_h2_rules.json`;
