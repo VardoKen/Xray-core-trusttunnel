@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `c6ff745b`
+Коммит состояния: `55c97b16`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -162,7 +162,28 @@
 - lab client `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json` и remote runtime binary `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux` дают живой H2/UDP DNS path;
 - controlled load bundle `/opt/lab/xray-tt/logs/load-h2-reality-20260406-111027` показывает, что тот же H2/REALITY path переносит sustained TCP traffic без функционального срыва.
 
-### 4.5. Outbound `clientRandom` runtime-path
+### 4.5. H3 + REALITY explicit unsupported path
+
+Файлы:
+- `proxy/trusttunnel/h3_client.go`
+- `proxy/trusttunnel/client.go`
+- `proxy/trusttunnel/udp_client.go`
+- `proxy/trusttunnel/icmp_client.go`
+- `app/proxyman/outbound/handler.go`
+- `transport/internet/tcp/hub.go`
+- `transport/internet/reality/reality.go`
+
+Архитектурный verdict:
+- outbound H3 path не идёт через общий Xray `internet.Dial(..., streamSettings)` и сейчас сам строит QUIC/TLS handshake в `proxy/trusttunnel/h3_client.go`;
+- current REALITY surface в Xray оборачивает только TCP `net.Conn` через `reality.UClient(...)` / `reality.Server(...)`, а не QUIC `PacketConn`;
+- inbound H3 listener в `transport/internet/tcp/hub.go` поднимается только через TLS-based QUIC listener и не имеет QUIC-capable REALITY wrapper.
+
+Следствие:
+- H3 + REALITY в текущем дереве не является “ещё не допиленным fallback”, а отдельной unsupported combination;
+- current runtime теперь явно режет её marker'ом `trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`;
+- для будущей реализации нужен новый transport/security layer для QUIC + REALITY, а не локальный фикс внутри TrustTunnel handler.
+
+### 4.6. Outbound `clientRandom` runtime-path
 
 Файлы:
 - `transport/internet/tls/client_random.go`
@@ -181,7 +202,7 @@
 - H2 и H3 allow-case с `clientRandom = "deadbeef"` проходят server-side rules;
 - H2 и H3 deny-case с несовпадающим `clientRandom` получают `403`.
 
-### 4.6. Outbound `_icmp` runtime-path
+### 4.7. Outbound `_icmp` runtime-path
 
 Файлы:
 - `proxy/trusttunnel/client.go`

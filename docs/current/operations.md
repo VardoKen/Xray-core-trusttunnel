@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `c6ff745b`
+Коммит состояния: `55c97b16`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -141,6 +141,18 @@
 Практический вывод:
 - текущий bottleneck для большого H2/REALITY traffic находится скорее на lab/client side, а не на remote server CPU;
 - process CPU выше `100%` в этих измерениях означает использование более чем одного ядра.
+
+### 2.14. H3 + REALITY
+
+На текущем состоянии это explicit unsupported combination, а не runtime-path:
+- server-side запуск с `settings.transports` содержащим `http3` и `streamSettings.security = "reality"` завершается сразу с `transport/internet/tcp: trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`;
+- то же относится и к mixed server config `["http2","http3"] + reality`: current runtime не стартует частично, а отказывается целиком;
+- client-side outbound с `settings.transport = "http3"` и `streamSettings.security = "reality"` не уходит в тихий QUIC/TLS fallback, а роняет запрос точной ошибкой `proxy/trusttunnel: trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`.
+
+Практическое правило:
+- для REALITY использовать H2 path;
+- для H3 использовать обычный TLS path;
+- не считать `http3 + reality` вопросом “недостающего флага” в текущем Xray transport layer.
 
 ## 3. Как писать рабочие outbound-конфиги
 
@@ -347,7 +359,7 @@
 На текущем состоянии нельзя объявлять как завершённые функции:
 - `antiDpi` как рабочий product path;
 - `hasIpv6` как активную готовую функцию;
-- TrustTunnel + H3 + REALITY как закрытый production path;
+- TrustTunnel + H3 + REALITY как рабочий path в текущем transport layer; текущий runtime его явно отклоняет;
 - `ipv6Available` как общий server transport selector вне `_icmp` raw-socket surface;
 - server runtime host/cert selection через `settings.hosts[]`;
 - server runtime routing H2/H3 только через `settings.transports[]` без корректных `streamSettings`;

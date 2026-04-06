@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `c6ff745b`
+Коммит состояния: `55c97b16`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -30,6 +30,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - server-side observable timeout surface подтверждён downstream-observable runtime-retest для `tlsHandshakeTimeoutSecs`, `clientListenerTimeoutSecs`, `connectionEstablishmentTimeoutSecs`, `tcpConnectionsTimeoutSecs` и `udpConnectionsTimeoutSecs`;
 - core network model распознаёт `icmp` в `common/net`, config parsing и routing/API semantics;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
+- H3 + REALITY больше не остаётся silent-misconfig: current runtime явно отклоняет эту комбинацию на client и server сторонах с marker `trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`;
 - server-side inbound/outbound/user traffic counters и `onlineMap` sanity-check;
 - полный `testing/scenarios` проходит как локально, так и на Debian lab; текущие full-tree ограничения остаются только внешними для `app/dns` QUIC probe и asset-зависимыми для `geoip.dat`, а не branch-регрессиями TrustTunnel;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
@@ -164,9 +165,10 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 ## 4. Что остаётся открытым после этой фиксации
 
 Открытыми задачами текущего этапа считаются не H3-баги и не уже закрытый H2 REALITY production path, а следующие блоки:
-- R&D по H3 + REALITY;
 - client-side parity fields после закрытия H2 REALITY production path;
 - нормализация TrustTunnel вокруг `streamSettings` и общей модели Xray.
+
+H3 + REALITY на текущем этапе больше не считается обычным parity-gap: R&D завершён stop-factor verdict'ом. Любая будущая реализация потребует нового QUIC-capable REALITY transport в Xray core, а не локального патча в TrustTunnel.
 
 ## 5. Антирегрессионное правило
 

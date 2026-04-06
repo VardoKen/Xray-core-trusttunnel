@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `c6ff745b`
+Коммит состояния: `55c97b16`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -239,7 +239,6 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- исследовательский трек H3 + REALITY;
 - client-side parity fields после закрытия H2 REALITY production path;
 - общая интеграция TrustTunnel с `streamSettings` и общими механизмами Xray.
 
@@ -591,6 +590,28 @@ Preflight:
 - H2/REALITY path переносит большой TCP traffic без функционального срыва;
 - lab-side Xray client является более горячей стороной, чем remote server;
 - process CPU выше `100%` в этих измерениях означает использование более чем одного ядра.
+
+### 2.23. H3 + REALITY explicit unsupported verdict
+
+Preflight:
+- origin repo HEAD: `55c97b163ff80f9d265bf453291c734c65476412`, worktree clean;
+- lab repo HEAD: `55c97b163ff80f9d265bf453291c734c65476412`, worktree clean;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-current-h3r`;
+- lab package check: `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/outbound -count=1`;
+- generated lab-only server configs: `/opt/lab/xray-tt/configs/server_h3_reality_unsupported.json`, `/opt/lab/xray-tt/configs/server_h2h3_reality_unsupported.json`;
+- generated lab-only client config: `/opt/lab/xray-tt/configs/our_client_to_remote_server_h3_reality_unsupported.json`;
+- server reject bundle: `/opt/lab/xray-tt/logs/h3-reality-server-reject-20260406-161144`;
+- client reject bundle: `/opt/lab/xray-tt/logs/h3-reality-client-reject-20260406-161144`.
+
+Подтверждено:
+- package check на lab проходит: `proxy/trusttunnel`, `transport/internet/tcp`, `app/proxyman/outbound`;
+- pure server config с `transports = ["http3"]` и `security = "reality"` завершается `exit=255` и логирует `transport/internet/tcp: trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`;
+- mixed server config с `transports = ["http2","http3"]` и `security = "reality"` тоже завершается `exit=255` с тем же marker'ом, то есть current runtime не оставляет частично рабочий H2 path при явном H3+REALITY request;
+- client config с `settings.transport = "http3"` и `streamSettings.security = "reality"` даёт failed downstream SOCKS probe (`curl exit=35`) и client log `proxy/trusttunnel: trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`.
+
+Технический вывод:
+- это больше не “непроверенный H3 REALITY path”, а explicit unsupported combination;
+- future support потребует нового QUIC-capable REALITY transport/security layer в Xray core, а не локального TrustTunnel patch.
 
 Для воспроизводимости outbound `clientRandom` retest зафиксированы:
 - server H2 rules: `testing/trusttunnel/server_h2_rules.json`;
