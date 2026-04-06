@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `57d8d5e1`
+Коммит состояния: `ae621d24`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -74,6 +74,10 @@
 - `testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json`
 - `testing/trusttunnel/our_client_to_our_server_h3_clientrandom_deny.json`
 
+Lab-only live-traffic REALITY configs против remote host `37.252.0.130` не входят в tracked tree:
+- remote server variants содержат `privateKey` и должны оставаться вне репозитория;
+- client variants содержат live endpoint coordinates/credentials и тоже должны трактоваться как lab-local runtime artifacts.
+
 ## 3. Config binding и модель протокола
 
 ### 3.1. JSON → protobuf
@@ -119,6 +123,7 @@
 - H1 CONNECT
 - H2 CONNECT через `http2.Transport.NewClientConn`
 - H3 CONNECT через `apernet/quic-go/http3.Transport`
+- H2 CONNECT / `_udp2` / `_icmp` поверх общего Xray `streamSettings.security = "reality"` без ложного HTTP/1.1 fallback при пустом negotiated ALPN у REALITY-wrapper
 - ручная TLS verify semantics в `verifyTrustTunnelTLS()`
 - UDP CONNECT на official authority `_udp2`; server-side reserved-host matcher сохраняет backward-compat на `_udp2` и legacy `_udp2:0`
 - ICMP CONNECT на `_icmp:0` для H2 и H3
@@ -137,7 +142,27 @@
 - `HasIpv6`
 - `AntiDpi`
 
-### 4.4. Outbound `clientRandom` runtime-path
+### 4.4. H2 REALITY runtime-path
+
+Файлы:
+- `proxy/trusttunnel/security_state.go`
+- `proxy/trusttunnel/client.go`
+- `proxy/trusttunnel/udp_client.go`
+- `proxy/trusttunnel/icmp_client.go`
+
+Реализовано:
+- выбор H2 path больше не завязан только на буквальный `NegotiatedProtocol == "h2"`;
+- helper `trustTunnelShouldUseHTTP2(...)` учитывает requested TrustTunnel transport и security state соединения;
+- если outbound использует `settings.transport = "http2"` и общий Xray `streamSettings.security = "reality"`, то пустой negotiated ALPN у REALITY-wrapper больше не переводит client в ложный HTTP/1.1 fallback;
+- тот же helper покрывает TCP CONNECT, `_udp2` и `_icmp`, потому что все три path используют один и тот же выбор H2 transport branch;
+- practically significant marker: client log `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`.
+
+Подтверждено real-traffic retest на `ae621d24`:
+- lab client `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json` и remote server `/opt/trusttunnel-dev/configs/server_h2_reality_remote.json` дают живой H2/TCP path до internet;
+- lab client `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json` и remote server `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json` дают живой H2/UDP DNS path;
+- controlled load bundle `/opt/lab/xray-tt/logs/load-h2-reality-20260406-111027` показывает, что тот же H2/REALITY path переносит sustained TCP traffic без функционального срыва.
+
+### 4.5. Outbound `clientRandom` runtime-path
 
 Файлы:
 - `transport/internet/tls/client_random.go`
@@ -156,7 +181,7 @@
 - H2 и H3 allow-case с `clientRandom = "deadbeef"` проходят server-side rules;
 - H2 и H3 deny-case с несовпадающим `clientRandom` получают `403`.
 
-### 4.5. Outbound `_icmp` runtime-path
+### 4.6. Outbound `_icmp` runtime-path
 
 Файлы:
 - `proxy/trusttunnel/client.go`
@@ -379,6 +404,7 @@ Client side:
 - `CertificatePem`
 - `EnableUdp`
 - `Transport`
+- общий Xray `streamSettings.security = "reality"` для H2 outbound path
 - outbound `ClientRandom`
 
 Server side:

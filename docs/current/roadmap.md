@@ -11,8 +11,9 @@
 Этот документ не повторяет уже закрытые H3-дефекты, не переоткрывает закрытый H2 `_check` и не возвращает auth/stats sanity-check или observable timeout surface в список открытых проблем без новых доказательств.
 
 Текущее направление разработки:
-1. реализовать и проверить REALITY;
-2. довести TrustTunnel до корректной интеграции с общими механизмами Xray-Core.
+1. не переоткрывать уже закрытый H2 production path по REALITY без новых доказательств;
+2. довести TrustTunnel до корректной интеграции с общими механизмами Xray-Core;
+3. отдельно исследовать H3 + REALITY как R&D-трек.
 
 Переоткрывать закрытую H3-тройку можно только при появлении более новых доказательств, чем фиксация `99e59352`.
 
@@ -22,11 +23,16 @@
 
 REALITY должен внедряться через общий Xray `streamSettings.security`, а не через trusttunnel-specific `settings`.
 
-### 2.2. Production-путь
+### 2.2. Закрытый production-path
 
-Приоритетный production path:
+Закрыто real-traffic retest на 2026-04-06 / `ae621d24`:
 - TrustTunnel + H2/TCP + REALITY;
-- затем TrustTunnel + H2/UDP + REALITY.
+- TrustTunnel + H2/UDP + REALITY.
+
+Практически значимый итог:
+- REALITY на H2 больше не является открытым production-gap;
+- текущий runtime идёт через общий Xray `streamSettings.security = "reality"`, а не через trusttunnel-specific поле;
+- отдельным post-fix verdict зафиксировано, что H2 path не должен падать в HTTP/1.1 fallback только из-за пустого negotiated ALPN у REALITY-wrapper.
 
 ### 2.3. Исследовательский путь
 
@@ -40,7 +46,7 @@ REALITY должен внедряться через общий Xray `streamSett
 
 ### 2.4. Client-side parity после REALITY
 
-После production-ready REALITY остаются поля:
+После закрытия H2 production-ready REALITY остаются поля:
 - `post_quantum_group_enabled`;
 - `anti_dpi`;
 - `has_ipv6`.
@@ -102,14 +108,12 @@ REALITY должен внедряться через общий Xray `streamSett
 
 ## 5. Порядок выполнения
 
-1. TrustTunnel + H2/TCP + REALITY
-2. TrustTunnel + H2/UDP + REALITY
-3. R&D по TrustTunnel + H3 + REALITY
-4. client-side parity fields после REALITY
-5. нормализация вокруг `streamSettings`
-6. full TLS/REALITY surface
-7. common outbound features
-8. common inbound features
-9. `_icmp` в routing/policy/stats модели Xray
-10. dynamic user management
-11. финальная матрица совместимости и validator
+1. R&D по TrustTunnel + H3 + REALITY
+2. client-side parity fields после REALITY
+3. нормализация вокруг `streamSettings`
+4. full TLS/REALITY surface
+5. common outbound features
+6. common inbound features
+7. `_icmp` в routing/policy/stats модели Xray
+8. dynamic user management
+9. финальная матрица совместимости и validator

@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `57d8d5e1`
+Коммит состояния: `ae621d24`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -95,6 +95,49 @@
 - локальные DNS probes через `127.0.0.1:5304/5305/5306/5307` дают `answers=2`;
 - после перехода outbound UDP CONNECT на `_udp2` прежний H2 fail `trusttunnel CONNECT failed with status 502` больше не воспроизводится.
 
+### 2.11. Наш Xray client → remote server → internet по H2/TCP + REALITY
+
+Подтверждено live-traffic retest на 2026-04-06 / `ae621d24`:
+- lab client runtime config: `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json`;
+- remote server runtime config: `/opt/trusttunnel-dev/configs/server_h2_reality_remote.json`;
+- lab bundle: `/opt/lab/xray-tt/logs/h2-reality-lab-20260406-102306`;
+- remote bundle: `/opt/trusttunnel-dev/logs/h2-reality-remote-20260406-102306`;
+- client log содержит `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`;
+- remote server log содержит `trusttunnel H2 CONNECT accepted for tcp:www.cloudflare.com:443` и `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`;
+- downstream SOCKS probes дают `ip=37.252.0.130`, `http=http/2` и `{"ip":"37.252.0.130"}`.
+
+Практическая граница:
+- remote server config остаётся lab-only runtime artifact, потому что содержит REALITY `privateKey` и не должен становиться tracked test config.
+
+### 2.12. Наш Xray client → remote server → internet по H2/UDP + REALITY
+
+Подтверждено live DNS retest на 2026-04-06 / `ae621d24`:
+- lab client runtime config: `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json`;
+- remote server runtime config: `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json`;
+- lab bundle: `/opt/lab/xray-tt/logs/h2-reality-udp-lab-20260406-102306`;
+- remote bundle: `/opt/trusttunnel-dev/logs/h2-reality-udp-remote-20260406-102306`;
+- remote server log содержит `trusttunnel H2 UDP mux accepted`, `dispatch request to: udp:1.1.1.1:53`, `proxy/freedom: connection opened to udp:1.1.1.1:53`;
+- downstream DNS probe для `cloudflare.com` возвращает `104.16.132.229` и `104.16.133.229`.
+
+Практическая граница:
+- remote UDP server config тоже остаётся lab-only runtime artifact, потому что содержит REALITY `privateKey`.
+
+### 2.13. Controlled load-test для H2/REALITY
+
+Подтверждено bundle `load-h2-reality-20260406-111027`:
+- lab Xray client binary: `/opt/lab/xray-tt/tmp/xray-tt-reality-linux`;
+- remote Xray server binary: `/opt/trusttunnel-dev/tmp/xray-tt-reality-linux`;
+- lab client runtime config: `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality_iperf_tcp.json`;
+- remote controlled target: `127.0.0.1:5201` через `iperf3`;
+- baseline `iperf3 -P 4 -t 20` даёт примерно `166 Mbit/s` receiver на uplink и `88 Mbit/s` receiver на reverse/downlink;
+- stress `iperf3 -P 8 -t 20` даёт примерно `238 Mbit/s` receiver на uplink и `148 Mbit/s` receiver на reverse/downlink;
+- на stress uplink lab-side Xray client держит в среднем около `92.9%` process CPU с пиками до `117%`, remote-side Xray server около `69.7%` с пиками до `87%`;
+- на stress reverse/downlink lab-side Xray client держит около `90.0%` среднего process CPU с пиками до `119.8%`, тогда как remote-side server остаётся около `23.4%` среднего и `39%` peak.
+
+Практический вывод:
+- текущий bottleneck для большого H2/REALITY traffic находится скорее на lab/client side, а не на remote server CPU;
+- process CPU выше `100%` в этих измерениях означает использование более чем одного ядра.
+
 ## 3. Как писать рабочие outbound-конфиги
 
 ### 3.1. Поддерживаемые поля
@@ -122,11 +165,16 @@
 
 Нужны одновременно:
 - `settings.transport = "http2"`
-- `streamSettings.security = "tls"`
-- `streamSettings.tlsSettings.alpn = ["h2"]`
-- `streamSettings.tlsSettings.serverName == settings.hostname`
-- сертификат сервера соответствует `hostname`
+- `streamSettings.network = "tcp"`
+- для TLS-path: `streamSettings.security = "tls"`
+- для TLS-path: `streamSettings.tlsSettings.alpn = ["h2"]`
+- для TLS-path: `streamSettings.tlsSettings.serverName == settings.hostname`
+- для TLS-path: сертификат сервера соответствует `hostname`
+- для REALITY-path: `streamSettings.security = "reality"`
+- для REALITY-path: `streamSettings.realitySettings.serverName == settings.hostname`
+- для REALITY-path: `publicKey`, `shortId` и `fingerprint` соответствуют серверу
 - если используется `certificatePemFile`, PEM должен читаться в runtime verify path
+- если используется REALITY-wrapper, пустой negotiated ALPN внутри TrustTunnel layer больше не должен трактоваться как причина падения в HTTP/1.1 fallback; авторитетным остаётся `settings.transport = "http2"`
 - если нужен deterministic allow/deny через server-side rules, `settings.clientRandom` должен совпадать с `client_random` rule-spec
 
 ### 3.3. Минимальные правила для H3 outbound
@@ -295,11 +343,13 @@
 На текущем состоянии нельзя объявлять как завершённые функции:
 - `antiDpi` как рабочий product path;
 - `hasIpv6` как активную готовую функцию;
+- TrustTunnel + H3 + REALITY как закрытый production path;
 - `ipv6Available` как общий server transport selector вне `_icmp` raw-socket surface;
 - server runtime host/cert selection через `settings.hosts[]`;
 - server runtime routing H2/H3 только через `settings.transports[]` без корректных `streamSettings`;
 - `_icmp` за пределами Linux path с OS-managed TUN routing или за пределами fixed-size official reply frame, если нужны MTU/pointer-specific поля;
-- доменные UDP targets.
+- доменные UDP targets;
+- lab-only REALITY server configs с `privateKey` внутри tracked tree репозитория.
 
 ## 8. Как использовать старые документы
 

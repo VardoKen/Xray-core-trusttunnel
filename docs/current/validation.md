@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `57d8d5e1`
+Коммит состояния: `ae621d24`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -32,13 +32,17 @@
 
 ## 1. Общая тестовая рамка
 
-Подтверждено:
+Подтверждено на `ae621d24`:
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound`
-- `go build -o /opt/lab/xray-tt/tmp/xray-tt-current ./main`
+- `go test ./common/signal ./common/net ./common/mux ./common/singbridge ./transport/internet/tcp ./transport/internet/tls ./app/dispatcher ./app/proxyman/inbound ./app/proxyman/outbound ./transport/internet ./proxy/trusttunnel/...`
+- `go test ./proxy/freedom ./proxy/http ./proxy/socks ./proxy/trojan ./proxy/vmess/... ./proxy/vless/... ./proxy/shadowsocks ./proxy/hysteria ./proxy/wireguard ./transport/internet/udp ./app/reverse`
+- `$env:GOFLAGS='-buildvcs=false'; go test -run '^$' ./...`
+- `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main`
+- `$env:GOFLAGS='-buildvcs=false'; go test ./...` на Windows падает не массово, а только в `testing/scenarios`
+- first fail текущего full-tree run: `go test ./testing/scenarios -count=1 -failfast -timeout 30m -v` останавливается на `TestProxyOverKCP` с `read tcp ... i/o timeout`
 
-Ограничение:
-- полный `go test ./...` исторически не считался обязательным зелёным критерием вне зоны доработки;
-- известные внешние ограничения включали `geoip.dat` и `transport/internet/tls/TestECHDial`.
+Ограничение текущего full-tree verdict:
+- этот KCP scenario fail уже был отдельно воспроизведён A/B на pre-`common/signal` commit `1f70e1ac`, поэтому он не считается новым regress-сигналом от TrustTunnel / H2 REALITY изменений текущей ветки.
 
 ## 2. Подтверждённые runtime-проверки
 
@@ -220,6 +224,7 @@ Preflight:
 - official H2 `_icmp` interop как отдельного незакрытого server-side дефекта;
 - official H3 `_icmp` interop как отдельного незакрытого server-side дефекта;
 - полного UDP interop matrix как отдельного незакрытого compatibility gap;
+- H2/TCP + REALITY и H2/UDP + REALITY как открытого production-gap, если live retest bundles от 2026-04-06 остаются воспроизводимыми;
 - outbound `clientRandom` как отдельного чисто декларативного поля на H2/H3;
 - transport-layer принадлежности рабочего H3 path;
 - server-side H3 rules по `client_random`;
@@ -231,7 +236,9 @@ Preflight:
 ## 5. Что остаётся предметом будущих проверок и что сохранено как воспроизводимый runbook
 
 Открытые блоки для следующих циклов проверки:
-- REALITY на H2 и исследовательский трек H3 + REALITY.
+- исследовательский трек H3 + REALITY;
+- client-side parity fields после закрытия H2 REALITY production path;
+- общая интеграция TrustTunnel с `streamSettings` и общими механизмами Xray.
 
 Локально подтверждённые regression-тесты на 2026-04-05:
 - `go test ./common/net` проходит, включая `Network_ICMP` string/destination coverage;
@@ -262,13 +269,14 @@ Preflight:
 - H1 `_udp2` больше не уходит в обычный dispatch и отвечает явной HTTP-ошибкой;
 - H1 `_icmp` больше не уходит в обычный dispatch и отвечает `501 Not Implemented`.
 
-Расширенный local regression sweep на 2026-04-06 / `57d8d5e1`:
+Расширенный local regression sweep на 2026-04-06 / `ae621d24`:
 - `go test ./common/signal ./common/net ./common/mux ./common/singbridge ./transport/internet/tcp ./transport/internet/tls ./app/dispatcher ./app/proxyman/inbound ./app/proxyman/outbound ./transport/internet ./proxy/trusttunnel/...` проходит;
 - `go test ./proxy/freedom ./proxy/http ./proxy/socks ./proxy/trojan ./proxy/vmess/... ./proxy/vless/... ./proxy/shadowsocks ./proxy/hysteria ./proxy/wireguard ./transport/internet/udp ./app/reverse` проходит;
 - `GOFLAGS=-buildvcs=false go test -run '^$' ./...` проходит как compile-only sweep по всему дереву;
 - `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main` проходит;
-- `GOFLAGS=-buildvcs=false go test ./...` на Windows не показывает массового regress по дереву, но падает в `testing/scenarios` на KCP scenarios: `TestProxyOverKCP`, `TestTLSOverKCP`, `TestVMessKCP`, `TestVMessKCPLarge`;
-- быстрый A/B check в temporary worktree на pre-`common/signal` commit `1f70e1ac` воспроизводит `go test ./testing/scenarios -run '^TestProxyOverKCP$' -count=1` с тем же `read tcp ... i/o timeout`, поэтому этот KCP fail не является новым эффектом transport/tcp timeout-fix `57d8d5e1`.
+- `GOFLAGS=-buildvcs=false go test ./...` на Windows снова не показывает массового regress по дереву, а падает только в `testing/scenarios`;
+- `go test ./testing/scenarios -count=1 -failfast -timeout 30m -v` на текущем HEAD останавливается на `TestProxyOverKCP` с тем же `read tcp ... i/o timeout`;
+- быстрый A/B check в temporary worktree на pre-`common/signal` commit `1f70e1ac` воспроизводит `go test ./testing/scenarios -run '^TestProxyOverKCP$' -count=1` с тем же `read tcp ... i/o timeout`, поэтому этот KCP fail не является новым эффектом TrustTunnel / H2 REALITY changes текущей ветки.
 
 Linux package verification на Debian lab 2026-04-05 / `0fbc2ed5`:
 - repo HEAD: `0fbc2ed5d5ad701c4cb554c184144f56e2f22859`;
@@ -508,6 +516,74 @@ Pass markers:
 
 Отдельное внешнее ограничение локального test-run:
 - полный `go test ./infra/conf ./app/router` по-прежнему цепляется за отсутствие `geoip.dat`; это исторический fixture-gap текущего окружения, а не регрессия `Network_ICMP`.
+
+### 2.20. Live-traffic H2/TCP + REALITY против remote server
+
+Preflight:
+- origin repo HEAD: `ae621d2444af095ae15a566c1bff5714f1c728b6`;
+- lab repo HEAD: `ae621d2444af095ae15a566c1bff5714f1c728b6`, worktree clean;
+- remote repo HEAD: `55e89c26aedddc2bb0679648057427ea8ce90786`, top commit message `trusttunnel: prefer h2 path for reality without alpn`, worktree clean;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-reality-linux`;
+- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-reality-linux`;
+- lab client config: `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json`;
+- remote server config: `/opt/trusttunnel-dev/configs/server_h2_reality_remote.json`;
+- REALITY trust inputs: `serverName = www.google.com`, `publicKey = E59WjnvZcQMu7tR7_BgyhycuEdBS-CtKxfImRCdAvFM`, `shortId = 0123456789abcdef`, `fingerprint = chrome`;
+- lab bundle: `/opt/lab/xray-tt/logs/h2-reality-lab-20260406-102306`;
+- remote bundle: `/opt/trusttunnel-dev/logs/h2-reality-remote-20260406-102306`.
+
+Подтверждено:
+- lab client log содержит `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`;
+- remote server log содержит `trusttunnel H2 CONNECT accepted for tcp:www.cloudflare.com:443` и `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`;
+- downstream probe через SOCKS даёт `ip=37.252.0.130`, `http=http/2` и `{"ip":"37.252.0.130"}`.
+
+Практическая граница:
+- runtime server config остаётся lab-only artifact, потому что содержит REALITY `privateKey` и не должен попадать в tracked tree.
+
+### 2.21. Live-traffic H2/UDP + REALITY против remote server
+
+Preflight:
+- origin repo HEAD: `ae621d2444af095ae15a566c1bff5714f1c728b6`;
+- lab repo HEAD: `ae621d2444af095ae15a566c1bff5714f1c728b6`, worktree clean;
+- remote repo HEAD: `55e89c26aedddc2bb0679648057427ea8ce90786`, top commit message `trusttunnel: prefer h2 path for reality without alpn`, worktree clean;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-reality-linux`;
+- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-reality-linux`;
+- lab client config: `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json`;
+- remote server config: `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json`;
+- REALITY trust inputs: `serverName = www.google.com`, `publicKey = E59WjnvZcQMu7tR7_BgyhycuEdBS-CtKxfImRCdAvFM`, `shortId = 0123456789abcdef`, `fingerprint = chrome`;
+- lab bundle: `/opt/lab/xray-tt/logs/h2-reality-udp-lab-20260406-102306`;
+- remote bundle: `/opt/trusttunnel-dev/logs/h2-reality-udp-remote-20260406-102306`.
+
+Подтверждено:
+- remote server log содержит `trusttunnel H2 UDP mux accepted`, `dispatch request to: udp:1.1.1.1:53`, `proxy/freedom: connection opened to udp:1.1.1.1:53`;
+- downstream DNS probe для `cloudflare.com` возвращает `104.16.132.229` и `104.16.133.229`.
+
+Практическая граница:
+- runtime UDP server config тоже остаётся lab-only artifact, потому что содержит REALITY `privateKey`.
+
+### 2.22. Controlled load-test и CPU verdict для H2/REALITY
+
+Preflight:
+- origin repo HEAD: `ae621d2444af095ae15a566c1bff5714f1c728b6`;
+- lab repo HEAD: `ae621d2444af095ae15a566c1bff5714f1c728b6`, worktree clean;
+- remote repo HEAD: `55e89c26aedddc2bb0679648057427ea8ce90786`, top commit message `trusttunnel: prefer h2 path for reality without alpn`, worktree clean;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-reality-linux`;
+- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-reality-linux`;
+- lab client config: `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality_iperf_tcp.json`;
+- remote TrustTunnel server config: `/opt/trusttunnel-dev/configs/server_h2_reality_remote.json`;
+- controlled target: remote `iperf3 -s -B 127.0.0.1 -p 5201 --one-off`;
+- lab bundle: `/opt/lab/xray-tt/logs/load-h2-reality-20260406-111027`;
+- remote bundle: `/opt/trusttunnel-dev/logs/load-h2-reality-20260406-111027`.
+
+Подтверждено:
+- upload baseline `iperf3 -c 127.0.0.1 -p 15201 -t 20 -P 4 -J`: `sum_sent.bits_per_second = 177931398.09`, `sum_received.bits_per_second = 166071992.75`, retransmits `47`, lab CPU avg/max `65.57 / 94.0`, remote CPU avg/max `46.91 / 73.0`;
+- reverse baseline `iperf3 -c 127.0.0.1 -p 15201 -t 20 -P 4 -R -J`: `sum_sent.bits_per_second = 100365886.11`, `sum_received.bits_per_second = 87760712.30`, retransmits `94`, lab CPU avg/max `47.05 / 69.0`, remote CPU avg/max `14.62 / 21.0`;
+- upload stress `iperf3 -c 127.0.0.1 -p 15201 -t 20 -P 8 -J`: `sum_sent.bits_per_second = 265157427.70`, `sum_received.bits_per_second = 238399901.19`, retransmits `375`, lab CPU avg/max `92.86 / 117.0`, remote CPU avg/max `69.73 / 87.0`;
+- reverse stress `iperf3 -c 127.0.0.1 -p 15201 -t 20 -P 8 -R -J`: `sum_sent.bits_per_second = 177187608.90`, `sum_received.bits_per_second = 148312584.30`, retransmits `145`, lab CPU avg/max `89.95 / 119.8`, remote CPU avg/max `23.4 / 39.0`.
+
+Практический вывод:
+- H2/REALITY path переносит большой TCP traffic без функционального срыва;
+- lab-side Xray client является более горячей стороной, чем remote server;
+- process CPU выше `100%` в этих измерениях означает использование более чем одного ядра.
 
 Для воспроизводимости outbound `clientRandom` retest зафиксированы:
 - server H2 rules: `testing/trusttunnel/server_h2_rules.json`;

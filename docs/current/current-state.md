@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `57d8d5e1`
+Коммит состояния: `ae621d24`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -14,6 +14,8 @@ TrustTunnel в текущем дереве подтверждённо наход
 - H3 TCP;
 - H2 UDP mux;
 - H3 UDP mux;
+- H2/TCP + REALITY через живой traffic path lab → remote server → internet;
+- H2/UDP + REALITY через живой DNS traffic path lab → remote server → internet;
 - полный UDP interop matrix в направлениях official client → our server и our client → official endpoint для H2/H3, IPv4/IPv6, multi-flow и reopen после idle timeout;
 - H2 rules по `client_random`;
 - H3 rules по `client_random`;
@@ -137,6 +139,16 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - `tcp_connections_timeout_secs = 3` даёт downstream `Empty reply from server` с `elapsed_ms=3026`, а server log фиксирует close примерно через `3.00s` после `trusttunnel H2 CONNECT accepted`;
 - `udp_connections_timeout_secs` остаётся подтверждённым через reopen marker: два последовательных UDP probe после `udpConnectionsTimeoutSecs = 1` проходят в одном и том же сценарии, а reopen-count остаётся `2`.
 
+### 2.12. H2 REALITY production path
+
+Подтверждено real-traffic runtime-retest на 2026-04-06 / `ae621d24`:
+- outbound H2 path теперь корректно работает поверх общего Xray `streamSettings.security = "reality"` и не падает в ложный HTTP/1.1 fallback, если REALITY transport не экспонирует negotiated ALPN обратно в TrustTunnel layer;
+- practically significant fix заключается в том, что H2 path больше не требует буквального `NegotiatedProtocol == "h2"` для REALITY-wrapper: при `UsesReality=true` и пустом negotiated ALPN client пишет `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path` и продолжает по HTTP/2 preface path;
+- живой H2/TCP retest через lab client `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json`, remote server `/opt/trusttunnel-dev/configs/server_h2_reality_remote.json`, lab bundle `/opt/lab/xray-tt/logs/h2-reality-lab-20260406-102306` и remote bundle `/opt/trusttunnel-dev/logs/h2-reality-remote-20260406-102306` подтверждает `trusttunnel H2 CONNECT accepted for tcp:www.cloudflare.com:443` и `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`, а downstream probe через SOCKS даёт `ip=37.252.0.130`, `http=http/2` и `{\"ip\":\"37.252.0.130\"}`;
+- живой H2/UDP retest через lab client `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json`, remote server `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json`, lab bundle `/opt/lab/xray-tt/logs/h2-reality-udp-lab-20260406-102306` и remote bundle `/opt/trusttunnel-dev/logs/h2-reality-udp-remote-20260406-102306` подтверждает `trusttunnel H2 UDP mux accepted`, `dispatch request to: udp:1.1.1.1:53`, `proxy/freedom: connection opened to udp:1.1.1.1:53` и real DNS answer для `cloudflare.com`.
+- controlled load-test через lab client `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality_iperf_tcp.json`, remote iperf target `127.0.0.1:5201` и bundle `load-h2-reality-20260406-111027` подтверждает, что H2/REALITY path переносит большой TCP traffic без функционального срыва: на `iperf3 -P 4 -t 20` uplink receiver получает ~`166 Mbit/s`, reverse/downlink receiver получает ~`88 Mbit/s`, а на stress-case `iperf3 -P 8 -t 20` uplink receiver получает ~`238 Mbit/s`, reverse/downlink receiver получает ~`148 Mbit/s`;
+- practically significant CPU verdict по этому load-test: lab-side Xray client на stress uplink (`-P 8`) держит в среднем ~`92.9%` process CPU с пиками до `117%`, а remote-side Xray server ~`69.7%` с пиками до `87%`; на stress reverse/downlink lab-side client остаётся основным горячим участком со средним ~`90.0%` и пиками до `119.8%`, тогда как remote-side server остаётся заметно ниже, ~`23.4%` среднего и `39%` peak.
+
 ## 3. Что считается текущей истиной
 
 Текущую истину по проекту определяют:
@@ -150,8 +162,9 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 
 ## 4. Что остаётся открытым после этой фиксации
 
-Открытыми задачами текущего этапа считаются не H3-баги, а следующие блоки:
-- REALITY;
+Открытыми задачами текущего этапа считаются не H3-баги и не уже закрытый H2 REALITY production path, а следующие блоки:
+- R&D по H3 + REALITY;
+- client-side parity fields после закрытия H2 REALITY production path;
 - нормализация TrustTunnel вокруг `streamSettings` и общей модели Xray.
 
 ## 5. Антирегрессионное правило
