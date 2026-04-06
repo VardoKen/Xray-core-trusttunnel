@@ -122,3 +122,13 @@ func trustTunnelExtractSecurityState(conn any) trustTunnelSecurityState {
 
 	return state
 }
+
+func trustTunnelShouldUseHTTP2(state trustTunnelSecurityState) bool {
+	if state.NegotiatedProtocol == "h2" {
+		return true
+	}
+
+	// REALITY may intentionally complete without exposing ALPN to the wrapped
+	// application layer, but the transport can still carry a valid HTTP/2 preface.
+	return state.UsesReality && state.NegotiatedProtocol == ""
+}

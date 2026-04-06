@@ -551,7 +551,7 @@ func (c *Client) connectICMPTunnel(ctx context.Context, dialer internet.Dialer, 
 		}
 	}
 
-	if securityState.NegotiatedProtocol != "h2" {
+	if !trustTunnelShouldUseHTTP2(securityState) {
 		_ = conn.Close()
 		return nil, errors.New("trusttunnel icmp over http2 requires negotiated ALPN h2, got ", securityState.NegotiatedProtocol)
 	}

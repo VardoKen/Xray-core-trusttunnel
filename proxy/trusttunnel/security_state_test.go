@@ -94,3 +94,47 @@ func TestTrustTunnelClientSecurityStateReportsHandshakeFailure(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestTrustTunnelShouldUseHTTP2(t *testing.T) {
+	tests := []struct {
+		name  string
+		state trustTunnelSecurityState
+		want  bool
+	}{
+		{
+			name: "explicit h2",
+			state: trustTunnelSecurityState{
+				NegotiatedProtocol: "h2",
+			},
+			want: true,
+		},
+		{
+			name: "reality without alpn",
+			state: trustTunnelSecurityState{
+				UsesReality: true,
+			},
+			want: true,
+		},
+		{
+			name: "reality with explicit http11",
+			state: trustTunnelSecurityState{
+				UsesReality:        true,
+				NegotiatedProtocol: "http/1.1",
+			},
+			want: false,
+		},
+		{
+			name:  "plain empty alpn",
+			state: trustTunnelSecurityState{},
+			want:  false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := trustTunnelShouldUseHTTP2(tc.state); got != tc.want {
+				t.Fatalf("trustTunnelShouldUseHTTP2() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

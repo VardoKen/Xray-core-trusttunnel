@@ -320,9 +320,12 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	var tunnelConn io.ReadWriteCloser
 
 	switch {
-	case c.config.GetTransport() == TransportProtocol_HTTP2 && securityState.NegotiatedProtocol == "h2":
+	case c.config.GetTransport() == TransportProtocol_HTTP2 && trustTunnelShouldUseHTTP2(securityState):
+		if securityState.UsesReality && securityState.NegotiatedProtocol == "" {
+			errors.LogInfo(ctx, "trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path")
+		}
 		tunnelConn, err = connectHTTP2(conn, req)
-	case c.config.GetTransport() == TransportProtocol_HTTP2 && securityState.NegotiatedProtocol != "h2":
+	case c.config.GetTransport() == TransportProtocol_HTTP2 && !trustTunnelShouldUseHTTP2(securityState):
 		errors.LogWarning(ctx, "trusttunnel transport=http2 requested, but negotiated protocol is [", securityState.NegotiatedProtocol, "], falling back to HTTP/1.1 CONNECT")
 		tunnelConn, err = connectHTTP1(conn, req)
 	default:
