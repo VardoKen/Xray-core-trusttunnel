@@ -110,6 +110,111 @@ func TestClientProcessRejectsHTTP3Reality(t *testing.T) {
 	}
 }
 
+func TestClientProcessRejectsAntiDpi(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			AntiDpi: true,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "antiDpi is unsupported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 0 {
+		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
+	}
+}
+
+func TestClientProcessRejectsIPv6TargetWhenHasIpv6Disabled(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			HasIpv6: false,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("2606:4700:4700::1111"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "IPv6 target is disabled by hasIpv6=false") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 0 {
+		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
+	}
+}
+
+func TestClientProcessAllowsIPv4TargetWhenHasIpv6Disabled(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			HasIpv6: false,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 1 {
+		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
+	}
+}
+
 type fakeTrustTunnelStreamConn struct {
 	readBuf  bytes.Buffer
 	writeBuf bytes.Buffer

@@ -36,6 +36,18 @@ type Client struct {
 	policyManager policy.Manager
 }
 
+func (c *Client) validateOutboundTarget(target xnet.Destination) error {
+	if c.config.GetAntiDpi() {
+		return errors.New("trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime").AtWarning()
+	}
+
+	if !c.config.GetHasIpv6() && target.Address != nil && target.Address.Family().IsIPv6() {
+		return errors.New("trusttunnel IPv6 target is disabled by hasIpv6=false").AtWarning()
+	}
+
+	return nil
+}
+
 func NewClient(ctx context.Context, config *ClientConfig) (*Client, error) {
 	if config.Server == nil {
 		return nil, errors.New("no target trusttunnel server found")
@@ -256,6 +268,10 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	account, ok := user.Account.(*MemoryAccount)
 	if !ok {
 		return errors.New("trusttunnel user account is not valid")
+	}
+
+	if err := c.validateOutboundTarget(ob.Target); err != nil {
+		return err
 	}
 
 	if ob.Target.Network == xnet.Network_ICMP {
