@@ -2,7 +2,6 @@ package trusttunnel
 
 import (
 	"context"
-	"crypto/x509"
 	"io"
 	stdnet "net"
 	"time"
@@ -155,36 +154,22 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer, a
 		return nil, errors.New("failed to set deadline").Base(err).AtWarning()
 	}
 
-	nextProto := ""
-	var peerCerts []*x509.Certificate
-
-	iConn := stat.TryUnwrapStatsConn(conn)
-	if tlsConn, ok := iConn.(*xtlstls.Conn); ok {
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			_ = conn.Close()
-			return nil, errors.New("failed TLS handshake").Base(err).AtWarning()
-		}
-		state := tlsConn.ConnectionState()
-		nextProto = state.NegotiatedProtocol
-		peerCerts = state.PeerCertificates
-	} else if tlsConn, ok := iConn.(*xtlstls.UConn); ok {
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			_ = conn.Close()
-			return nil, errors.New("failed uTLS handshake").Base(err).AtWarning()
-		}
-		state := tlsConn.ConnectionState()
-		nextProto = state.NegotiatedProtocol
-		peerCerts = state.PeerCertificates
+	securityState, err := trustTunnelClientSecurityState(ctx, conn)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
 	}
 
-	if err := verifyTrustTunnelTLS(peerCerts, c.config); err != nil {
-		_ = conn.Close()
-		return nil, errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
+	if !securityState.UsesReality {
+		if err := verifyTrustTunnelTLS(securityState.PeerCertificates, c.config); err != nil {
+			_ = conn.Close()
+			return nil, errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
+		}
 	}
 
-	if nextProto != "h2" {
+	if securityState.NegotiatedProtocol != "h2" {
 		_ = conn.Close()
-		return nil, errors.New("trusttunnel udp over http2 requires negotiated ALPN h2, got ", nextProto)
+		return nil, errors.New("trusttunnel udp over http2 requires negotiated ALPN h2, got ", securityState.NegotiatedProtocol)
 	}
 
 	tunnelConn, err := connectHTTP2(conn, req)

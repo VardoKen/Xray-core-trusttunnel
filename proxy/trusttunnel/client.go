@@ -304,40 +304,26 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		return errors.New("failed to set deadline").Base(err).AtWarning()
 	}
 
-	nextProto := ""
-	var peerCerts []*x509.Certificate
-
-	iConn := stat.TryUnwrapStatsConn(conn)
-	if tlsConn, ok := iConn.(*xtlstls.Conn); ok {
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			_ = conn.Close()
-			return errors.New("failed TLS handshake").Base(err).AtWarning()
-		}
-		state := tlsConn.ConnectionState()
-		nextProto = state.NegotiatedProtocol
-		peerCerts = state.PeerCertificates
-	} else if tlsConn, ok := iConn.(*xtlstls.UConn); ok {
-		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			_ = conn.Close()
-			return errors.New("failed uTLS handshake").Base(err).AtWarning()
-		}
-		state := tlsConn.ConnectionState()
-		nextProto = state.NegotiatedProtocol
-		peerCerts = state.PeerCertificates
+	securityState, err := trustTunnelClientSecurityState(ctx, conn)
+	if err != nil {
+		_ = conn.Close()
+		return err
 	}
 
-	if err := verifyTrustTunnelTLS(peerCerts, c.config); err != nil {
-		_ = conn.Close()
-		return errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
+	if !securityState.UsesReality {
+		if err := verifyTrustTunnelTLS(securityState.PeerCertificates, c.config); err != nil {
+			_ = conn.Close()
+			return errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
+		}
 	}
 
 	var tunnelConn io.ReadWriteCloser
 
 	switch {
-	case c.config.GetTransport() == TransportProtocol_HTTP2 && nextProto == "h2":
+	case c.config.GetTransport() == TransportProtocol_HTTP2 && securityState.NegotiatedProtocol == "h2":
 		tunnelConn, err = connectHTTP2(conn, req)
-	case c.config.GetTransport() == TransportProtocol_HTTP2 && nextProto != "h2":
-		errors.LogWarning(ctx, "trusttunnel transport=http2 requested, but negotiated protocol is [", nextProto, "], falling back to HTTP/1.1 CONNECT")
+	case c.config.GetTransport() == TransportProtocol_HTTP2 && securityState.NegotiatedProtocol != "h2":
+		errors.LogWarning(ctx, "trusttunnel transport=http2 requested, but negotiated protocol is [", securityState.NegotiatedProtocol, "], falling back to HTTP/1.1 CONNECT")
 		tunnelConn, err = connectHTTP1(conn, req)
 	default:
 		tunnelConn, err = connectHTTP1(conn, req)

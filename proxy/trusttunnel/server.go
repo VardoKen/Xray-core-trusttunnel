@@ -201,6 +201,9 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 	reader := bufio.NewReaderSize(conn, 64*1024)
 
 	preface, err := reader.Peek(len(h2ClientPreface))
+	if negotiatedProto == "" {
+		negotiatedProto = trustTunnelNegotiatedProtocol(conn)
+	}
 	if err == nil && bytes.Equal(preface, []byte(h2ClientPreface)) {
 		if h2PrefaceAbortTimer != nil {
 			h2PrefaceAbortTimer.Stop()
@@ -241,22 +244,6 @@ func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Con
 	}
 
 	return s.processHTTP1(ctx, conn, reader, dispatcher, inbound, clientRandom)
-}
-
-func trustTunnelNegotiatedProtocol(conn stat.Connection) string {
-	if conn == nil {
-		return ""
-	}
-
-	if negotiated, ok := any(conn).(interface{ NegotiatedProtocol() string }); ok {
-		return negotiated.NegotiatedProtocol()
-	}
-
-	if negotiated, ok := stat.TryUnwrapStatsConn(conn).(interface{ NegotiatedProtocol() string }); ok {
-		return negotiated.NegotiatedProtocol()
-	}
-
-	return ""
 }
 
 func startTrustTunnelConnAbortTimer(conn stat.Connection, timeout time.Duration) *time.Timer {
