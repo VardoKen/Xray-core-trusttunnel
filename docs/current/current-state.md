@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `ae621d24`
+Коммит состояния: `c6ff745b`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -31,6 +31,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - core network model распознаёт `icmp` в `common/net`, config parsing и routing/API semantics;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
 - server-side inbound/outbound/user traffic counters и `onlineMap` sanity-check;
+- полный `testing/scenarios` проходит как локально, так и на Debian lab; текущие full-tree ограничения остаются только внешними для `app/dns` QUIC probe и asset-зависимыми для `geoip.dat`, а не branch-регрессиями TrustTunnel;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
 
 ## 2. Что закрыто на текущем состоянии
@@ -141,11 +142,11 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 
 ### 2.12. H2 REALITY production path
 
-Подтверждено real-traffic runtime-retest на 2026-04-06 / `ae621d24`:
+Подтверждено real-traffic runtime-retest на 2026-04-06 / `ae621d24`, затем повторно подтверждено current-head smoke на 2026-04-06 / `c6ff745b`:
 - outbound H2 path теперь корректно работает поверх общего Xray `streamSettings.security = "reality"` и не падает в ложный HTTP/1.1 fallback, если REALITY transport не экспонирует negotiated ALPN обратно в TrustTunnel layer;
 - practically significant fix заключается в том, что H2 path больше не требует буквального `NegotiatedProtocol == "h2"` для REALITY-wrapper: при `UsesReality=true` и пустом negotiated ALPN client пишет `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path` и продолжает по HTTP/2 preface path;
-- живой H2/TCP retest через lab client `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json`, remote server `/opt/trusttunnel-dev/configs/server_h2_reality_remote.json`, lab bundle `/opt/lab/xray-tt/logs/h2-reality-lab-20260406-102306` и remote bundle `/opt/trusttunnel-dev/logs/h2-reality-remote-20260406-102306` подтверждает `trusttunnel H2 CONNECT accepted for tcp:www.cloudflare.com:443` и `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`, а downstream probe через SOCKS даёт `ip=37.252.0.130`, `http=http/2` и `{\"ip\":\"37.252.0.130\"}`;
-- живой H2/UDP retest через lab client `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json`, remote server `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json`, lab bundle `/opt/lab/xray-tt/logs/h2-reality-udp-lab-20260406-102306` и remote bundle `/opt/trusttunnel-dev/logs/h2-reality-udp-remote-20260406-102306` подтверждает `trusttunnel H2 UDP mux accepted`, `dispatch request to: udp:1.1.1.1:53`, `proxy/freedom: connection opened to udp:1.1.1.1:53` и real DNS answer для `cloudflare.com`.
+- живой H2/TCP current-head smoke через lab client `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json`, runtime binary `/opt/lab/xray-tt/tmp/xray-tt-regress-linux`, remote runtime binary `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux`, lab bundle `/opt/lab/xray-tt/logs/workerfix-h2-reality-lab-20260406-153646` и remote bundle `/opt/trusttunnel-dev/logs/workerfix-h2-reality-remote-20260406-153646` повторно подтверждает `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`, `trusttunnel H2 CONNECT accepted for tcp:www.cloudflare.com:443`, `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`, а downstream probe через SOCKS даёт `ip=37.252.0.130`, `http=http/2` и `{\"ip\":\"37.252.0.130\"}`;
+- живой H2/UDP current-head smoke через lab client `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json`, runtime binary `/opt/lab/xray-tt/tmp/xray-tt-regress-linux`, remote runtime binary `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux`, lab bundle `/opt/lab/xray-tt/logs/workerfix-h2-reality-udp-lab-20260406-153758` и remote bundle `/opt/trusttunnel-dev/logs/workerfix-h2-reality-udp-remote-20260406-153758` повторно подтверждает `trusttunnel H2 UDP mux accepted`, `dispatch request to: udp:1.1.1.1:53`, `proxy/freedom: connection opened to udp:1.1.1.1:53` и real DNS answer для `cloudflare.com`.
 - controlled load-test через lab client `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality_iperf_tcp.json`, remote iperf target `127.0.0.1:5201` и bundle `load-h2-reality-20260406-111027` подтверждает, что H2/REALITY path переносит большой TCP traffic без функционального срыва: на `iperf3 -P 4 -t 20` uplink receiver получает ~`166 Mbit/s`, reverse/downlink receiver получает ~`88 Mbit/s`, а на stress-case `iperf3 -P 8 -t 20` uplink receiver получает ~`238 Mbit/s`, reverse/downlink receiver получает ~`148 Mbit/s`;
 - practically significant CPU verdict по этому load-test: lab-side Xray client на stress uplink (`-P 8`) держит в среднем ~`92.9%` process CPU с пиками до `117%`, а remote-side Xray server ~`69.7%` с пиками до `87%`; на stress reverse/downlink lab-side client остаётся основным горячим участком со средним ~`90.0%` и пиками до `119.8%`, тогда как remote-side server остаётся заметно ниже, ~`23.4%` среднего и `39%` peak.
 

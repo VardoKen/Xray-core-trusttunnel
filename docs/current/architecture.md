@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `ae621d24`
+Коммит состояния: `c6ff745b`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -74,9 +74,9 @@
 - `testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json`
 - `testing/trusttunnel/our_client_to_our_server_h3_clientrandom_deny.json`
 
-Lab-only live-traffic REALITY configs против remote host `37.252.0.130` не входят в tracked tree:
-- remote server variants содержат `privateKey` и должны оставаться вне репозитория;
-- client variants содержат live endpoint coordinates/credentials и тоже должны трактоваться как lab-local runtime artifacts.
+Для live-traffic REALITY против remote host `37.252.0.130` в tracked tree уже лежат шаблоны under `testing/trusttunnel/*`, а runtime deployment может использовать их lab-local copies:
+- tracked templates: `testing/trusttunnel/our_client_to_remote_server_h2_reality.json`, `testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json`, `testing/trusttunnel/server_h2_reality_remote.json`, `testing/trusttunnel/server_h2_udp_reality_remote.json`;
+- deployment-specific overrides и любые non-test keys/coordinates должны оставаться lab-local runtime artifacts вне tracked history.
 
 ## 3. Config binding и модель протокола
 
@@ -157,9 +157,9 @@ Lab-only live-traffic REALITY configs против remote host `37.252.0.130` н
 - тот же helper покрывает TCP CONNECT, `_udp2` и `_icmp`, потому что все три path используют один и тот же выбор H2 transport branch;
 - practically significant marker: client log `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`.
 
-Подтверждено real-traffic retest на `ae621d24`:
-- lab client `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json` и remote server `/opt/trusttunnel-dev/configs/server_h2_reality_remote.json` дают живой H2/TCP path до internet;
-- lab client `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json` и remote server `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json` дают живой H2/UDP DNS path;
+Подтверждено real-traffic retest на `ae621d24`, затем повторно подтверждено current-head smoke на `c6ff745b`:
+- lab client `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json` и remote runtime binary `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux` дают живой H2/TCP path до internet;
+- lab client `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json` и remote runtime binary `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux` дают живой H2/UDP DNS path;
 - controlled load bundle `/opt/lab/xray-tt/logs/load-h2-reality-20260406-111027` показывает, что тот же H2/REALITY path переносит sustained TCP traffic без функционального срыва.
 
 ### 4.5. Outbound `clientRandom` runtime-path

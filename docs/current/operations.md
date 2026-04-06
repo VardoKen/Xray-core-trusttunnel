@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `ae621d24`
+Коммит состояния: `c6ff745b`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -97,30 +97,34 @@
 
 ### 2.11. Наш Xray client → remote server → internet по H2/TCP + REALITY
 
-Подтверждено live-traffic retest на 2026-04-06 / `ae621d24`:
+Подтверждено live-traffic retest на 2026-04-06 / `ae621d24`, затем повторно подтверждено current-head smoke на 2026-04-06 / `c6ff745b`:
 - lab client runtime config: `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json`;
 - remote server runtime config: `/opt/trusttunnel-dev/configs/server_h2_reality_remote.json`;
-- lab bundle: `/opt/lab/xray-tt/logs/h2-reality-lab-20260406-102306`;
-- remote bundle: `/opt/trusttunnel-dev/logs/h2-reality-remote-20260406-102306`;
+- current-head lab binary: `/opt/lab/xray-tt/tmp/xray-tt-regress-linux`;
+- current-head remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux`;
+- current-head lab bundle: `/opt/lab/xray-tt/logs/workerfix-h2-reality-lab-20260406-153646`;
+- current-head remote bundle: `/opt/trusttunnel-dev/logs/workerfix-h2-reality-remote-20260406-153646`;
 - client log содержит `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`;
 - remote server log содержит `trusttunnel H2 CONNECT accepted for tcp:www.cloudflare.com:443` и `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`;
 - downstream SOCKS probes дают `ip=37.252.0.130`, `http=http/2` и `{"ip":"37.252.0.130"}`.
 
 Практическая граница:
-- remote server config остаётся lab-only runtime artifact, потому что содержит REALITY `privateKey` и не должен становиться tracked test config.
+- tracked template под этот runtime уже лежит в `testing/trusttunnel/server_h2_reality_remote.json`; deployment-specific overrides и non-test keys не должны попадать в tracked history.
 
 ### 2.12. Наш Xray client → remote server → internet по H2/UDP + REALITY
 
-Подтверждено live DNS retest на 2026-04-06 / `ae621d24`:
+Подтверждено live DNS retest на 2026-04-06 / `ae621d24`, затем повторно подтверждено current-head smoke на 2026-04-06 / `c6ff745b`:
 - lab client runtime config: `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json`;
 - remote server runtime config: `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json`;
-- lab bundle: `/opt/lab/xray-tt/logs/h2-reality-udp-lab-20260406-102306`;
-- remote bundle: `/opt/trusttunnel-dev/logs/h2-reality-udp-remote-20260406-102306`;
+- current-head lab binary: `/opt/lab/xray-tt/tmp/xray-tt-regress-linux`;
+- current-head remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux`;
+- current-head lab bundle: `/opt/lab/xray-tt/logs/workerfix-h2-reality-udp-lab-20260406-153758`;
+- current-head remote bundle: `/opt/trusttunnel-dev/logs/workerfix-h2-reality-udp-remote-20260406-153758`;
 - remote server log содержит `trusttunnel H2 UDP mux accepted`, `dispatch request to: udp:1.1.1.1:53`, `proxy/freedom: connection opened to udp:1.1.1.1:53`;
 - downstream DNS probe для `cloudflare.com` возвращает `104.16.132.229` и `104.16.133.229`.
 
 Практическая граница:
-- remote UDP server config тоже остаётся lab-only runtime artifact, потому что содержит REALITY `privateKey`.
+- tracked template под этот runtime уже лежит в `testing/trusttunnel/server_h2_udp_reality_remote.json`; deployment-specific overrides и non-test keys должны оставаться lab-local.
 
 ### 2.13. Controlled load-test для H2/REALITY
 

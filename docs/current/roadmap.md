@@ -25,7 +25,7 @@ REALITY должен внедряться через общий Xray `streamSett
 
 ### 2.2. Закрытый production-path
 
-Закрыто real-traffic retest на 2026-04-06 / `ae621d24`:
+Закрыто real-traffic retest на 2026-04-06 / `ae621d24`, затем повторно подтверждено current-head smoke на 2026-04-06 / `c6ff745b`:
 - TrustTunnel + H2/TCP + REALITY;
 - TrustTunnel + H2/UDP + REALITY.
 

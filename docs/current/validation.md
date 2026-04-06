@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-06
-Коммит состояния: `ae621d24`
+Коммит состояния: `c6ff745b`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -32,17 +32,20 @@
 
 ## 1. Общая тестовая рамка
 
-Подтверждено на `ae621d24`:
+Подтверждено на `c6ff745b`:
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound`
 - `go test ./common/signal ./common/net ./common/mux ./common/singbridge ./transport/internet/tcp ./transport/internet/tls ./app/dispatcher ./app/proxyman/inbound ./app/proxyman/outbound ./transport/internet ./proxy/trusttunnel/...`
 - `go test ./proxy/freedom ./proxy/http ./proxy/socks ./proxy/trojan ./proxy/vmess/... ./proxy/vless/... ./proxy/shadowsocks ./proxy/hysteria ./proxy/wireguard ./transport/internet/udp ./app/reverse`
 - `$env:GOFLAGS='-buildvcs=false'; go test -run '^$' ./...`
 - `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main`
-- `$env:GOFLAGS='-buildvcs=false'; go test ./...` на Windows падает не массово, а только в `testing/scenarios`
-- first fail текущего full-tree run: `go test ./testing/scenarios -count=1 -failfast -timeout 30m -v` останавливается на `TestProxyOverKCP` с `read tcp ... i/o timeout`
+- `GOFLAGS=-buildvcs=false go test ./testing/scenarios -count=1 -timeout 90m -v` проходит локально;
+- `GOFLAGS=-buildvcs=false go test ./testing/scenarios -count=1 -timeout 90m -v` проходит на Debian lab;
+- sequential `GOFLAGS=-buildvcs=false go test -p 1 ./...` на Windows не показывает TrustTunnel-specific regress и останавливается только на `app/dns`, `app/router` и `infra/conf`.
 
 Ограничение текущего full-tree verdict:
-- этот KCP scenario fail уже был отдельно воспроизведён A/B на pre-`common/signal` commit `1f70e1ac`, поэтому он не считается новым regress-сигналом от TrustTunnel / H2 REALITY изменений текущей ветки.
+- `app/dns` останавливается на `TestQUICNameServer` с `quic://dns.adguard-dns.com got answer: google.com. -> [] ... <app/dns: record not found>`, то есть на внешнем QUIC DNS runtime, а не на TrustTunnel path;
+- `app/router` (`TestGeoIPMatcher4CN`) и `infra/conf` (`TestToCidrList`) требуют `geoip.dat` в standard asset locations или `{project_root}/resources`;
+- эти ограничения не выглядят следствием TrustTunnel / inbound-worker изменений текущей ветки.
 
 ## 2. Подтверждённые runtime-проверки
 
@@ -269,14 +272,16 @@ Preflight:
 - H1 `_udp2` больше не уходит в обычный dispatch и отвечает явной HTTP-ошибкой;
 - H1 `_icmp` больше не уходит в обычный dispatch и отвечает `501 Not Implemented`.
 
-Расширенный local regression sweep на 2026-04-06 / `ae621d24`:
+Расширенный regression sweep и bugfix на 2026-04-06 / `c6ff745b`:
 - `go test ./common/signal ./common/net ./common/mux ./common/singbridge ./transport/internet/tcp ./transport/internet/tls ./app/dispatcher ./app/proxyman/inbound ./app/proxyman/outbound ./transport/internet ./proxy/trusttunnel/...` проходит;
 - `go test ./proxy/freedom ./proxy/http ./proxy/socks ./proxy/trojan ./proxy/vmess/... ./proxy/vless/... ./proxy/shadowsocks ./proxy/hysteria ./proxy/wireguard ./transport/internet/udp ./app/reverse` проходит;
 - `GOFLAGS=-buildvcs=false go test -run '^$' ./...` проходит как compile-only sweep по всему дереву;
 - `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main` проходит;
-- `GOFLAGS=-buildvcs=false go test ./...` на Windows снова не показывает массового regress по дереву, а падает только в `testing/scenarios`;
-- `go test ./testing/scenarios -count=1 -failfast -timeout 30m -v` на текущем HEAD останавливается на `TestProxyOverKCP` с тем же `read tcp ... i/o timeout`;
-- быстрый A/B check в temporary worktree на pre-`common/signal` commit `1f70e1ac` воспроизводит `go test ./testing/scenarios -run '^TestProxyOverKCP$' -count=1` с тем же `read tcp ... i/o timeout`, поэтому этот KCP fail не является новым эффектом TrustTunnel / H2 REALITY changes текущей ветки.
+- branch-регрессия была найдена не в KCP, а в `TestDomainSniffing`: на bad HEAD отсутствовал marker `app/dispatcher: sniffed domain: www.github.com`, а downstream запрос уходил в `tcp:127.0.0.1:443` и падал `proxyconnect tcp: dial tcp 127.0.0.1:443: connect: connection refused`;
+- root cause локализован в `app/proxyman/inbound/worker.go`: commit `bf23af9f` протащил `w.ctx` в generic `tcpWorker.Start()` listener path, хотя TrustTunnel требовался только явный hook `ListenerContext(context.Context) context.Context`;
+- current fix `c6ff745b` возвращает generic TCP listener на `context.Background()`, но сохраняет explicit `ListenerContext(...)` hook для TrustTunnel-specific providers;
+- после фикса проходят локально `TestDomainSniffing`, `TestProxyOverKCP`, `TestTLSOverKCP`, `TestVMessKCP` и `TestVMessKCPLarge`;
+- полный `GOFLAGS=-buildvcs=false go test ./testing/scenarios -count=1 -timeout 90m -v` проходит и локально, и на Debian lab.
 
 Linux package verification на Debian lab 2026-04-05 / `0fbc2ed5`:
 - repo HEAD: `0fbc2ed5d5ad701c4cb554c184144f56e2f22859`;
@@ -520,16 +525,17 @@ Pass markers:
 ### 2.20. Live-traffic H2/TCP + REALITY против remote server
 
 Preflight:
-- origin repo HEAD: `ae621d2444af095ae15a566c1bff5714f1c728b6`;
-- lab repo HEAD: `ae621d2444af095ae15a566c1bff5714f1c728b6`, worktree clean;
-- remote repo HEAD: `55e89c26aedddc2bb0679648057427ea8ce90786`, top commit message `trusttunnel: prefer h2 path for reality without alpn`, worktree clean;
-- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-reality-linux`;
-- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-reality-linux`;
+- origin repo HEAD: `c6ff745b579eb70e05c32375d5d10574b95f82cb`;
+- lab repo HEAD: `c6ff745b579eb70e05c32375d5d10574b95f82cb`, worktree clean;
+- remote repo HEAD: `55e89c26aedddc2bb0679648057427ea8ce90786`; current smoke не опирается на этот worktree для build, потому что remote host остаётся без Go;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-regress-linux`;
+- remote runtime binary: `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux`;
+- lab/remote binary sha256: `b68a868c9b3b9f2fcbc4aa1d8a3680999461fed72a554f82c485d132d3a4040c`;
 - lab client config: `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json`;
 - remote server config: `/opt/trusttunnel-dev/configs/server_h2_reality_remote.json`;
 - REALITY trust inputs: `serverName = www.google.com`, `publicKey = E59WjnvZcQMu7tR7_BgyhycuEdBS-CtKxfImRCdAvFM`, `shortId = 0123456789abcdef`, `fingerprint = chrome`;
-- lab bundle: `/opt/lab/xray-tt/logs/h2-reality-lab-20260406-102306`;
-- remote bundle: `/opt/trusttunnel-dev/logs/h2-reality-remote-20260406-102306`.
+- lab bundle: `/opt/lab/xray-tt/logs/workerfix-h2-reality-lab-20260406-153646`;
+- remote bundle: `/opt/trusttunnel-dev/logs/workerfix-h2-reality-remote-20260406-153646`.
 
 Подтверждено:
 - lab client log содержит `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`;
@@ -542,16 +548,17 @@ Preflight:
 ### 2.21. Live-traffic H2/UDP + REALITY против remote server
 
 Preflight:
-- origin repo HEAD: `ae621d2444af095ae15a566c1bff5714f1c728b6`;
-- lab repo HEAD: `ae621d2444af095ae15a566c1bff5714f1c728b6`, worktree clean;
-- remote repo HEAD: `55e89c26aedddc2bb0679648057427ea8ce90786`, top commit message `trusttunnel: prefer h2 path for reality without alpn`, worktree clean;
-- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-reality-linux`;
-- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-reality-linux`;
+- origin repo HEAD: `c6ff745b579eb70e05c32375d5d10574b95f82cb`;
+- lab repo HEAD: `c6ff745b579eb70e05c32375d5d10574b95f82cb`, worktree clean;
+- remote repo HEAD: `55e89c26aedddc2bb0679648057427ea8ce90786`; current smoke не использует remote worktree как build source;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-regress-linux`;
+- remote runtime binary: `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux`;
+- lab/remote binary sha256: `b68a868c9b3b9f2fcbc4aa1d8a3680999461fed72a554f82c485d132d3a4040c`;
 - lab client config: `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json`;
 - remote server config: `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json`;
 - REALITY trust inputs: `serverName = www.google.com`, `publicKey = E59WjnvZcQMu7tR7_BgyhycuEdBS-CtKxfImRCdAvFM`, `shortId = 0123456789abcdef`, `fingerprint = chrome`;
-- lab bundle: `/opt/lab/xray-tt/logs/h2-reality-udp-lab-20260406-102306`;
-- remote bundle: `/opt/trusttunnel-dev/logs/h2-reality-udp-remote-20260406-102306`.
+- lab bundle: `/opt/lab/xray-tt/logs/workerfix-h2-reality-udp-lab-20260406-153758`;
+- remote bundle: `/opt/trusttunnel-dev/logs/workerfix-h2-reality-udp-remote-20260406-153758`.
 
 Подтверждено:
 - remote server log содержит `trusttunnel H2 UDP mux accepted`, `dispatch request to: udp:1.1.1.1:53`, `proxy/freedom: connection opened to udp:1.1.1.1:53`;
