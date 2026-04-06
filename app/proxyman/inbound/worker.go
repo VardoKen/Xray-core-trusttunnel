@@ -139,10 +139,7 @@ func (w *tcpWorker) Proxy() proxy.Inbound {
 }
 
 func (w *tcpWorker) Start() error {
-	ctx := w.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := context.Background()
 
 	type HysteriaInboundValidator interface{ HysteriaInboundValidator() *account.Validator }
 	if v, ok := w.proxy.(HysteriaInboundValidator); ok {
