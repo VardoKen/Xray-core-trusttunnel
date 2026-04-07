@@ -284,16 +284,21 @@ func forceCloseTrustTunnelConn(conn stdnet.Conn) error {
 }
 
 func (s *Server) processHTTP3(ctx context.Context, h3conn tcptransport.HTTP3RequestConn, conn stat.Connection, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) error {
+	rawStream := h3conn.H3Stream()
+	if rawStream == nil {
+		return errors.New("trusttunnel H3 raw stream is unavailable").AtWarning()
+	}
+
 	req := &http.Request{
 		Method:     h3conn.H3Method(),
 		Host:       h3conn.H3Host(),
 		Header:     h3conn.H3Header(),
-		Body:       &countedReadCloser{Reader: conn, Closer: h3conn},
+		Body:       &countedReadCloser{Reader: rawStream, Closer: h3conn},
 		RemoteAddr: h3conn.RemoteAddr().String(),
 	}
 	rw := &countedH3ResponseWriter{
 		base:   h3conn,
-		writer: conn,
+		writer: rawStream,
 	}
 
 	s.serveHTTPConnectRequest("H3", ctx, rw, req.WithContext(ctx), dispatcher, inboundTemplate, h3conn.H3ClientRandom(), nil)

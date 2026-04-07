@@ -46,6 +46,7 @@ type TrustTunnelClientConfig struct {
 	CertificatePEMFile string                       `json:"certificatePemFile"`
 	ClientRandom       string                       `json:"clientRandom"`
 	AntiDpi            bool                         `json:"antiDpi"`
+	PostQuantumGroup   *bool                        `json:"postQuantumGroupEnabled"`
 	UDP                bool                         `json:"udp"`
 }
 
@@ -126,6 +127,14 @@ func (c *TrustTunnelClientConfig) Build() (proto.Message, error) {
 				}),
 			},
 		},
+	}
+
+	if c.PostQuantumGroup != nil {
+		if *c.PostQuantumGroup {
+			config.PostQuantumGroupEnabled = trusttunnel.PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_ENABLED
+		} else {
+			config.PostQuantumGroupEnabled = trusttunnel.PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_DISABLED
+		}
 	}
 
 	return config, nil

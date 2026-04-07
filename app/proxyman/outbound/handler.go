@@ -273,6 +273,8 @@ func (h *Handler) StreamSettings() *internet.MemoryStreamConfig {
 
 // Dial implements internet.Dialer.
 func (h *Handler) Dial(ctx context.Context, dest net.Destination) (stat.Connection, error) {
+	effectiveStreamSettings := internet.StreamSettingsFromContext(ctx, h.streamSettings)
+
 	if h.senderSettings != nil {
 
 		if h.senderSettings.ProxySettings.HasTag() {
@@ -293,7 +295,7 @@ func (h *Handler) Dial(ctx context.Context, dest net.Destination) (stat.Connecti
 				go handler.Dispatch(ctx, &transport.Link{Reader: uplinkReader, Writer: downlinkWriter})
 				conn := cnc.NewConnection(cnc.ConnectionInputMulti(uplinkWriter), cnc.ConnectionOutputMulti(downlinkReader))
 
-				if config := tls.ConfigFromStreamSettings(h.streamSettings); config != nil {
+				if config := tls.ConfigFromStreamSettings(effectiveStreamSettings); config != nil {
 					tlsConfig := config.GetTLSConfig(tls.WithDestination(dest))
 					conn = tls.Client(conn, tlsConfig)
 				}
@@ -317,7 +319,7 @@ func (h *Handler) Dial(ctx context.Context, dest net.Destination) (stat.Connecti
 		return conn, err
 	}
 
-	conn, err := internet.Dial(ctx, dest, h.streamSettings)
+	conn, err := internet.Dial(ctx, dest, effectiveStreamSettings)
 	conn = h.getStatCouterConnection(conn)
 	outbounds := session.OutboundsFromContext(ctx)
 	if outbounds != nil {

@@ -3,6 +3,7 @@ package conf
 import (
 	"testing"
 
+	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/proxy/trusttunnel"
 )
 
@@ -62,5 +63,54 @@ func TestTrustTunnelServerConfigBuildSupportsICMPSettings(t *testing.T) {
 	}
 	if built.GetUdpConnectionsTimeoutSecs() != 300 {
 		t.Fatalf("udpConnectionsTimeoutSecs = %d, want 300", built.GetUdpConnectionsTimeoutSecs())
+	}
+}
+
+func TestTrustTunnelClientConfigBuildSupportsPostQuantumGroupEnabled(t *testing.T) {
+	trueValue := true
+	falseValue := false
+
+	tests := []struct {
+		name string
+		flag *bool
+		want trusttunnel.PostQuantumGroupSetting
+	}{
+		{
+			name: "auto when omitted",
+			flag: nil,
+			want: trusttunnel.PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_AUTO,
+		},
+		{
+			name: "enabled when true",
+			flag: &trueValue,
+			want: trusttunnel.PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_ENABLED,
+		},
+		{
+			name: "disabled when false",
+			flag: &falseValue,
+			want: trusttunnel.PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_DISABLED,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			config, err := (&TrustTunnelClientConfig{
+				Address:          &Address{Address: net.ParseAddress("127.0.0.1")},
+				Port:             9443,
+				Username:         "u1",
+				Password:         "p1",
+				Hostname:         "www.google.com",
+				Transport:        "http2",
+				PostQuantumGroup: tc.flag,
+			}).Build()
+			if err != nil {
+				t.Fatalf("Build() failed: %v", err)
+			}
+
+			built := config.(*trusttunnel.ClientConfig)
+			if built.GetPostQuantumGroupEnabled() != tc.want {
+				t.Fatalf("postQuantumGroupEnabled = %v, want %v", built.GetPostQuantumGroupEnabled(), tc.want)
+			}
+		})
 	}
 }

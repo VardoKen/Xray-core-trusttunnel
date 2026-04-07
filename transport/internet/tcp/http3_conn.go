@@ -19,11 +19,13 @@ type HTTP3RequestConn interface {
 	H3Host() string
 	H3Header() http.Header
 	H3ClientRandom() string
+	H3Stream() *http3.Stream
 }
 
 type http3RequestConn struct {
 	body         io.ReadCloser
 	rw           http.ResponseWriter
+	stream       *http3.Stream
 	method       string
 	host         string
 	header       http.Header
@@ -38,9 +40,15 @@ func newHTTP3RequestConn(req *http.Request, rw http.ResponseWriter, remote net.A
 		header[k] = append([]string(nil), v...)
 	}
 
+	var stream *http3.Stream
+	if streamer, ok := rw.(http3.HTTPStreamer); ok {
+		stream = streamer.HTTPStream()
+	}
+
 	return &http3RequestConn{
 		body:         req.Body,
 		rw:           rw,
+		stream:       stream,
 		method:       req.Method,
 		host:         req.Host,
 		header:       header,
@@ -64,6 +72,10 @@ func (c *http3RequestConn) H3Header() http.Header {
 
 func (c *http3RequestConn) H3ClientRandom() string {
 	return c.clientRandom
+}
+
+func (c *http3RequestConn) H3Stream() *http3.Stream {
+	return c.stream
 }
 
 func isHTTP3NoError(err error) bool {
@@ -107,6 +119,11 @@ func (c *http3RequestConn) Write(p []byte) (int, error) {
 }
 
 func (c *http3RequestConn) Close() error {
+	if c.stream != nil {
+		c.stream.CancelRead(quic.StreamErrorCode(http3.ErrCodeNoError))
+		c.stream.CancelWrite(quic.StreamErrorCode(http3.ErrCodeNoError))
+		_ = c.stream.Close()
+	}
 	if c.body != nil {
 		return c.body.Close()
 	}

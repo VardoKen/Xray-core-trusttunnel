@@ -20,6 +20,12 @@ enum TransportProtocol {
   HTTP3 = 1;
 }
 
+enum PostQuantumGroupSetting {
+  POST_QUANTUM_GROUP_SETTING_AUTO = 0;
+  POST_QUANTUM_GROUP_SETTING_DISABLED = 1;
+  POST_QUANTUM_GROUP_SETTING_ENABLED = 2;
+}
+
 message Rule {
   string cidr = 1;
   string client_random = 2;
@@ -42,6 +48,7 @@ message ClientConfig {
   string client_random = 7;
   bool anti_dpi = 8;
   bool enable_udp = 9;
+  PostQuantumGroupSetting post_quantum_group_enabled = 10;
 }
 
 message ServerConfig {

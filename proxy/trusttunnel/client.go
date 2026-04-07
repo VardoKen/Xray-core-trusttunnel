@@ -41,8 +41,13 @@ func (c *Client) validateOutboundTarget(target xnet.Destination) error {
 		return errors.New("trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime").AtWarning()
 	}
 
-	if !c.config.GetHasIpv6() && target.Address != nil && target.Address.Family().IsIPv6() {
-		return errors.New("trusttunnel IPv6 target is disabled by hasIpv6=false").AtWarning()
+	if !c.config.GetHasIpv6() && target.Address != nil {
+		switch {
+		case target.Address.Family().IsIPv6():
+			return errors.New("trusttunnel IPv6 target is disabled by hasIpv6=false").AtWarning()
+		case target.Address.Family().IsDomain():
+			return errors.New(trustTunnelPostQuantumDomainStrategyError).AtWarning()
+		}
 	}
 
 	return nil
@@ -305,6 +310,11 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	}
 
 	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
+	updatedCtx, err := trustTunnelContextWithPostQuantumOverride(ctx, dialer, c.config)
+	if err != nil {
+		return err
+	}
+	ctx = updatedCtx
 
 	rawConn, err := dialer.Dial(ctx, c.server.Destination)
 	if err != nil {

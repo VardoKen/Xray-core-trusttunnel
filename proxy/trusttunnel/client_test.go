@@ -17,6 +17,7 @@ import (
 	"github.com/xtls/xray-core/transport/internet"
 	"github.com/xtls/xray-core/transport/internet/reality"
 	"github.com/xtls/xray-core/transport/internet/stat"
+	internettls "github.com/xtls/xray-core/transport/internet/tls"
 	"github.com/xtls/xray-core/transport/pipe"
 )
 
@@ -52,10 +53,16 @@ func TestClientProcessRejectsIncompleteICMPLink(t *testing.T) {
 type fakeTrustTunnelDialerWithStreamSettings struct {
 	streamSettings *internet.MemoryStreamConfig
 	dialCalls      int
+	lastCtx        context.Context
+	err            error
 }
 
 func (d *fakeTrustTunnelDialerWithStreamSettings) Dial(ctx context.Context, destination xnet.Destination) (stat.Connection, error) {
 	d.dialCalls++
+	d.lastCtx = ctx
+	if d.err != nil {
+		return nil, d.err
+	}
 	return nil, io.EOF
 }
 
@@ -212,6 +219,231 @@ func TestClientProcessAllowsIPv4TargetWhenHasIpv6Disabled(t *testing.T) {
 	}
 	if dialer.dialCalls != 1 {
 		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
+	}
+}
+
+func TestClientProcessRejectsDomainTargetWhenHasIpv6Disabled(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			HasIpv6: false,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.DomainAddress("example.com"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "requires outbound targetStrategy useipv4/forceipv4") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 0 {
+		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
+	}
+}
+
+func TestClientProcessAppliesPostQuantumRealityOverride(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			PostQuantumGroupEnabled: PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_ENABLED,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	originalSettings := &internet.MemoryStreamConfig{
+		SecurityType: "reality",
+		SecuritySettings: &reality.Config{
+			Fingerprint: "chrome",
+		},
+	}
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: originalSettings,
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 1 {
+		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
+	}
+
+	override := internet.StreamSettingsOverrideFromContext(dialer.lastCtx)
+	if override == nil {
+		t.Fatal("expected stream settings override, got nil")
+	}
+	realityConfig := reality.ConfigFromStreamSettings(override)
+	if realityConfig == nil {
+		t.Fatal("expected reality override config, got nil")
+	}
+	if got := realityConfig.GetFingerprint(); got != trustTunnelPostQuantumChromeFingerprintPQ {
+		t.Fatalf("fingerprint = %q, want %q", got, trustTunnelPostQuantumChromeFingerprintPQ)
+	}
+	originalReality := reality.ConfigFromStreamSettings(originalSettings)
+	if got := originalReality.GetFingerprint(); got != "chrome" {
+		t.Fatalf("original fingerprint = %q, want chrome", got)
+	}
+}
+
+func TestClientProcessAppliesPostQuantumTLSDisableOverride(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			PostQuantumGroupEnabled: PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_DISABLED,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				Fingerprint: trustTunnelPostQuantumChromeFingerprintPQ,
+			},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	override := internet.StreamSettingsOverrideFromContext(dialer.lastCtx)
+	if override == nil {
+		t.Fatal("expected stream settings override, got nil")
+	}
+	tlsConfig := internettls.ConfigFromStreamSettings(override)
+	if tlsConfig == nil {
+		t.Fatal("expected tls override config, got nil")
+	}
+	if got := tlsConfig.GetFingerprint(); got != trustTunnelPostQuantumChromeFingerprint {
+		t.Fatalf("fingerprint = %q, want %q", got, trustTunnelPostQuantumChromeFingerprint)
+	}
+	if got := tlsConfig.GetCurvePreferences(); len(got) != 1 || got[0] != "x25519" {
+		t.Fatalf("curvePreferences = %v, want [x25519]", got)
+	}
+}
+
+func TestClientProcessRejectsPostQuantumWithoutSecurityStreamSettings(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			PostQuantumGroupEnabled: PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_ENABLED,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "postQuantumGroupEnabled is unsupported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 0 {
+		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
+	}
+}
+
+func TestClientProcessRejectsPostQuantumUnsupportedFingerprint(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			PostQuantumGroupEnabled: PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_ENABLED,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "reality",
+			SecuritySettings: &reality.Config{
+				Fingerprint: "firefox",
+			},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "only default Chrome-family TLS/REALITY fingerprints can be toggled today") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 0 {
+		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
 	}
 }
 
