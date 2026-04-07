@@ -51,17 +51,47 @@ func trustTunnelStreamSettingsWithTLSCompatibility(streamSettings *internet.Memo
 		return streamSettings, false, false
 	}
 
-	// For non-H3 paths, generic tlsSettings are the authoritative verification
-	// surface. TrustTunnel compatibility fields only fill missing pieces.
-	if cfg.GetSkipVerification() {
-		return streamSettings, false, true
-	}
-
-	if trustTunnelTLSConfigHasExplicitVerifySurface(tlsConfig) {
-		return streamSettings, false, true
-	}
-
 	needServerName := tlsConfig.GetServerName() == "" && cfg.GetHostname() != ""
+	explicitVerifySurface := trustTunnelTLSConfigHasExplicitVerifySurface(tlsConfig)
+
+	// For non-H3 paths, generic tlsSettings are the authoritative TLS surface.
+	// TrustTunnel compatibility fields only fill missing generic pieces.
+	if cfg.GetSkipVerification() {
+		needAllowInsecure := !tlsConfig.GetAllowInsecure() && !explicitVerifySurface
+		if !needServerName && !needAllowInsecure {
+			return streamSettings, false, true
+		}
+
+		override := cloneTrustTunnelStreamSettings(streamSettings)
+		tlsOverride := xtlstls.ConfigFromStreamSettings(override)
+		if tlsOverride == nil {
+			return streamSettings, false, false
+		}
+
+		if tlsOverride.GetServerName() == "" && cfg.GetHostname() != "" {
+			tlsOverride.ServerName = cfg.GetHostname()
+		}
+		if !explicitVerifySurface {
+			tlsOverride.AllowInsecure = true
+		}
+
+		return override, true, true
+	}
+
+	if explicitVerifySurface {
+		if !needServerName {
+			return streamSettings, false, true
+		}
+
+		override := cloneTrustTunnelStreamSettings(streamSettings)
+		tlsOverride := xtlstls.ConfigFromStreamSettings(override)
+		if tlsOverride == nil {
+			return streamSettings, false, false
+		}
+		tlsOverride.ServerName = cfg.GetHostname()
+		return override, true, true
+	}
+
 	needAllowInsecure := tlsConfig.GetAllowInsecure()
 	needAuthorityVerify := cfg.GetCertificatePem() != "" && trustTunnelTLSConfigNeedsCompatibilityAuthorityVerify(tlsConfig)
 

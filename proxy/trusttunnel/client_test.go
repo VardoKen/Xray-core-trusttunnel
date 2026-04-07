@@ -515,10 +515,66 @@ func TestClientProcessAppliesTLSCompatibilityOverride(t *testing.T) {
 	}
 }
 
+func TestClientProcessAppliesTLSSkipVerificationCompatibilityOverride(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			Hostname:         "vpn.lab.local",
+			SkipVerification: true,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				AllowInsecure: false,
+			},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	override := internet.StreamSettingsOverrideFromContext(dialer.lastCtx)
+	if override == nil {
+		t.Fatal("expected stream settings override, got nil")
+	}
+	tlsConfig := internettls.ConfigFromStreamSettings(override)
+	if tlsConfig == nil {
+		t.Fatal("expected tls override config, got nil")
+	}
+	if !tlsConfig.GetAllowInsecure() {
+		t.Fatal("allowInsecure = false, want true")
+	}
+	if got := tlsConfig.GetServerName(); got != "vpn.lab.local" {
+		t.Fatalf("serverName = %q, want %q", got, "vpn.lab.local")
+	}
+}
+
 func TestTrustTunnelStreamSettingsWithTLSCompatibilityKeepsExplicitVerifySurface(t *testing.T) {
 	streamSettings := &internet.MemoryStreamConfig{
 		SecurityType: "tls",
 		SecuritySettings: &internettls.Config{
+			ServerName:           "vpn.lab.local",
 			AllowInsecure:        true,
 			VerifyPeerCertByName: []string{"example.com"},
 		},
@@ -538,6 +594,44 @@ func TestTrustTunnelStreamSettingsWithTLSCompatibilityKeepsExplicitVerifySurface
 	}
 	if override != streamSettings {
 		t.Fatal("override pointer changed unexpectedly")
+	}
+}
+
+func TestTrustTunnelStreamSettingsWithTLSCompatibilityFillsServerNameForExplicitVerifySurface(t *testing.T) {
+	streamSettings := &internet.MemoryStreamConfig{
+		SecurityType: "tls",
+		SecuritySettings: &internettls.Config{
+			VerifyPeerCertByName: []string{"example.com"},
+		},
+	}
+
+	override, changed, handled := trustTunnelStreamSettingsWithTLSCompatibility(streamSettings, &ClientConfig{
+		Hostname:         "vpn.lab.local",
+		SkipVerification: false,
+	})
+
+	if !handled {
+		t.Fatal("handled = false, want true")
+	}
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+	if override == streamSettings {
+		t.Fatal("override pointer was not cloned")
+	}
+
+	tlsConfig := internettls.ConfigFromStreamSettings(override)
+	if tlsConfig == nil {
+		t.Fatal("expected tls override config, got nil")
+	}
+	if got := tlsConfig.GetServerName(); got != "vpn.lab.local" {
+		t.Fatalf("serverName = %q, want %q", got, "vpn.lab.local")
+	}
+	if got := tlsConfig.GetVerifyPeerCertByName(); len(got) != 1 || got[0] != "example.com" {
+		t.Fatalf("verifyPeerCertByName = %v, want [example.com]", got)
+	}
+	if tlsConfig.GetAllowInsecure() {
+		t.Fatal("allowInsecure = true, want false")
 	}
 }
 

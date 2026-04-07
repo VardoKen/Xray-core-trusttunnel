@@ -89,13 +89,21 @@ func validateTrustTunnelOutboundTLSCompatibility(stream *StreamConfig, settings 
 	}
 
 	tlsSettings := stream.TLSSettings
-	compatibilityVerifyActive := !settings.SkipVerification || settings.CertificatePEM != "" || settings.CertificatePEMFile != ""
+	explicitVerifySurface := trustTunnelTLSSettingsHaveExplicitVerifySurface(tlsSettings)
 
-	if compatibilityVerifyActive && settings.Hostname != "" && tlsSettings.ServerName != "" && !strings.EqualFold(settings.Hostname, tlsSettings.ServerName) {
+	if settings.Hostname != "" && tlsSettings.ServerName != "" && !strings.EqualFold(settings.Hostname, tlsSettings.ServerName) {
 		return errors.New("trusttunnel hostname conflicts with tlsSettings.serverName on non-HTTP3 path: generic tlsSettings are authoritative").AtError()
 	}
 
-	if (settings.CertificatePEM != "" || settings.CertificatePEMFile != "") && trustTunnelTLSSettingsHaveExplicitVerifySurface(tlsSettings) {
+	if settings.SkipVerification && explicitVerifySurface {
+		return errors.New("trusttunnel skipVerification conflicts with generic tlsSettings verification surface on non-HTTP3 path; choose one authoritative verification source").AtError()
+	}
+
+	if settings.SkipVerification && (settings.CertificatePEM != "" || settings.CertificatePEMFile != "") {
+		return errors.New("trusttunnel skipVerification conflicts with certificatePem/certificatePemFile on non-HTTP3 path; choose either insecure skip or certificate verification").AtError()
+	}
+
+	if (settings.CertificatePEM != "" || settings.CertificatePEMFile != "") && explicitVerifySurface {
 		return errors.New("trusttunnel certificatePem/certificatePemFile conflicts with generic tlsSettings verification surface on non-HTTP3 path; choose one authoritative verification source").AtError()
 	}
 
