@@ -2,81 +2,44 @@
 
 English version: [README.md](README.md)
 
-Этот репозиторий является downstream-форком [XTLS/Xray-core](https://github.com/XTLS/Xray-core), в котором ведётся рабочая интеграция TrustTunnel в Xray-core.
+Этот репозиторий является downstream-форком [XTLS/Xray-core](https://github.com/XTLS/Xray-core) с интеграцией TrustTunnel в Xray-core.
 
-Форк нужен не для хранения разрозненных экспериментов, а для поддерживаемой runtime-реализации TrustTunnel внутри Xray: с кодом протокола, binding конфигов, validator-ограничениями, live-traffic проверками и канонической документацией по фактически подтверждённому состоянию.
+Форк нужен для поддерживаемой runtime-реализации TrustTunnel внутри Xray, а не для хранения внешних временных патчей.
 
-## Что Добавляет Этот Форк
+## Что Есть В Форке
 
-- inbound и outbound `trusttunnel` внутри Xray-core
-- подтверждённые HTTP/2 и HTTP/3 TCP path
-- подтверждённые HTTP/2 и HTTP/3 UDP mux path
-- подтверждённый HTTP/2 + REALITY path для TCP и UDP
-- обработку `_check`, `_udp2` и `_icmp`
-- validator и compatibility guards для TrustTunnel-конфигов
-- runtime-поддержку `clientRandom`, `postQuantumGroupEnabled` и policy-guard для `hasIpv6`
-- регулярную синхронизацию с upstream и regression-аудит по не-TrustTunnel путям
+- inbound и outbound `trusttunnel`
+- HTTP/2 и HTTP/3 TCP path
+- HTTP/2 и HTTP/3 UDP mux path
+- поддержка HTTP/2 + REALITY
+- обработка `_check`, `_udp2` и `_icmp`
+- validator для неподдержанных TrustTunnel-комбинаций
 
-## Текущий Подтверждённый Scope
+## Текущий Scope Возможностей
 
-Каноническое состояние описано в [docs/current/current-state.md](docs/current/current-state.md). На текущем этапе у форка подтверждены:
+Публично документированные и целевые возможности форка:
 
-- H2 TCP
-- H3 TCP
-- H2 UDP mux
-- H3 UDP mux
-- H2 TCP + REALITY
-- H2 UDP + REALITY
-- official interop для `_check`, `_udp2`, `_icmp`
-- runtime-path для outbound `clientRandom`
-- Linux TUN product path для `_icmp`
-- общая интеграция Xray с `proxySettings`, `mux`, `sendThrough=origin`, `targetStrategy useipv4/forceipv4`, `sniffing + routeOnly` и inbound `rejectUnknownSni`
+- TrustTunnel поверх HTTP/2 + TLS
+- TrustTunnel поверх HTTP/2 + REALITY
+- TrustTunnel поверх HTTP/3 + TLS
+- TrustTunnel для TCP, UDP mux и ICMP
+- совместимость с общими routing и transport-настройками Xray
 
-## Важные Ограничения
+## Известные Ограничения
 
-Этот форк не объявляет все исторические или official поля TrustTunnel автоматически рабочими.
-
-Текущие жёсткие ограничения:
-
-- `http3 + reality` явно не поддерживается и режется validator/runtime.
-- `antiDpi=true` явно не поддерживается и режется validator/runtime.
-- UDP domain targets не считаются подтверждённым product path.
-- inbound `hosts[]` и `transports[]` сами по себе не являются универсальным virtual-host/router layer.
-- lab-only secrets и deployment keys не должны попадать в tracked tree репозитория.
+- `http3 + reality` не поддерживается
+- `antiDpi=true` не поддерживается
+- UDP domain targets не описываются как поддержанный product path
 
 ## Документация
 
-Начать лучше отсюда:
-
 - индекс документации: [docs/README.ru.md](docs/README.ru.md)
 - руководство по конфигам: [docs/configuration.ru.md](docs/configuration.ru.md)
-- English config guide: [docs/configuration.md](docs/configuration.md)
+- English configuration guide: [docs/configuration.md](docs/configuration.md)
 
-Канонический current-слой:
+## Примеры
 
-- состояние: [docs/current/current-state.md](docs/current/current-state.md)
-- архитектура: [docs/current/architecture.md](docs/current/architecture.md)
-- эксплуатация: [docs/current/operations.md](docs/current/operations.md)
-- проверки: [docs/current/validation.md](docs/current/validation.md)
-- roadmap: [docs/current/roadmap.md](docs/current/roadmap.md)
-
-Исторические слои:
-
-- в [docs/README.ru.md](docs/README.ru.md) описано, чем отличаются `current`, `history`, `migration` и `archive`
-
-## Примеры Конфигов
-
-Tracked templates лежат в [testing/trusttunnel](testing/trusttunnel):
-
-- [testing/trusttunnel/client_h2.json](testing/trusttunnel/client_h2.json)
-- [testing/trusttunnel/server_h2.json](testing/trusttunnel/server_h2.json)
-- [testing/trusttunnel/server_h3.json](testing/trusttunnel/server_h3.json)
-- [testing/trusttunnel/our_client_to_remote_server_h2_reality.json](testing/trusttunnel/our_client_to_remote_server_h2_reality.json)
-- [testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json](testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json)
-- [testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json](testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json)
-- [testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json](testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json)
-
-Их нужно трактовать как tracked templates, а не как место для deployment-секретов.
+Санитизированные шаблоны конфигов лежат в [testing/trusttunnel](testing/trusttunnel).
 
 ## Сборка
 
@@ -92,15 +55,6 @@ Linux:
 ```bash
 CGO_ENABLED=0 go build -buildvcs=false -o ./tmp/xray-tt-current ./main
 ```
-
-## Политика Синхронизации С Upstream
-
-Этот форк следует за upstream Xray-core, но не подаётся как готовый upstream patch stack. Рабочее правило такое:
-
-1. догонять upstream `main`
-2. после каждого merge/rebase повторять regression-проверки
-3. считать `docs/current/*` единственным слоем текущей истины для форка
-4. выделять upstreamable изменения позже, только после стабилизации поведения форка
 
 ## Лицензия
 

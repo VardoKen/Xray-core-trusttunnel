@@ -21,7 +21,7 @@
         "port": 8443,
         "username": "u1",
         "password": "p1",
-        "hostname": "vpn.lab.local",
+        "hostname": "vpn.example.com",
         "transport": "http2",
         "skipVerification": true,
         "udp": false

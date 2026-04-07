@@ -241,7 +241,7 @@ func TestConfigBuildRejectsTrustTunnelTLSHostnameMismatchOnHTTP2(t *testing.T) {
 		"port": 9443,
 		"username": "u1",
 		"password": "p1",
-		"hostname": "vpn.lab.local",
+		"hostname": "vpn.example.com",
 		"transport": "http2",
 		"skipVerification": false
 	}`)
@@ -254,7 +254,7 @@ func TestConfigBuildRejectsTrustTunnelTLSHostnameMismatchOnHTTP2(t *testing.T) {
 				StreamSetting: &StreamConfig{
 					Security: "tls",
 					TLSSettings: &TLSConfig{
-						ServerName: "wrong.lab.local",
+						ServerName: "wrong.example.com",
 					},
 				},
 			},
@@ -271,7 +271,7 @@ func TestConfigBuildRejectsTrustTunnelCertificatePemConflictWithGenericTLSVerify
 		"port": 9443,
 		"username": "u1",
 		"password": "p1",
-		"hostname": "vpn.lab.local",
+		"hostname": "vpn.example.com",
 		"transport": "http2",
 		"skipVerification": false,
 		"certificatePem": "-----BEGIN CERTIFICATE-----\ncompat-ca\n-----END CERTIFICATE-----\n"
@@ -302,7 +302,7 @@ func TestConfigBuildRejectsTrustTunnelSkipVerificationConflictWithGenericTLSVeri
 		"port": 9443,
 		"username": "u1",
 		"password": "p1",
-		"hostname": "vpn.lab.local",
+		"hostname": "vpn.example.com",
 		"transport": "http2",
 		"skipVerification": true
 	}`)
@@ -332,7 +332,7 @@ func TestConfigBuildRejectsTrustTunnelSkipVerificationConflictWithCertificatePem
 		"port": 9443,
 		"username": "u1",
 		"password": "p1",
-		"hostname": "vpn.lab.local",
+		"hostname": "vpn.example.com",
 		"transport": "http2",
 		"skipVerification": true,
 		"certificatePem": "-----BEGIN CERTIFICATE-----\ncompat-ca\n-----END CERTIFICATE-----\n"
@@ -361,7 +361,7 @@ func TestConfigBuildRejectsTrustTunnelTLSHostnameMismatchOnHTTP2EvenWhenSkipVeri
 		"port": 9443,
 		"username": "u1",
 		"password": "p1",
-		"hostname": "vpn.lab.local",
+		"hostname": "vpn.example.com",
 		"transport": "http2",
 		"skipVerification": true
 	}`)
@@ -374,7 +374,7 @@ func TestConfigBuildRejectsTrustTunnelTLSHostnameMismatchOnHTTP2EvenWhenSkipVeri
 				StreamSetting: &StreamConfig{
 					Security: "tls",
 					TLSSettings: &TLSConfig{
-						ServerName: "wrong.lab.local",
+						ServerName: "wrong.example.com",
 					},
 				},
 			},
@@ -391,7 +391,7 @@ func TestConfigBuildAllowsTrustTunnelCertificatePemCompatibilityFallbackOnHTTP2(
 		"port": 9443,
 		"username": "u1",
 		"password": "p1",
-		"hostname": "vpn.lab.local",
+		"hostname": "vpn.example.com",
 		"transport": "http2",
 		"skipVerification": false,
 		"certificatePem": "-----BEGIN CERTIFICATE-----\ncompat-ca\n-----END CERTIFICATE-----\n"
@@ -405,7 +405,7 @@ func TestConfigBuildAllowsTrustTunnelCertificatePemCompatibilityFallbackOnHTTP2(
 				StreamSetting: &StreamConfig{
 					Security: "tls",
 					TLSSettings: &TLSConfig{
-						ServerName:    "vpn.lab.local",
+						ServerName:    "vpn.example.com",
 						AllowInsecure: true,
 					},
 				},

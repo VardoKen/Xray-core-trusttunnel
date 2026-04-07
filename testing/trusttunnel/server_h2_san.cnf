@@ -4,7 +4,7 @@ x509_extensions = v3_req
 prompt = no
 
 [dn]
-CN = vpn.lab.local
+CN = vpn.example.com
 
 [v3_req]
 subjectAltName = @alt_names
@@ -12,5 +12,5 @@ keyUsage = critical, digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
 
 [alt_names]
-DNS.1 = vpn.lab.local
-DNS.2 = tt.lab.local
+DNS.1 = vpn.example.com
+DNS.2 = tt.example.com

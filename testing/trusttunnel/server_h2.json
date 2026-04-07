@@ -8,13 +8,13 @@
       "protocol": "trusttunnel",
       "settings": {
         "users": [
-          { "email": "u1@lab", "username": "u1", "password": "p1" }
+          { "email": "u1@example.com", "username": "u1", "password": "p1" }
         ],
         "hosts": [
           {
-            "hostname": "vpn.lab.local",
-            "certificateFile": "/opt/lab/xray-tt/certs/server.crt",
-            "keyFile": "/opt/lab/xray-tt/certs/server.key"
+            "hostname": "vpn.example.com",
+            "certificateFile": "/path/to/server.crt",
+            "keyFile": "/path/to/server.key"
           }
         ],
         "transports": ["http2"],
@@ -30,8 +30,8 @@
           "alpn": ["h2"],
           "certificates": [
             {
-              "certificateFile": "/opt/lab/xray-tt/certs/server.crt",
-              "keyFile": "/opt/lab/xray-tt/certs/server.key"
+              "certificateFile": "/path/to/server.crt",
+              "keyFile": "/path/to/server.key"
             }
           ]
         }

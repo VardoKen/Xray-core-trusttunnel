@@ -12,9 +12,9 @@
         ],
         "hosts": [
           {
-            "hostname": "vpn.lab.local",
-            "certificateFile": "/opt/lab/xray-tt/official-endpoint-lab/certs/cert.pem",
-            "keyFile": "/opt/lab/xray-tt/official-endpoint-lab/certs/key.pem"
+            "hostname": "vpn.example.com",
+            "certificateFile": "/path/to/official/cert.pem",
+            "keyFile": "/path/to/official/key.pem"
           }
         ],
         "transports": ["http3"],
@@ -33,8 +33,8 @@
           "alpn": ["h3"],
           "certificates": [
             {
-              "certificateFile": "/opt/lab/xray-tt/official-endpoint-lab/certs/cert.pem",
-              "keyFile": "/opt/lab/xray-tt/official-endpoint-lab/certs/key.pem"
+              "certificateFile": "/path/to/official/cert.pem",
+              "keyFile": "/path/to/official/key.pem"
             }
           ]
         }

@@ -22,11 +22,11 @@
         "port": 9444,
         "username": "u1",
         "password": "p1",
-        "hostname": "vpn.lab.local",
+        "hostname": "vpn.example.com",
         "transport": "http2",
         "hasIpv6": true,
         "skipVerification": false,
-        "certificatePemFile": "/opt/lab/xray-tt/official-endpoint-lab/certs/cert.pem",
+        "certificatePemFile": "/path/to/official/cert.pem",
         "clientRandom": "",
         "antiDpi": false,
         "udp": true
@@ -35,7 +35,7 @@
         "network": "tcp",
         "security": "tls",
         "tlsSettings": {
-          "serverName": "vpn.lab.local",
+          "serverName": "vpn.example.com",
           "allowInsecure": true,
           "alpn": ["h2"]
         }

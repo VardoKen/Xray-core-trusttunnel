@@ -19,7 +19,7 @@
         "port": 9443,
         "username": "u1",
         "password": "p1",
-        "hostname": "vpn.lab.local",
+        "hostname": "vpn.example.com",
         "transport": "http3",
         "hasIpv6": true,
         "skipVerification": true,
@@ -31,7 +31,7 @@
         "network": "tcp",
         "security": "tls",
         "tlsSettings": {
-          "serverName": "vpn.lab.local",
+          "serverName": "vpn.example.com",
           "allowInsecure": true,
           "alpn": ["h3"]
         }

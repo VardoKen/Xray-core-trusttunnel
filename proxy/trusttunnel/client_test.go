@@ -450,7 +450,7 @@ func TestClientProcessRejectsPostQuantumUnsupportedFingerprint(t *testing.T) {
 func TestClientProcessAppliesTLSCompatibilityOverride(t *testing.T) {
 	client := &Client{
 		config: &ClientConfig{
-			Hostname:         "vpn.lab.local",
+			Hostname:         "vpn.example.com",
 			SkipVerification: false,
 			CertificatePem:   "-----BEGIN CERTIFICATE-----\ncompat-ca\n-----END CERTIFICATE-----\n",
 		},
@@ -498,8 +498,8 @@ func TestClientProcessAppliesTLSCompatibilityOverride(t *testing.T) {
 	if tlsConfig.GetAllowInsecure() {
 		t.Fatal("allowInsecure = true, want false")
 	}
-	if got := tlsConfig.GetServerName(); got != "vpn.lab.local" {
-		t.Fatalf("serverName = %q, want %q", got, "vpn.lab.local")
+	if got := tlsConfig.GetServerName(); got != "vpn.example.com" {
+		t.Fatalf("serverName = %q, want %q", got, "vpn.example.com")
 	}
 	if !tlsConfig.GetDisableSystemRoot() {
 		t.Fatal("disableSystemRoot = false, want true")
@@ -518,7 +518,7 @@ func TestClientProcessAppliesTLSCompatibilityOverride(t *testing.T) {
 func TestClientProcessAppliesTLSSkipVerificationCompatibilityOverride(t *testing.T) {
 	client := &Client{
 		config: &ClientConfig{
-			Hostname:         "vpn.lab.local",
+			Hostname:         "vpn.example.com",
 			SkipVerification: true,
 		},
 		server: protocol.NewServerSpec(
@@ -565,8 +565,8 @@ func TestClientProcessAppliesTLSSkipVerificationCompatibilityOverride(t *testing
 	if !tlsConfig.GetAllowInsecure() {
 		t.Fatal("allowInsecure = false, want true")
 	}
-	if got := tlsConfig.GetServerName(); got != "vpn.lab.local" {
-		t.Fatalf("serverName = %q, want %q", got, "vpn.lab.local")
+	if got := tlsConfig.GetServerName(); got != "vpn.example.com" {
+		t.Fatalf("serverName = %q, want %q", got, "vpn.example.com")
 	}
 }
 
@@ -574,14 +574,14 @@ func TestTrustTunnelStreamSettingsWithTLSCompatibilityKeepsExplicitVerifySurface
 	streamSettings := &internet.MemoryStreamConfig{
 		SecurityType: "tls",
 		SecuritySettings: &internettls.Config{
-			ServerName:           "vpn.lab.local",
+			ServerName:           "vpn.example.com",
 			AllowInsecure:        true,
 			VerifyPeerCertByName: []string{"example.com"},
 		},
 	}
 
 	override, changed, handled := trustTunnelStreamSettingsWithTLSCompatibility(streamSettings, &ClientConfig{
-		Hostname:         "vpn.lab.local",
+		Hostname:         "vpn.example.com",
 		SkipVerification: false,
 		CertificatePem:   "-----BEGIN CERTIFICATE-----\ncompat-ca\n-----END CERTIFICATE-----\n",
 	})
@@ -606,7 +606,7 @@ func TestTrustTunnelStreamSettingsWithTLSCompatibilityFillsServerNameForExplicit
 	}
 
 	override, changed, handled := trustTunnelStreamSettingsWithTLSCompatibility(streamSettings, &ClientConfig{
-		Hostname:         "vpn.lab.local",
+		Hostname:         "vpn.example.com",
 		SkipVerification: false,
 	})
 
@@ -624,8 +624,8 @@ func TestTrustTunnelStreamSettingsWithTLSCompatibilityFillsServerNameForExplicit
 	if tlsConfig == nil {
 		t.Fatal("expected tls override config, got nil")
 	}
-	if got := tlsConfig.GetServerName(); got != "vpn.lab.local" {
-		t.Fatalf("serverName = %q, want %q", got, "vpn.lab.local")
+	if got := tlsConfig.GetServerName(); got != "vpn.example.com" {
+		t.Fatalf("serverName = %q, want %q", got, "vpn.example.com")
 	}
 	if got := tlsConfig.GetVerifyPeerCertByName(); len(got) != 1 || got[0] != "example.com" {
 		t.Fatalf("verifyPeerCertByName = %v, want [example.com]", got)

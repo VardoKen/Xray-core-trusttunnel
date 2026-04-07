@@ -7,7 +7,7 @@ exclusions = []
 dns_upstreams = []
 
 [endpoint]
-hostname = "vpn.lab.local"
+hostname = "vpn.example.com"
 addresses = ["127.0.0.1:9443"]
 custom_sni = ""
 has_ipv6 = true

@@ -2,14 +2,7 @@
 
 Russian version: [configuration.ru.md](configuration.ru.md)
 
-This document explains how to write configs for the TrustTunnel fork of Xray-core. It is a practical guide, not the authoritative behavior spec. When this file and `docs/current/*` differ, `docs/current/*` wins.
-
-Primary references:
-
-- Current state: [current/current-state.md](current/current-state.md)
-- Operations: [current/operations.md](current/operations.md)
-- Architecture: [current/architecture.md](current/architecture.md)
-- Validation: [current/validation.md](current/validation.md)
+This document explains how to write configs for the TrustTunnel fork of Xray-core. It is a public, deployment-neutral guide focused on supported configuration patterns.
 
 ## 1. Mental Model
 
@@ -131,7 +124,7 @@ The validator rejects these combinations before runtime:
     "port": 9443,
     "username": "u1",
     "password": "p1",
-    "hostname": "vpn.lab.local",
+    "hostname": "vpn.example.com",
     "transport": "http2",
     "skipVerification": false,
     "certificatePemFile": "/path/to/server.crt",
@@ -141,7 +134,7 @@ The validator rejects these combinations before runtime:
     "network": "tcp",
     "security": "tls",
     "tlsSettings": {
-      "serverName": "vpn.lab.local",
+      "serverName": "vpn.example.com",
       "alpn": ["h2"]
     }
   }
@@ -158,7 +151,7 @@ Tracked example:
 {
   "protocol": "trusttunnel",
   "settings": {
-    "address": "37.252.0.130",
+    "address": "server.example.com",
     "port": 9443,
     "username": "u1",
     "password": "p1",
@@ -203,7 +196,7 @@ Tracked example:
     "port": 9443,
     "username": "u1",
     "password": "p1",
-    "hostname": "vpn.lab.local",
+    "hostname": "vpn.example.com",
     "transport": "http3",
     "skipVerification": true,
     "udp": false
@@ -212,7 +205,7 @@ Tracked example:
     "network": "tcp",
     "security": "tls",
     "tlsSettings": {
-      "serverName": "vpn.lab.local",
+      "serverName": "vpn.example.com",
       "allowInsecure": true,
       "alpn": ["h3"]
     }
@@ -299,11 +292,11 @@ Tracked examples:
   "port": 9443,
   "settings": {
     "users": [
-      { "email": "u1@lab", "username": "u1", "password": "p1" }
+      { "email": "u1@example.com", "username": "u1", "password": "p1" }
     ],
     "hosts": [
       {
-        "hostname": "vpn.lab.local",
+        "hostname": "vpn.example.com",
         "certificateFile": "/path/to/server.crt",
         "keyFile": "/path/to/server.key"
       }
@@ -412,7 +405,7 @@ Do not rely on these as working product paths:
 - UDP domain targets
 - generic server host/cert selection only through `settings.hosts[]`
 - generic server transport routing only through `settings.transports[]`
-- lab-only keys or secrets committed into tracked files
+- deployment-specific keys or secrets committed into tracked files
 
 ## 8. Tracked Examples
 
@@ -426,4 +419,4 @@ Useful starting points:
 - [../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json)
 - [../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json)
 
-For exact runtime verdicts, certificates, and pass/fail markers, always check [current/validation.md](current/validation.md).
+For real deployments, replace all placeholder hostnames, certificates, credentials, and keys with your own values.

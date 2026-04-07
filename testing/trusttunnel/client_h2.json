@@ -21,17 +21,17 @@
         "port": 9443,
         "username": "u1",
         "password": "p1",
-        "hostname": "vpn.lab.local",
+        "hostname": "vpn.example.com",
         "transport": "http2",
         "skipVerification": false,
-        "certificatePemFile": "/opt/lab/xray-tt/certs/server.crt",
+        "certificatePemFile": "/path/to/server.crt",
         "udp": false
       },
       "streamSettings": {
         "network": "tcp",
         "security": "tls",
         "tlsSettings": {
-          "serverName": "vpn.lab.local",
+          "serverName": "vpn.example.com",
           "allowInsecure": true,
           "alpn": ["h2"]
         }
