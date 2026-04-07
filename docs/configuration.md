@@ -2,50 +2,57 @@
 
 Russian version: [configuration.ru.md](configuration.ru.md)
 
-This document explains how to write configs for the TrustTunnel fork of Xray-core. It is a public, deployment-neutral guide focused on supported configuration patterns.
+This guide explains how to write public, deployment-neutral TrustTunnel configs for this fork of Xray-core.
 
-## 1. Mental Model
+## 1. Quick model
 
 TrustTunnel is available as both:
 
 - an inbound protocol: `protocol: "trusttunnel"`
 - an outbound protocol: `protocol: "trusttunnel"`
 
-The current validated transport surface is:
+Validated transport and security combinations:
 
 - HTTP/2 over TLS
 - HTTP/2 over REALITY
 - HTTP/3 over TLS
 
-The current validated payload surface is:
+Validated payload paths:
 
 - TCP CONNECT
-- UDP mux via `_udp2`
-- ICMP mux via `_icmp`
+- UDP multiplexing via `_udp2`
+- ICMP multiplexing via `_icmp`
 - health-check path via `_check`
 
-## 2. Transport Matrix
+For `HTTP/2 over REALITY`, use `streamSettings.security = "reality"`. This path does not use the regular certificate-chain trust model in the same way as `HTTP/2 over TLS` or `HTTP/3 over TLS`.
 
-Supported:
+## 2. Minimal vs recommended examples
 
-- `transport: "http2"` with `streamSettings.security: "tls"`
-- `transport: "http2"` with `streamSettings.security: "reality"`
-- `transport: "http3"` with `streamSettings.security: "tls"`
+This guide uses two kinds of examples:
 
-Explicitly unsupported:
+- minimal examples show the shortest valid config shape
+- recommended examples show the better default for real deployments
 
-- `transport: "http3"` with `streamSettings.security: "reality"`
-- `antiDpi: true`
+In practice, start from a recommended example unless you explicitly need the smallest possible config.
 
-Guarded limitations:
+## 3. Supported transport and security combinations
 
-- UDP domain targets are not a validated product path. Use IP targets.
-- `hasIpv6: false` requires `targetStrategy: "useipv4"` or `"forceipv4"` for domain targets.
-- Inbound `hosts[]` and `transports[]` are not a generic host-routing layer by themselves.
+| Combination | Status | Notes |
+| --- | --- | --- |
+| HTTP/2 over TLS | Supported | Main certificate-based H2 path |
+| HTTP/2 over REALITY | Supported | Uses `streamSettings.security = "reality"` |
+| HTTP/3 over TLS | Supported | H3 path over QUIC |
+| HTTP/3 over REALITY | Unsupported | Current REALITY runtime is TCP-stream based |
 
-## 3. Outbound Config
+Additional limits:
 
-### 3.1. Minimum Shape
+- `antiDpi=true` is unsupported.
+- UDP domain targets are not documented as a supported product path. Use IP targets for UDP.
+- With `hasIpv6=false`, domain targets require `targetStrategy: "useipv4"` or `"forceipv4"`.
+
+## 4. Outbound quick start
+
+### 4.1. Minimal HTTP/2 over TLS outbound
 
 ```json
 {
@@ -70,82 +77,18 @@ Guarded limitations:
 }
 ```
 
-### 3.2. Outbound Fields That Matter In Runtime
-
-Required in practice:
-
-- `address`
-- `port`
-- `username`
-- `password`
-- `hostname`
-- `transport`
-
-Supported runtime fields:
-
-- `udp`
-- `skipVerification`
-- `certificatePem`
-- `certificatePemFile`
-- `clientRandom`
-- `hasIpv6`
-- `postQuantumGroupEnabled`
-
-Explicit unsupported field:
-
-- `antiDpi`
-
-### 3.3. Boundary Between `settings` And `streamSettings`
-
-For non-HTTP3 paths, generic Xray `streamSettings.tlsSettings` are authoritative. That means:
-
-- `settings.hostname` may fill a missing `tlsSettings.serverName`
-- `settings.skipVerification=true` may fill a missing `tlsSettings.allowInsecure=true`
-- `settings.skipVerification` must not override explicit generic verify settings
-- `settings.certificatePem` and `settings.certificatePemFile` must not be combined with explicit generic verify surface in ambiguous ways
-
-The validator rejects these combinations before runtime:
-
-- H2 `postQuantumGroupEnabled=true` without TLS or REALITY `streamSettings`
-- `http3 + reality`
-- `antiDpi=true`
-- `hostname` conflicting with generic `tlsSettings.serverName`
-- `skipVerification=true` combined with explicit generic verify surface
-- `skipVerification=true` combined with `certificatePem` or `certificatePemFile`
-- `certificatePem` or `certificatePemFile` combined with explicit generic verify surface
-
-### 3.4. Minimal HTTP/2 + TLS Outbound
+Recommended addition:
 
 ```json
-{
-  "protocol": "trusttunnel",
-  "settings": {
-    "address": "127.0.0.1",
-    "port": 9443,
-    "username": "u1",
-    "password": "p1",
-    "hostname": "vpn.example.com",
-    "transport": "http2",
-    "skipVerification": false,
-    "certificatePemFile": "/path/to/server.crt",
-    "udp": false
-  },
-  "streamSettings": {
-    "network": "tcp",
-    "security": "tls",
-    "tlsSettings": {
-      "serverName": "vpn.example.com",
-      "alpn": ["h2"]
-    }
-  }
-}
+"clientRandom": "deadbeef"
 ```
 
-Tracked example:
+Tracked examples:
 
-- [../testing/trusttunnel/client_h2.json](../testing/trusttunnel/client_h2.json)
+- minimal: [../testing/trusttunnel/client_h2.json](../testing/trusttunnel/client_h2.json)
+- recommended: [../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json)
 
-### 3.5. Minimal HTTP/2 + REALITY Outbound
+### 4.2. Minimal HTTP/2 over REALITY outbound
 
 ```json
 {
@@ -155,10 +98,9 @@ Tracked example:
     "port": 9443,
     "username": "u1",
     "password": "p1",
-    "hostname": "www.google.com",
+    "hostname": "www.example.com",
     "transport": "http2",
     "hasIpv6": true,
-    "skipVerification": false,
     "udp": false
   },
   "streamSettings": {
@@ -166,7 +108,7 @@ Tracked example:
     "security": "reality",
     "realitySettings": {
       "fingerprint": "chrome",
-      "serverName": "www.google.com",
+      "serverName": "www.example.com",
       "publicKey": "REPLACE_ME",
       "shortId": "0123456789abcdef",
       "spiderX": "/"
@@ -175,30 +117,35 @@ Tracked example:
 }
 ```
 
+Recommended addition:
+
+```json
+"clientRandom": "deadbeef"
+```
+
 Rules:
 
-- `streamSettings.security` must be `"reality"`
-- `realitySettings.serverName` must match `settings.hostname`
-- `publicKey`, `shortId`, and `fingerprint` must match the server
-- current REALITY support is validated for HTTP/2 only
+- `streamSettings.security` must be `"reality"`.
+- `realitySettings.serverName` must match `settings.hostname`.
+- `publicKey`, `shortId`, and `fingerprint` must match the server.
+- REALITY support is currently validated for HTTP/2 only.
 
 Tracked example:
 
-- [../testing/trusttunnel/our_client_to_remote_server_h2_reality.json](../testing/trusttunnel/our_client_to_remote_server_h2_reality.json)
+- recommended: [../testing/trusttunnel/our_client_to_remote_server_h2_reality.json](../testing/trusttunnel/our_client_to_remote_server_h2_reality.json)
 
-### 3.6. Minimal HTTP/3 + TLS Outbound
+### 4.3. Minimal HTTP/3 over TLS outbound
 
 ```json
 {
   "protocol": "trusttunnel",
   "settings": {
-    "address": "127.0.0.1",
+    "address": "server.example.com",
     "port": 9443,
     "username": "u1",
     "password": "p1",
     "hostname": "vpn.example.com",
     "transport": "http3",
-    "skipVerification": true,
     "udp": false
   },
   "streamSettings": {
@@ -206,11 +153,16 @@ Tracked example:
     "security": "tls",
     "tlsSettings": {
       "serverName": "vpn.example.com",
-      "allowInsecure": true,
       "alpn": ["h3"]
     }
   }
 }
+```
+
+Recommended addition:
+
+```json
+"clientRandom": "deadbeef"
 ```
 
 Rules:
@@ -221,13 +173,15 @@ Rules:
 
 Tracked example:
 
-- [../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json)
+- recommended: [../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json)
 
-### 3.7. UDP Outbound
+### 4.4. UDP outbound
 
 Set:
 
-- `settings.udp: true`
+```json
+"udp": true
+```
 
 Validated scope:
 
@@ -235,9 +189,7 @@ Validated scope:
 - HTTP/3 UDP mux
 - HTTP/2 UDP mux over REALITY
 
-Important rule:
-
-- validated UDP destinations are IP literals, not domains
+Use IP destinations for UDP.
 
 Tracked examples:
 
@@ -245,45 +197,99 @@ Tracked examples:
 - [../testing/trusttunnel/our_client_udp_to_our_server_h3.json](../testing/trusttunnel/our_client_udp_to_our_server_h3.json)
 - [../testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json](../testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json)
 
-### 3.8. `clientRandom`
+## 5. `clientRandom` and `client_random` rules
 
-`clientRandom` is a real runtime feature for HTTP/2 and HTTP/3.
+### 5.1. What `clientRandom` is
 
-Use it when:
+`clientRandom` is an outbound setting that shapes the TLS ClientHello random so that the server can match the connection against TrustTunnel `client_random` rules.
 
-- the server enforces TrustTunnel rules by `client_random`
+Practical guidance:
 
-Result:
+- minimal examples may omit it
+- recommended examples should set it explicitly
+- if you do not have a reason to omit it, set it explicitly
+- it is especially important when multiple clients share the same public IP or NAT
 
-- outgoing TLS ClientHello random is shaped to match the configured TrustTunnel rule spec
+### 5.2. What `client_random` rules are
 
-Tracked examples:
+`client_random` rules are inbound access rules under `settings.rules[]`.
 
-- [../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json)
-- [../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json)
+Each rule can match:
 
-### 3.9. `hasIpv6`, `postQuantumGroupEnabled`, `antiDpi`
+- `cidr`
+- `clientRandom`
+- both together
+- neither, which makes the rule a catch-all rule
 
-`hasIpv6`:
+Each rule also carries:
 
-- allows normal IPv6 behavior when `true`
-- blocks literal IPv6 targets when `false`
-- also blocks domain targets unless the outbound target strategy is `useipv4` or `forceipv4`
+- `allow: true`
+- or `allow: false`
 
-`postQuantumGroupEnabled`:
+### 5.3. Rule evaluation order
 
-- real runtime toggle
-- for H2 TLS and H2 REALITY it changes the effective TLS/REALITY fingerprint profile
-- for H3 TLS it changes curve preferences
+Rule evaluation is exact:
 
-`antiDpi`:
+- rules are checked from top to bottom
+- the first matching rule wins
+- if no rule matches, the request is allowed by default
+- if the client did not send a usable `clientRandom`, any rule that contains `clientRandom` does not match
 
-- not implemented as a runtime feature
-- rejected explicitly
+This is why there is no single unconditional answer to “will a client without `clientRandom` be rejected?”:
 
-## 4. Inbound Config
+- if the server does not rely on a matching `client_random` rule, the connection can still be accepted
+- if the server allows only specific `client_random` values and then ends the list with a catch-all deny rule, a client without a matching `clientRandom` will be denied
 
-### 4.1. Minimum HTTP/2 + TLS Inbound
+### 5.4. How to write `client_random` rules
+
+`clientRandom` in a rule accepts:
+
+- a hex prefix, for example `deadbeef`
+- or a prefix with a mask, for example `d0adbeef/f0ffffff`
+
+Example:
+
+```json
+"rules": [
+  { "clientRandom": "deadbeef", "allow": true },
+  { "allow": false }
+]
+```
+
+Meaning:
+
+- a client whose effective ClientHello random starts with `deadbeef` is allowed
+- a client with no explicit `clientRandom`, or with a different value, does not match the first rule
+- the second rule is a catch-all deny rule, so that client is denied
+
+If you want allow-by-default behavior, do not add the final catch-all deny rule.
+
+Tracked rule example:
+
+- [../testing/trusttunnel/server_h2_rules.json](../testing/trusttunnel/server_h2_rules.json)
+
+## 6. Outbound field reference
+
+| Field | Type | Required | Meaning | Notes |
+| --- | --- | --- | --- | --- |
+| `address` | string | Yes | TrustTunnel server address | IP or domain |
+| `port` | integer | Yes | TrustTunnel server port | Usually `9443` in examples |
+| `username` | string | Yes | Username for TrustTunnel auth | Must match server user |
+| `password` | string | Yes | Password for TrustTunnel auth | Must match server user |
+| `hostname` | string | Yes | Logical TrustTunnel host name | For REALITY, match `realitySettings.serverName` |
+| `transport` | string | Yes | Transport selection | `http2` or `http3` |
+| `udp` | boolean | No | Enables UDP mux path | Use IP targets |
+| `skipVerification` | boolean | No | Allows insecure certificate verification behavior | Do not combine ambiguously with generic verify settings |
+| `certificatePem` | string | No | Inline trusted PEM certificate | TLS path only |
+| `certificatePemFile` | string | No | Path to trusted PEM certificate file | TLS path only |
+| `clientRandom` | string | No, but strongly recommended | Shapes ClientHello random for `client_random` rules | Set it explicitly unless you have a reason not to |
+| `hasIpv6` | boolean | No | Controls IPv6 target allowance | `false` blocks literal IPv6 and requires IPv4-only target strategy for domain targets |
+| `postQuantumGroupEnabled` | boolean | No | Enables the post-quantum group profile where supported | Runtime-active for H2 TLS, H2 REALITY, and H3 TLS |
+| `antiDpi` | boolean | No | Compatibility field only | Explicitly rejected |
+
+## 7. Inbound quick start
+
+### 7.1. Minimal HTTP/2 over TLS inbound
 
 ```json
 {
@@ -326,7 +332,40 @@ Tracked example:
 
 - [../testing/trusttunnel/server_h2.json](../testing/trusttunnel/server_h2.json)
 
-### 4.2. Minimum HTTP/3 + TLS Inbound
+### 7.2. Minimal HTTP/2 over REALITY inbound
+
+```json
+{
+  "protocol": "trusttunnel",
+  "listen": "0.0.0.0",
+  "port": 9443,
+  "settings": {
+    "users": [
+      { "email": "u1@example.com", "username": "u1", "password": "p1" }
+    ],
+    "transports": ["http2"],
+    "rules": [],
+    "authFailureStatusCode": 407,
+    "udp": false
+  },
+  "streamSettings": {
+    "network": "tcp",
+    "security": "reality",
+    "realitySettings": {
+      "dest": "www.example.com:443",
+      "serverNames": ["www.example.com"],
+      "privateKey": "REPLACE_ME",
+      "shortIds": ["0123456789abcdef"]
+    }
+  }
+}
+```
+
+Tracked example:
+
+- [../testing/trusttunnel/server_h2_reality_remote.json](../testing/trusttunnel/server_h2_reality_remote.json)
+
+### 7.3. Minimal HTTP/3 over TLS inbound
 
 Use the same protocol with:
 
@@ -337,33 +376,49 @@ Tracked example:
 
 - [../testing/trusttunnel/server_h3.json](../testing/trusttunnel/server_h3.json)
 
-### 4.3. Inbound Fields That Matter In Runtime
+## 8. Inbound field reference
 
-Validated runtime fields:
+| Field | Type | Required | Meaning | Notes |
+| --- | --- | --- | --- | --- |
+| `users` | array | Yes | TrustTunnel users accepted by the server | Each user needs `username` and `password`; `email` is useful for identity and stats |
+| `hosts` | array | No | Compatibility host/certificate mapping | Do not treat it as a generic host-routing system |
+| `transports` | array | No | Allowed transport list | Do not treat it as a generic transport-routing system |
+| `rules` | array | No | Access rules evaluated before dispatch | See Section 5 |
+| `authFailureStatusCode` | integer | No | HTTP status used for auth failure | `407` is the common value |
+| `udp` | boolean | No | Enables UDP mux support | Required for `_udp2` |
+| `allowPrivateNetworkConnections` | boolean | No | Allows private-network ICMP targets | Applies to `_icmp` |
+| `icmp.interfaceName` | string | No | Outgoing interface name for ICMP | `_icmp` only |
+| `icmp.requestTimeoutSecs` | integer | No | Per-request ICMP timeout in seconds | `_icmp` only |
+| `icmp.recvMessageQueueCapacity` | integer | No | Reply queue capacity for ICMP runtime | `_icmp` only |
+| `tlsHandshakeTimeoutSecs` | integer | No | TLS handshake timeout in seconds | Inbound timeout control |
+| `clientListenerTimeoutSecs` | integer | No | Timeout for client listener stage | Inbound timeout control |
+| `connectionEstablishmentTimeoutSecs` | integer | No | Timeout for establishing upstream connection | Inbound timeout control |
+| `tcpConnectionsTimeoutSecs` | integer | No | TCP connection idle timeout in seconds | Inbound timeout control |
+| `udpConnectionsTimeoutSecs` | integer | No | UDP session timeout in seconds | Inbound timeout control |
+| `ipv6Available` | boolean | No | Controls IPv6 availability for `_icmp` runtime | `_icmp` only |
 
-- `users`
-- `rules`
-- `authFailureStatusCode`
-- `udp`
-- `allowPrivateNetworkConnections` for `_icmp`
-- `icmp.interfaceName`
-- `icmp.requestTimeoutSecs`
-- `icmp.recvMessageQueueCapacity`
-- `tlsHandshakeTimeoutSecs`
-- `clientListenerTimeoutSecs`
-- `connectionEstablishmentTimeoutSecs`
-- `tcpConnectionsTimeoutSecs`
-- `udpConnectionsTimeoutSecs`
-- `ipv6Available` for `_icmp`
+## 9. Boundary between `settings` and `streamSettings`
 
-Fields that should not be oversold:
+For non-H3 paths, generic Xray `streamSettings` are authoritative.
 
-- `hosts`
-- `transports`
+That means:
 
-They are part of the compatibility surface and configuration model, but they are not a standalone generic routing system.
+- `settings.hostname` may fill a missing `tlsSettings.serverName`
+- `settings.skipVerification=true` may fill a missing `tlsSettings.allowInsecure=true`
+- `settings.skipVerification` must not override explicit generic verify settings
+- `certificatePem` and `certificatePemFile` must not be mixed ambiguously with explicit generic verify settings
 
-## 5. Combining TrustTunnel With Generic Xray Features
+The validator rejects these combinations before runtime:
+
+- `http3 + reality`
+- `antiDpi=true`
+- H2 `postQuantumGroupEnabled=true` without TLS or REALITY `streamSettings`
+- `hostname` conflicting with generic `tlsSettings.serverName`
+- `skipVerification=true` combined with explicit generic verify settings
+- `skipVerification=true` combined with `certificatePem` or `certificatePemFile`
+- `certificatePem` or `certificatePemFile` combined with explicit generic verify settings
+
+## 10. Combining TrustTunnel with generic Xray features
 
 Already validated:
 
@@ -374,7 +429,7 @@ Already validated:
 - inbound `sniffing + routeOnly`
 - inbound generic TLS `rejectUnknownSni`
 - dynamic inbound user management via `HandlerService`
-- generic TLS options on non-HTTP3 paths:
+- generic TLS options on non-H3 paths:
   - `serverName`
   - custom-CA verify
   - `VerifyPeerCertByName`
@@ -383,40 +438,28 @@ Already validated:
 
 Windows note:
 
-- if you rely on custom-CA authority verification through generic TLS settings on Windows, use `disableSystemRoot = true` to keep verification on the intended custom-CA path
+- if you use custom-CA verification through generic TLS settings on Windows, set `disableSystemRoot = true` so verification stays on the intended custom-CA path
 
-## 6. How It Works
+## 11. Unsupported or guarded combinations
 
-High-level runtime model:
+- `HTTP/3 over REALITY` is unsupported because the current REALITY runtime is TCP-stream based.
+- `antiDpi=true` is unsupported because there is no transport/runtime implementation behind it.
+- UDP domain targets are not a documented product path.
+- `settings.hosts[]` is not a standalone generic host-routing layer.
+- `settings.transports[]` is not a standalone generic transport-routing layer.
 
-- outbound opens TrustTunnel CONNECT over HTTP/2 or HTTP/3
-- TCP uses the normal Xray dispatcher link
-- UDP uses `_udp2` mux over the same TrustTunnel session
-- ICMP uses `_icmp` mux with fixed-size request and reply frames
-- `_check` is a reserved health-check path
-- stats, routing, policy, and generic Xray transport features remain integrated through common Xray layers
-
-## 7. Unsupported Or Guarded Combinations
-
-Do not rely on these as working product paths:
-
-- `http3 + reality`
-- `antiDpi=true`
-- UDP domain targets
-- generic server host/cert selection only through `settings.hosts[]`
-- generic server transport routing only through `settings.transports[]`
-- deployment-specific keys or secrets committed into tracked files
-
-## 8. Tracked Examples
+## 12. Tracked examples
 
 Useful starting points:
 
 - [../testing/trusttunnel/client_h2.json](../testing/trusttunnel/client_h2.json)
 - [../testing/trusttunnel/server_h2.json](../testing/trusttunnel/server_h2.json)
+- [../testing/trusttunnel/server_h2_reality_remote.json](../testing/trusttunnel/server_h2_reality_remote.json)
 - [../testing/trusttunnel/server_h3.json](../testing/trusttunnel/server_h3.json)
-- [../testing/trusttunnel/our_client_to_remote_server_h2_reality.json](../testing/trusttunnel/our_client_to_remote_server_h2_reality.json)
-- [../testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json](../testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json)
 - [../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json)
 - [../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json)
+- [../testing/trusttunnel/our_client_to_remote_server_h2_reality.json](../testing/trusttunnel/our_client_to_remote_server_h2_reality.json)
+- [../testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json](../testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json)
+- [../testing/trusttunnel/server_h2_rules.json](../testing/trusttunnel/server_h2_rules.json)
 
-For real deployments, replace all placeholder hostnames, certificates, credentials, and keys with your own values.
+Replace all placeholder addresses, certificates, credentials, public keys, private keys, and short IDs with your own deployment values.

@@ -32,7 +32,7 @@
         "security": "tls",
         "tlsSettings": {
           "serverName": "vpn.example.com",
-          "allowInsecure": true,
+          "allowInsecure": false,
           "alpn": ["h2"]
         }
       }

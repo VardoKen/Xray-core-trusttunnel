@@ -17,14 +17,7 @@ client_random = "deadbeef"
 skip_verification = false
 certificate = """
 -----BEGIN CERTIFICATE-----
-MIIBXzCCAQWgAwIBAgIUMEkgq6/mlvcPvuG+L8ywf8K3W9swCgYIKoZIzj0EAwIw
-GDEWMBQGA1UEAwwNdnBuLmxhYi5sb2NhbDAeFw0yNjAzMjQwMDAwMDBaFw0yNzAz
-MjQwMDAwMDBaMBgxFjAUBgNVBAMMDXZwbi5sYWIubG9jYWwwWTATBgcqhkjOPQIB
-BggqhkjOPQMBBwNCAATeD8a0b3AFJQXj32NRmstMUuQ4icXTYUPvc42jnK6SlFBk
-sFZ3QUjqNjFiyVpSlLWOrvsaFmIi9hQT+ku8JN7roy0wKzApBgNVHREEIjAggg12
-cG4ubGFiLmxvY2Fsgg8qLnZwbi5sYWIubG9jYWwwCgYIKoZIzj0EAwIDSAAwRQIh
-ALxAEnITikOq4mVI8WWP+Xw+MeT62kO3UQT73MTVD5aJAiBtwtzsl32RKfmk1Y+W
-zVglTNd6+XSF+Az3JzGktku8kQ==
+REPLACE_WITH_YOUR_TRUSTED_SERVER_CERTIFICATE
 -----END CERTIFICATE-----
 """
 upstream_protocol = "http2"

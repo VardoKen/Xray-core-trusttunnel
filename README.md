@@ -2,34 +2,37 @@
 
 Russian version: [README.ru.md](README.ru.md)
 
-This repository is a downstream fork of [XTLS/Xray-core](https://github.com/XTLS/Xray-core) with TrustTunnel support integrated into Xray-core.
+This repository is a downstream fork of [XTLS/Xray-core](https://github.com/XTLS/Xray-core) with TrustTunnel integrated directly into Xray-core.
 
-The fork exists to provide a maintained Xray runtime for TrustTunnel scenarios instead of keeping TrustTunnel support as an external prototype or a private patch set.
+The goal of the fork is straightforward: keep TrustTunnel usable as a maintained Xray runtime instead of leaving it as a private patch set or a standalone prototype.
 
-## What This Fork Contains
+## Supported configurations
 
-- TrustTunnel inbound and outbound protocol support
-- HTTP/2 and HTTP/3 TCP paths
-- HTTP/2 and HTTP/3 UDP mux paths
-- HTTP/2 + REALITY support
-- TrustTunnel `_check`, `_udp2`, and `_icmp`
-- config validation for unsupported TrustTunnel combinations
+- HTTP/2 over TLS
+- HTTP/2 over REALITY
+- HTTP/3 over TLS
+- TCP tunneling
+- UDP multiplexing via `_udp2`
+- ICMP tunneling via `_icmp`
+- Health-check path via `_check`
 
-## Current Feature Scope
+## `clientRandom`
 
-Publicly documented and intended features in this fork:
+`clientRandom` is not required to make every TrustTunnel connection work, but it is the recommended default for real deployments.
 
-- TrustTunnel over HTTP/2 + TLS
-- TrustTunnel over HTTP/2 + REALITY
-- TrustTunnel over HTTP/3 + TLS
-- TrustTunnel TCP, UDP mux, and ICMP support
-- compatibility with common Xray routing and transport configuration
+If the server uses `client_random` rules and finishes the rule list with a fallback deny rule, a client without a matching `clientRandom` will be denied. If the server does not require a matching `client_random` rule, the tunnel can still work without an explicit `clientRandom`.
 
-## Known Limits
+The configuration guide includes:
 
-- `http3 + reality` is unsupported
-- `antiDpi=true` is unsupported
-- UDP domain targets are not documented as a supported product path
+- minimal examples, which show the shortest valid config shape
+- recommended examples, which show the safer default for real deployments
+- a precise explanation of `client_random` rules and how to write them
+
+## Unsupported combinations
+
+- `HTTP/3 over REALITY` is unsupported because the current REALITY runtime in Xray is built around the TCP stream layer, while TrustTunnel H3 uses QUIC.
+- `antiDpi=true` is unsupported because the field exists in the config surface, but there is no transport/runtime implementation behind it.
+- UDP domain targets are not documented as a supported product path. The validated UDP path uses IP targets.
 
 ## Documentation
 
@@ -37,7 +40,7 @@ Publicly documented and intended features in this fork:
 - Configuration guide: [docs/configuration.md](docs/configuration.md)
 - Russian configuration guide: [docs/configuration.ru.md](docs/configuration.ru.md)
 
-## Example Templates
+## Example templates
 
 Sanitized example templates are provided under [testing/trusttunnel](testing/trusttunnel).
 
