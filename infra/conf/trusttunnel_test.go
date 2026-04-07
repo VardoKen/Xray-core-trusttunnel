@@ -1,6 +1,8 @@
 package conf
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/xtls/xray-core/common/net"
@@ -112,5 +114,123 @@ func TestTrustTunnelClientConfigBuildSupportsPostQuantumGroupEnabled(t *testing.
 				t.Fatalf("postQuantumGroupEnabled = %v, want %v", built.GetPostQuantumGroupEnabled(), tc.want)
 			}
 		})
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelHTTP3RealityOutbound(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "127.0.0.1",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http3"
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol:      "trusttunnel",
+				Settings:      &raw,
+				StreamSetting: &StreamConfig{Security: "reality"},
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "http3 with REALITY is unsupported") {
+		t.Fatalf("Build() error = %v, want http3 reality unsupported", err)
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelHTTP3RealityInbound(t *testing.T) {
+	raw := json.RawMessage(`{
+		"users": [{"username": "u1", "password": "p1"}],
+		"transports": ["http3"]
+	}`)
+
+	_, err := (&Config{
+		InboundConfigs: []InboundDetourConfig{
+			{
+				Protocol:      "trusttunnel",
+				PortList:      &PortList{Range: []PortRange{{From: 9443, To: 9443}}},
+				ListenOn:      &Address{Address: net.ParseAddress("127.0.0.1")},
+				Settings:      &raw,
+				StreamSetting: &StreamConfig{Security: "reality"},
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "http3 with REALITY is unsupported") {
+		t.Fatalf("Build() error = %v, want http3 reality unsupported", err)
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelAntiDpi(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "127.0.0.1",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http2",
+		"antiDpi": true
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "antiDpi is unsupported") {
+		t.Fatalf("Build() error = %v, want antiDpi unsupported", err)
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelPostQuantumWithoutSecurityOnHTTP2(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "127.0.0.1",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http2",
+		"postQuantumGroupEnabled": true
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "postQuantumGroupEnabled is unsupported") {
+		t.Fatalf("Build() error = %v, want postQuantum unsupported", err)
+	}
+}
+
+func TestConfigBuildAllowsTrustTunnelHTTP3PostQuantumWithoutOutboundSecurity(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "127.0.0.1",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http3",
+		"postQuantumGroupEnabled": true
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+			},
+		},
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
 	}
 }
