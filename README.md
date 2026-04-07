@@ -1,214 +1,107 @@
-# Project X
+# Xray-core TrustTunnel Fork
 
-[Project X](https://github.com/XTLS) originates from XTLS protocol, providing a set of network tools such as [Xray-core](https://github.com/XTLS/Xray-core) and [REALITY](https://github.com/XTLS/REALITY).
+Russian version: [README.ru.md](README.ru.md)
 
-[README](https://github.com/XTLS/Xray-core#readme) is open, so feel free to submit your project [here](https://github.com/XTLS/Xray-core/pulls).
+This repository is a downstream fork of [XTLS/Xray-core](https://github.com/XTLS/Xray-core) that carries a production-focused TrustTunnel implementation and the related integration work inside Xray-core.
 
-## Sponsors
+It exists for one reason: keep TrustTunnel as a maintained, testable Xray runtime instead of a loose prototype. The fork includes protocol support, config binding, validator guards, live-traffic regression checks, and current documentation for the exact behavior that is already confirmed.
 
-[![Remnawave](https://github.com/user-attachments/assets/a22d34ae-01ee-441c-843a-85356748ed1e)](https://docs.rw)
+## What This Fork Adds
 
-[![Happ](https://github.com/user-attachments/assets/14055dab-e8bb-48bd-89e8-962709e4098e)](https://happ.su)
+- TrustTunnel inbound and outbound support in Xray-core.
+- Validated HTTP/2 and HTTP/3 TCP paths.
+- Validated HTTP/2 and HTTP/3 UDP mux paths.
+- Validated HTTP/2 + REALITY path for TCP and UDP.
+- TrustTunnel `_check`, `_udp2`, and `_icmp` protocol handling.
+- TrustTunnel-specific config validation and compatibility guards.
+- Runtime support for `clientRandom`, `postQuantumGroupEnabled`, and `hasIpv6` guards.
+- Ongoing upstream sync with targeted regression audits outside TrustTunnel.
 
-[![BlancVPN](https://github.com/user-attachments/assets/9145ea7d-5da3-446e-8143-710dba4292c3)](https://blanc.link/VMTSDqW)
+## Current Validated Scope
 
-[**Sponsor Xray-core**](https://github.com/XTLS/Xray-core/issues/3668)
+Authoritative current state lives in [docs/current/current-state.md](docs/current/current-state.md). At the moment this fork has confirmed:
 
-## Donation & NFTs
+- H2 TCP
+- H3 TCP
+- H2 UDP mux
+- H3 UDP mux
+- H2 TCP + REALITY
+- H2 UDP + REALITY
+- official interop for `_check`, `_udp2`, `_icmp`
+- outbound `clientRandom` runtime path
+- Linux TUN-backed `_icmp` product path
+- common Xray integration with `proxySettings`, `mux`, `sendThrough=origin`, `targetStrategy useipv4/forceipv4`, `sniffing + routeOnly`, and inbound `rejectUnknownSni`
 
-### [Collect a Project X NFT to support the development of Project X!](https://opensea.io/item/ethereum/0x5ee362866001613093361eb8569d59c4141b76d1/1)
+## Important Limits
 
-[<img alt="Project X NFT" width="150px" src="https://raw2.seadn.io/ethereum/0x5ee362866001613093361eb8569d59c4141b76d1/7fa9ce900fb39b44226348db330e32/8b7fa9ce900fb39b44226348db330e32.svg" />](https://opensea.io/item/ethereum/0x5ee362866001613093361eb8569d59c4141b76d1/1)
+This fork is not a blanket statement that every historical or official TrustTunnel field is active in runtime.
 
-- **TRX(Tron)/USDT/USDC: `TNrDh5VSfwd4RPrwsohr6poyNTfFefNYan`**
-- **TON: `UQApeV-u2gm43aC1uP76xAC1m6vCylstaN1gpfBmre_5IyTH`**
-- **BTC: `1JpqcziZZuqv3QQJhZGNGBVdCBrGgkL6cT`**
-- **XMR: `4ABHQZ3yJZkBnLoqiKvb3f8eqUnX4iMPb6wdant5ZLGQELctcerceSGEfJnoCk6nnyRZm73wrwSgvZ2WmjYLng6R7sR67nq`**
-- **SOL/USDT/USDC: `3x5NuXHzB5APG6vRinPZcsUv5ukWUY1tBGRSJiEJWtZa`**
-- **ETH/USDT/USDC: `0xDc3Fe44F0f25D13CACb1C4896CD0D321df3146Ee`**
-- **Project X NFT: https://opensea.io/item/ethereum/0x5ee362866001613093361eb8569d59c4141b76d1/1**
-- **VLESS NFT: https://opensea.io/collection/vless**
-- **REALITY NFT: https://opensea.io/item/ethereum/0x5ee362866001613093361eb8569d59c4141b76d1/2**
-- **Related links: [VLESS Post-Quantum Encryption](https://github.com/XTLS/Xray-core/pull/5067), [XHTTP: Beyond REALITY](https://github.com/XTLS/Xray-core/discussions/4113), [Announcement of NFTs by Project X](https://github.com/XTLS/Xray-core/discussions/3633)**
+Current hard limits are:
 
-## License
-
-[Mozilla Public License Version 2.0](https://github.com/XTLS/Xray-core/blob/main/LICENSE)
+- `http3 + reality` is explicitly unsupported and rejected.
+- `antiDpi=true` is explicitly unsupported and rejected.
+- UDP domain targets are not a validated product path.
+- `hosts[]` and `transports[]` on inbound are not a generic virtual-host/router layer by themselves.
+- Lab-only secrets and deployment keys must stay outside tracked repository files.
 
 ## Documentation
 
-[Project X Official Website](https://xtls.github.io)
+Start here:
 
-## Telegram
+- Documentation index: [docs/README.md](docs/README.md)
+- Configuration guide: [docs/configuration.md](docs/configuration.md)
+- Russian configuration guide: [docs/configuration.ru.md](docs/configuration.ru.md)
 
-[Project X](https://t.me/projectXray)
+Current source of truth:
 
-[Project X Channel](https://t.me/projectXtls)
+- State: [docs/current/current-state.md](docs/current/current-state.md)
+- Architecture: [docs/current/architecture.md](docs/current/architecture.md)
+- Operations: [docs/current/operations.md](docs/current/operations.md)
+- Validation: [docs/current/validation.md](docs/current/validation.md)
+- Roadmap: [docs/current/roadmap.md](docs/current/roadmap.md)
 
-[Project VLESS](https://t.me/projectVless) (Русский)
+Historical layers:
 
-[Project XHTTP](https://t.me/projectXhttp) (Persian)
+- Docs index explains the difference between `current`, `history`, `migration`, and `archive`.
 
-## Installation
+## Config Examples
 
-- Linux Script
-  - [XTLS/Xray-install](https://github.com/XTLS/Xray-install) (**Official**)
-  - [tempest](https://github.com/team-cloudchaser/tempest) (supports [`systemd`](https://systemd.io) and [OpenRC](https://github.com/OpenRC/openrc); Linux-only)
-- Docker
-  - [ghcr.io/xtls/xray-core](https://ghcr.io/xtls/xray-core) (**Official**)
-  - [teddysun/xray](https://hub.docker.com/r/teddysun/xray)
-  - [wulabing/xray_docker](https://github.com/wulabing/xray_docker)
-- Web Panel
-  - [Remnawave](https://github.com/remnawave/panel)
-  - [3X-UI](https://github.com/MHSanaei/3x-ui)
-  - [PasarGuard](https://github.com/PasarGuard/panel)
-  - [Xray-UI](https://github.com/qist/xray-ui)
-  - [X-Panel](https://github.com/xeefei/X-Panel)
-  - [Marzban](https://github.com/Gozargah/Marzban)
-  - [Hiddify](https://github.com/hiddify/Hiddify-Manager)
-  - [TX-UI](https://github.com/AghayeCoder/tx-ui)
-  - [CELERITY](https://github.com/ClickDevTech/CELERITY-panel)
-- One Click
-  - [Xray-REALITY](https://github.com/zxcvos/Xray-script), [xray-reality](https://github.com/sajjaddg/xray-reality), [reality-ezpz](https://github.com/aleskxyz/reality-ezpz)
-  - [Xray_bash_onekey](https://github.com/hello-yunshu/Xray_bash_onekey), [XTool](https://github.com/LordPenguin666/XTool), [VPainLess](https://github.com/vpainless/vpainless)
-  - [v2ray-agent](https://github.com/mack-a/v2ray-agent), [Xray_onekey](https://github.com/wulabing/Xray_onekey), [ProxySU](https://github.com/proxysu/ProxySU)
-- Magisk
-  - [NetProxy-Magisk](https://github.com/Fanju6/NetProxy-Magisk)
-  - [Xray4Magisk](https://github.com/Asterisk4Magisk/Xray4Magisk)
-  - [Xray_For_Magisk](https://github.com/E7KMbb/Xray_For_Magisk)
-- Homebrew
-  - `brew install xray`
+Tracked examples live under [testing/trusttunnel](testing/trusttunnel):
 
-## Usage
+- [testing/trusttunnel/client_h2.json](testing/trusttunnel/client_h2.json)
+- [testing/trusttunnel/server_h2.json](testing/trusttunnel/server_h2.json)
+- [testing/trusttunnel/server_h3.json](testing/trusttunnel/server_h3.json)
+- [testing/trusttunnel/our_client_to_remote_server_h2_reality.json](testing/trusttunnel/our_client_to_remote_server_h2_reality.json)
+- [testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json](testing/trusttunnel/our_client_udp_to_remote_server_h2_reality.json)
+- [testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json](testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json)
+- [testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json](testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json)
 
-- Example
-  - [VLESS-XTLS-uTLS-REALITY](https://github.com/XTLS/REALITY#readme)
-  - [VLESS-TCP-XTLS-Vision](https://github.com/XTLS/Xray-examples/tree/main/VLESS-TCP-XTLS-Vision)
-  - [All-in-One-fallbacks-Nginx](https://github.com/XTLS/Xray-examples/tree/main/All-in-One-fallbacks-Nginx)
-- Xray-examples
-  - [XTLS/Xray-examples](https://github.com/XTLS/Xray-examples)
-  - [chika0801/Xray-examples](https://github.com/chika0801/Xray-examples)
-  - [lxhao61/integrated-examples](https://github.com/lxhao61/integrated-examples)
-- Tutorial
-  - [XTLS Vision](https://github.com/chika0801/Xray-install)
-  - [REALITY (English)](https://cscot.pages.dev/2023/03/02/Xray-REALITY-tutorial/)
-  - [XTLS-Iran-Reality (English)](https://github.com/SasukeFreestyle/XTLS-Iran-Reality)
-  - [Xray REALITY with 'steal oneself' (English)](https://computerscot.github.io/vless-xtls-utls-reality-steal-oneself.html)
-  - [Xray with WireGuard inbound (English)](https://g800.pages.dev/wireguard)
+Treat them as tracked templates, not as deployment secrets.
 
-## GUI Clients
+## Build
 
-- OpenWrt
-  - [PassWall](https://github.com/Openwrt-Passwall/openwrt-passwall), [PassWall 2](https://github.com/Openwrt-Passwall/openwrt-passwall2)
-  - [ShadowSocksR Plus+](https://github.com/fw876/helloworld)
-  - [luci-app-xray](https://github.com/yichya/luci-app-xray) ([openwrt-xray](https://github.com/yichya/openwrt-xray))
-- Asuswrt-Merlin
-  - [XRAYUI](https://github.com/DanielLavrushin/asuswrt-merlin-xrayui)
-  - [fancyss](https://github.com/hq450/fancyss)
-- Windows
-  - [v2rayN](https://github.com/2dust/v2rayN)
-  - [Furious](https://github.com/LorenEteval/Furious)
-  - [Invisible Man - Xray](https://github.com/InvisibleManVPN/InvisibleMan-XRayClient)
-  - [AnyPortal](https://github.com/AnyPortal/AnyPortal)
-  - [GenyConnect](https://github.com/genyleap/GenyConnect)
-- Android
-  - [v2rayNG](https://github.com/2dust/v2rayNG)
-  - [X-flutter](https://github.com/XTLS/X-flutter)
-  - [SaeedDev94/Xray](https://github.com/SaeedDev94/Xray)
-  - [SimpleXray](https://github.com/lhear/SimpleXray)
-  - [XrayFA](https://github.com/Q7DF1/XrayFA)
-  - [AnyPortal](https://github.com/AnyPortal/AnyPortal)
-  - [NetProxy-Magisk](https://github.com/Fanju6/NetProxy-Magisk)
-- iOS & macOS arm64 & tvOS
-  - [Happ](https://apps.apple.com/app/happ-proxy-utility/id6504287215) | [Happ RU](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973) | [Happ tvOS](https://apps.apple.com/us/app/happ-proxy-utility-for-tv/id6748297274)
-  - [Streisand](https://apps.apple.com/app/streisand/id6450534064)
-  - [OneXray](https://github.com/OneXray/OneXray)
-  - [INCY](https://apps.apple.com/en/app/incy/id6756943388)
-- macOS arm64 & x64
-  - [Happ](https://apps.apple.com/app/happ-proxy-utility/id6504287215) | [Happ RU](https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973)
-  - [V2rayU](https://github.com/yanue/V2rayU)
-  - [V2RayXS](https://github.com/tzmax/V2RayXS)
-  - [Furious](https://github.com/LorenEteval/Furious)
-  - [OneXray](https://github.com/OneXray/OneXray)
-  - [GoXRay](https://github.com/goxray/desktop)
-  - [AnyPortal](https://github.com/AnyPortal/AnyPortal)
-  - [v2rayN](https://github.com/2dust/v2rayN)
-  - [GenyConnect](https://github.com/genyleap/GenyConnect)
-  - [INCY](https://apps.apple.com/en/app/incy/id6756943388)
-- Linux
-  - [v2rayA](https://github.com/v2rayA/v2rayA)
-  - [Furious](https://github.com/LorenEteval/Furious)
-  - [GorzRay](https://github.com/ketetefid/GorzRay)
-  - [GoXRay](https://github.com/goxray/desktop)
-  - [AnyPortal](https://github.com/AnyPortal/AnyPortal)
-  - [v2rayN](https://github.com/2dust/v2rayN)
-  - [GenyConnect](https://github.com/genyleap/GenyConnect)
-
-## Others that support VLESS, XTLS, REALITY, XUDP, PLUX...
-
-- iOS & macOS arm64 & tvOS
-  - [Shadowrocket](https://apps.apple.com/app/shadowrocket/id932747118)
-  - [Loon](https://apps.apple.com/us/app/loon/id1373567447)
-  - [Egern](https://apps.apple.com/us/app/egern/id1616105820)
-  - [Quantumult X](https://apps.apple.com/us/app/quantumult-x/id1443988620)
-- Xray Tools
-  - [xray-knife](https://github.com/lilendian0x00/xray-knife)
-  - [xray-checker](https://github.com/kutovoys/xray-checker)
-- Xray Wrapper
-  - [XTLS/libXray](https://github.com/XTLS/libXray)
-  - [xtls-sdk](https://github.com/remnawave/xtls-sdk)
-  - [xtlsapi](https://github.com/hiddify/xtlsapi)
-  - [AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLite)
-  - [Xray-core-python](https://github.com/LorenEteval/Xray-core-python)
-  - [xray-api](https://github.com/XVGuardian/xray-api)
-- [XrayR](https://github.com/XrayR-project/XrayR)
-  - [XrayR-release](https://github.com/XrayR-project/XrayR-release)
-  - [XrayR-V2Board](https://github.com/missuo/XrayR-V2Board)
-- Cores
-  - [Amnezia VPN](https://github.com/amnezia-vpn)
-  - [mihomo](https://github.com/MetaCubeX/mihomo)
-  - [sing-box](https://github.com/SagerNet/sing-box)
-
-## Contributing
-
-[Code of Conduct](https://github.com/XTLS/Xray-core/blob/main/CODE_OF_CONDUCT.md)
-
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/XTLS/Xray-core)
-
-## Credits
-
-- [Xray-core v1.0.0](https://github.com/XTLS/Xray-core/releases/tag/v1.0.0) was forked from [v2fly-core 9a03cc5](https://github.com/v2fly/v2ray-core/commit/9a03cc5c98d04cc28320fcee26dbc236b3291256), and we have made & accumulated a huge number of enhancements over time, check [the release notes for each version](https://github.com/XTLS/Xray-core/releases).
-- For third-party projects used in [Xray-core](https://github.com/XTLS/Xray-core), check your local or [the latest go.mod](https://github.com/XTLS/Xray-core/blob/main/go.mod).
-
-## One-line Compilation
-
-### Windows (PowerShell)
+Windows PowerShell:
 
 ```powershell
-$env:CGO_ENABLED=0
-go build -o xray.exe -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -v ./main
+$env:CGO_ENABLED = 0
+go build -buildvcs=false -o .\tmp\xray-tt-current.exe .\main
 ```
 
-### Linux / macOS
+Linux:
 
 ```bash
-CGO_ENABLED=0 go build -o xray -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -v ./main
+CGO_ENABLED=0 go build -buildvcs=false -o ./tmp/xray-tt-current ./main
 ```
 
-### Reproducible Releases
+## Upstream Tracking
 
-Make sure that you are using the same Go version, and remember to set the git commit id (7 bytes):
+This fork follows upstream Xray-core, but it is not presented as an upstream-ready patch stack. The working policy is:
 
-```bash
-CGO_ENABLED=0 go build -o xray -trimpath -buildvcs=false -gcflags="all=-l=4" -ldflags="-X github.com/xtls/xray-core/core.build=REPLACE -s -w -buildid=" -v ./main
-```
+1. keep the fork synced with upstream `main`
+2. rerun regression checks after each upstream merge/rebase
+3. treat `docs/current/*` as the only current source of truth for this fork
+4. split out upstreamable work later, only after the fork behavior stays stable
 
-If you are compiling a 32-bit MIPS/MIPSLE target, use this command instead:
+## License
 
-```bash
-CGO_ENABLED=0 go build -o xray -trimpath -buildvcs=false -gcflags="-l=4" -ldflags="-X github.com/xtls/xray-core/core.build=REPLACE -s -w -buildid=" -v ./main
-```
-
-## Stargazers over time
-
-[![Stargazers over time](https://starchart.cc/XTLS/Xray-core.svg)](https://starchart.cc/XTLS/Xray-core)
+This repository remains under the same project license as Xray-core: [Mozilla Public License Version 2.0](LICENSE).

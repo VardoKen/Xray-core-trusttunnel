@@ -1,124 +1,50 @@
-# TrustTunnel / Xray-Core — документация проекта
+# TrustTunnel Fork Documentation
 
-Этот каталог является канонической документационной базой проекта для людей и для Codex.
+Russian version: [README.ru.md](README.ru.md)
 
-## Слои документации
+This directory contains the maintained documentation set for the TrustTunnel fork of Xray-core.
 
-- `docs/current/*` — единственный слой текущей истины.
-- `docs/history/*` — хронология, ошибки этапов и старые диагностические сигнатуры.
-- `docs/migration/*` — служебные документы по переносу и нормализации старых текстов.
-- `docs/archive/*` — карантин для снятых с актуальности файлов, которые ещё нужно хранить рядом с репозиторием.
+## Where To Start
 
-## Порядок чтения
+Public fork documentation:
 
-При любой задаче по TrustTunnel начинать в таком порядке:
+- Fork overview: [../README.md](../README.md)
+- Configuration guide: [configuration.md](configuration.md)
+- Russian configuration guide: [configuration.ru.md](configuration.ru.md)
 
-1. `docs/current/current-state.md`
-2. один или несколько профильных current-документов:
-   - `architecture.md` — карта кода и runtime-path;
-   - `operations.md` — рабочие конфиги и эксплуатационные ограничения;
-   - `validation.md` — подтверждённые тесты, preflight и pass/fail;
-   - `roadmap.md` — только открытые задачи.
-3. `docs/history/development-history.md` — только если нужно понять, как проект пришёл в текущее состояние.
-4. `docs/migration/source-reconciliation.md` — только если нужно понять, из каких исходников собран новый слой.
+Current source of truth:
 
-## Антирегрессионное правило
+- State: [current/current-state.md](current/current-state.md)
+- Architecture: [current/architecture.md](current/architecture.md)
+- Operations: [current/operations.md](current/operations.md)
+- Validation: [current/validation.md](current/validation.md)
+- Roadmap: [current/roadmap.md](current/roadmap.md)
 
-Из `docs/history/*`, `docs/migration/*`, `docs/archive/*` и старых несистемных заметок нельзя поднимать утверждения обратно в `docs/current/*`, если нет более нового кода, тестов или эксплуатационных фактов, чем фиксация current-слоя.
+## Documentation Layers
 
-Для состояния `99e59352` это особенно важно для закрытой H3-тройки:
-- рабочий H3 runtime-path находится в transport-layer, а не в удалённом legacy-обработчике;
-- H3 `client_random` rules закрыты и не считаются fail-closed проблемой;
-- ложный `H3_NO_ERROR` закрыт и не считается текущим дефектом.
+- `docs/current/*`
+  - The only current source of truth.
+  - Use this layer for actual behavior, supported paths, validated configs, and open tasks.
+- `docs/history/*`
+  - Historical development notes.
+  - Use only to understand how the project reached the current state.
+- `docs/migration/*`
+  - Reconciliation and migration notes for older documentation sources.
+- `docs/archive/*`
+  - Retained but non-current material.
 
-## Структура
+## Reading Order
 
-```text
-/docs
-  README.md
-  current/
-    current-state.md
-    architecture.md
-    operations.md
-    validation.md
-    roadmap.md
-  history/
-    development-history.md
-  migration/
-    source-reconciliation.md
-  archive/
-    README.md
-```
+For any TrustTunnel code, config, test, or runtime task:
 
-## Канонические документы
+1. [current/current-state.md](current/current-state.md)
+2. one or more focused current documents:
+   - [current/architecture.md](current/architecture.md)
+   - [current/operations.md](current/operations.md)
+   - [current/validation.md](current/validation.md)
+   - [current/roadmap.md](current/roadmap.md)
+3. historical documents only if current-layer context is not enough
 
-### `docs/current/current-state.md`
+## Practical Rule
 
-Главный документ текущего состояния проекта.
-
-Содержит:
-- актуальную фиксацию после `99e59352`;
-- закрытые и открытые блоки;
-- границу текущей истины;
-- правило, какие H3-вопросы не поднимать обратно без более новых доказательств.
-
-### `docs/current/architecture.md`
-
-Техническая карта кода и реальных runtime-path.
-
-Содержит:
-- карту модулей;
-- активные и декларативные поля конфигурации;
-- H1/H2/H3 path;
-- `client_random`, UDP mux и stats;
-- диагностические сигнатуры.
-
-### `docs/current/operations.md`
-
-Эксплуатационная база.
-
-Содержит:
-- подтверждённые рабочие сценарии;
-- минимальные правила написания конфигов;
-- сертификатные нюансы;
-- ограничения режима эксплуатации.
-
-### `docs/current/validation.md`
-
-Документ проверок.
-
-Содержит:
-- preflight перед interop-тестами;
-- подтверждённые runtime-проверки;
-- pass/fail признаки;
-- список того, что уже закрыто и что ещё проверять дальше.
-
-### `docs/current/roadmap.md`
-
-Актуальный план разработки.
-
-Содержит только открытые задачи после состояния `99e59352`.
-
-### `docs/history/development-history.md`
-
-Исторический слой.
-
-Содержит:
-- этапы разработки;
-- тупиковые ветки и ошибки порядка работ;
-- старые ограничения;
-- исторические сигнатуры;
-- эволюцию проекта до текущего состояния.
-
-## Базовые правила поддержки документации
-
-1. Сначала обновляется `docs/current/current-state.md`.
-2. Если меняется карта кода или runtime-path — обновляется `docs/current/architecture.md`.
-3. Если меняются рабочие конфиги, сценарии запуска или эксплуатационные ограничения — обновляется `docs/current/operations.md`.
-4. Если меняется набор подтверждённых тестов, preflight или pass/fail признаки — обновляется `docs/current/validation.md`.
-5. Если задача закрыта или открыта заново — обновляется `docs/current/roadmap.md`.
-6. Исторический слой не переписывается как текущая истина. Новые события добавляются туда отдельно и не должны ломать `docs/current/*`.
-
-## Правило разрешения противоречий
-
-Если `docs/history/*`, `docs/migration/*`, `docs/archive/*` или старые несистемные заметки спорят с `docs/current/*`, приоритет всегда у `docs/current/*`.
+Do not promote claims from `history`, `migration`, `archive`, or old notes back into `docs/current/*` unless newer code, tests, or runtime evidence confirms them.
