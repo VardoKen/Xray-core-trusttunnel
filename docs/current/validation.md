@@ -1094,3 +1094,47 @@ wait "$CLIENT_PID" "$SERVER_PID" 2>/dev/null || true
 - server log содержит `trusttunnel H3 health-check accepted` и `trusttunnel H3 ICMP mux accepted`;
 - client log содержит `ICMP register_request` и `ICMP register_reply`;
 - `ping` из namespace `tun` проходит с ненулевым RTT и без packet loss.
+
+### 5.4. Upstream main sync и non-TrustTunnel live regression audit
+
+Preflight:
+- текущая ветка догнана merge commit `e83795ab`, который подтягивает `upstream/main` до `e5a9fb75` (`QUIC sniffer: Fix potential panic on malformed QUIC packets (#5866)`);
+- upstream compare-worktree для A/B расположен в `C:\Users\Vardo\GPTProject\xray-core-upstream-main-compare`, HEAD `e5a9fb75`;
+- lab binaries: `/opt/lab/xray-compare/bin/xray-fork`, `/opt/lab/xray-compare/bin/xray-upstream`;
+- remote binaries: `/opt/xray-compare/bin/xray-fork`, `/opt/xray-compare/bin/xray-upstream`;
+- lab configs: `/opt/lab/xray-compare/configs/lab_direct_socks.json`, `/opt/lab/xray-compare/configs/lab_tun_direct.json`, `/opt/lab/xray-compare/configs/lab_vless_tls_socks.json`, `/opt/lab/xray-compare/configs/lab_vless_reality_socks.json`, `/opt/lab/xray-compare/configs/lab_hysteria2_socks.json`;
+- remote configs: `/opt/xray-compare/configs/remote_vless_tls_server.json`, `/opt/xray-compare/configs/remote_vless_reality_server.json`, `/opt/xray-compare/configs/remote_hysteria2_server.json`;
+- remote payloads: `/opt/xray-compare/http/test32.bin`, `/opt/xray-compare/http/test128.bin`;
+- authoritative live result root: `/opt/lab/xray-compare/results/non-tt-live-20260407-210442`.
+
+Post-merge code checks:
+- `go test ./app/observatory ./app/proxyman/inbound ./app/proxyman/outbound ./common/protocol/quic ./proxy/hysteria ./proxy/tun ./proxy/wireguard ./transport/internet/... ./proxy/trusttunnel/... -count=1`;
+- `go test ./testing/scenarios -count=1 -timeout 90m -v`;
+- `GOFLAGS=-buildvcs=false go test -run '^$' ./...`;
+- `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main`.
+
+Authoritative live verdict:
+- `10/10` real-traffic cases прошли на lab → remote → internet;
+- все path дали одинаковую функциональную семантику между fork и upstream: `ipify` совпадает попарно, `test32.bin` всегда даёт SHA-256 `e448489238b0c182ce38452f1a073d2f7676e5868f25e3124ac3fd58e536ab73`;
+- direct/TUN path выходят в интернет с lab egress `109.252.70.98`, а server-mediated path (`vless + tls`, `vless + reality`, `hysteria`) выходят через remote egress `37.252.0.130`;
+- подтверждённого поведенческого расхождения fork vs upstream вне TrustTunnel в этих live-сценариях нет.
+
+Сводная таблица live A/B matrix:
+
+| Case | Path | Exit IP | Throughput | Lab CPU avg/max | Remote CPU avg/max | Verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| `direct_fork` | SOCKS -> freedom -> remote HTTP | `109.252.70.98` | `~42.66 Mbit/s` | `6.83 / 9` | `NA / NA` | PASS |
+| `direct_upstream` | SOCKS -> freedom -> remote HTTP | `109.252.70.98` | `~34.43 Mbit/s` | `7.49 / 14` | `NA / NA` | PASS |
+| `vless_tls_fork` | SOCKS -> VLESS/TLS -> remote HTTP | `37.252.0.130` | `~30.48 Mbit/s` | `6.50 / 9` | `1.08 / 3` | PASS |
+| `vless_tls_upstream` | SOCKS -> VLESS/TLS -> remote HTTP | `37.252.0.130` | `~45.08 Mbit/s` | `8.83 / 14` | `1.92 / 3` | PASS |
+| `vless_reality_fork` | SOCKS -> VLESS/REALITY -> remote HTTP | `37.252.0.130` | `~32.26 Mbit/s` | `6.42 / 9` | `0.92 / 4` | PASS |
+| `vless_reality_upstream` | SOCKS -> VLESS/REALITY -> remote HTTP | `37.252.0.130` | `~41.99 Mbit/s` | `6.83 / 11` | `1.08 / 4` | PASS |
+| `hysteria_fork` | SOCKS -> Hysteria2 -> remote HTTP | `37.252.0.130` | `~520.72 Mbit/s` | `17.92 / 103` | `15.75 / 94` | PASS |
+| `hysteria_upstream` | SOCKS -> Hysteria2 -> remote HTTP | `37.252.0.130` | `~523.60 Mbit/s` | `17.17 / 107` | `16.08 / 96` | PASS |
+| `tun_direct_fork` | Linux TUN namespace -> freedom -> remote HTTP | `109.252.70.98` | `~46.92 Mbit/s` | `23.92 / 41` | `NA / NA` | PASS |
+| `tun_direct_upstream` | Linux TUN namespace -> freedom -> remote HTTP | `109.252.70.98` | `~45.84 Mbit/s` | `22.00 / 33` | `NA / NA` | PASS |
+
+Практический вывод:
+- функционально fork и upstream ведут себя одинаково на проверенных non-TrustTunnel path;
+- one-shot throughput шумит сильнее, чем функциональные различия, поэтому speed delta между отдельными прогонами не трактуется как регрессия без повторяемого расхождения по поведению или стабильного benchmark-gap;
+- initial false-fail в этом блоке были orchestration-only: Windows parallel `go test` давал ложный `finalmask/sudoku` UDP bind fail, desktop -> remote SSH path пришлось заменить на lab jump, а первая Hysteria-матрица падала на harness wait/cleanup ошибках, не на runtime divergence Xray.

@@ -120,6 +120,7 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 Остаётся:
 - поддерживать matrix синхронной с общими integration-изменениями Xray;
 - расширять validator только там, где комбинация действительно должна fail-fast на config-build этапе.
+- после каждого merge/rebase на upstream main повторять non-TrustTunnel live regression audit минимум по `direct`, `tun`, `vless + tls`, `vless + reality`, `hysteria`; одноразовый throughput-noise не считать регрессией без повторяемого функционального расхождения.
 
 ## 5. Порядок выполнения
 

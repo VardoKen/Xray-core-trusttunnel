@@ -173,6 +173,8 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 
 Исторические и миграционные документы могут объяснять, почему раньше было иначе, но не могут переопределять этот current-слой.
 
+На `2026-04-07` current baseline дополнительно включает merge `e83795ab`, который догоняет ветку до `upstream/main` `e5a9fb75`. Отдельный live A/B audit fork vs upstream по не-TrustTunnel path (`direct`, `tun`, `vless + tls`, `vless + reality`, `hysteria`) не дал подтверждённого поведенческого расхождения вне TrustTunnel: authoritative result root — `/opt/lab/xray-compare/results/non-tt-live-20260407-210442`, детали и метрики зафиксированы в `docs/current/validation.md`.
+
 ## 4. Что остаётся открытым после этой фиксации
 
 Client-side parity surface для поддержанных H2/H3 + TLS и H2 + REALITY path на текущем этапе больше не считается открытым блоком: `post_quantum_group_enabled` wired в runtime, `hasIpv6=false` получил domain-target policy guard, `antiDpi=true` зафиксирован как explicit unsupported verdict, а non-HTTP3 TLS compatibility surface доведён до текущей границы между compatibility fields и generic `streamSettings.tlsSettings`.
