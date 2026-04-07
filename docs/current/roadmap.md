@@ -72,13 +72,15 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 Уже реализовано:
 - per-request `streamSettings` override в общем outbound layer;
-- config-build validator, который режет `http3 + reality`, `antiDpi=true` и H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`.
+- config-build validator, который режет `http3 + reality`, `antiDpi=true` и H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`;
+- на non-HTTP3 path зафиксирована граница между compatibility fields и generic TLS surface: `streamSettings.tlsSettings` являются authoritative, а `hostname` / `skipVerification` только дополняют missing `serverName` / `allowInsecure`;
+- validator дополнительно режет non-HTTP3 `hostname` mismatch с generic `tlsSettings.serverName`, `skipVerification=true` поверх explicit generic verify surface и `skipVerification=true` вместе с `certificatePem` / `certificatePemFile`;
+- current runtime больше не строит второй TrustTunnel-local verify/router поверх generic `streamSettings.tlsSettings`.
 
 Остаётся:
-- определить границу между compatibility fields и реальным transport/security layer;
-- не расползаться отдельными TrustTunnel-local policy checks там, где уже есть generic Xray surface;
-- довести validator до финального coverage по оставшимся integration-комбинациям;
-- не строить второй runtime-router поверх `streamSettings`.
+- держать эту границу синхронной с будущими upstream-изменениями generic `streamSettings` / TLS / REALITY surface;
+- не расползаться новыми TrustTunnel-local policy checks там, где уже есть достаточный generic Xray surface;
+- расширять validator только под новые действительно двусмысленные integration-комбинации, а не как отдельный параллельный policy-layer.
 
 ### 3.2. Общая TLS/REALITY surface Xray
 
@@ -111,7 +113,9 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - `clientRandom` / rules;
 - common Xray outbound features `sendThrough`, `proxySettings`, `mux`, `targetStrategy`;
 - common Xray inbound `sniffing + routeOnly`;
-- dynamic user management через `HandlerService`.
+- dynamic user management через `HandlerService`;
+- generic outbound/inbound TLS integration surface, включая `serverName`, custom-CA verify, `VerifyPeerCertByName`, `PinnedPeerCertSha256`, `Fingerprint` и inbound `rejectUnknownSni`;
+- clean-head live traffic matrix lab → remote server → internet с separate functional и load verdict.
 
 Остаётся:
 - поддерживать matrix синхронной с общими integration-изменениями Xray;
@@ -119,6 +123,6 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 ## 5. Порядок выполнения
 
-1. нормализация вокруг `streamSettings`
-2. финальная матрица совместимости и validator hardening
-3. dedicated inbound / generic TLS coverage только при появлении новых product-level требований
+1. держать `streamSettings`-нормализацию синхронной с upstream generic TLS / REALITY / outbound plumbing
+2. держать compatibility matrix и validator синхронными с новыми integration-комбинациями
+3. добирать dedicated inbound / generic TLS coverage только при появлении новых product-level требований

@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-07
-Коммит состояния: `d350388e`
+Коммит состояния: `4bfd8ac9`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -43,6 +43,7 @@
 - `infra/conf/trusttunnel.go`
 - `infra/conf/trusttunnel_lint.go`
 - `proxy/trusttunnel/post_quantum.go`
+- `proxy/trusttunnel/stream_settings_compat.go`
 - `app/proxyman/outbound/handler.go`
 - `transport/internet/stream_settings_override.go`
 - `transport/internet/tcp/trusttunnel_clienthello.go`
@@ -126,6 +127,10 @@
 - validator fail-fast режет outbound `transport=http3` + `streamSettings.security = "reality"`;
 - validator fail-fast режет inbound `transports` содержащий `http3` + `streamSettings.security = "reality"`;
 - validator fail-fast режет H2 outbound `postQuantumGroupEnabled`, если общий `streamSettings` не даёт TLS/REALITY security surface;
+- validator fail-fast режет non-HTTP3 outbound `hostname` conflict с generic `tlsSettings.serverName`;
+- validator fail-fast режет non-HTTP3 outbound `skipVerification=true` поверх explicit generic TLS verify surface;
+- validator fail-fast режет non-HTTP3 outbound `skipVerification=true` вместе с `certificatePem` / `certificatePemFile`;
+- validator fail-fast режет non-HTTP3 outbound `certificatePem` / `certificatePemFile` поверх explicit generic TLS verify surface;
 - H3 `postQuantumGroupEnabled` без outbound TLS `streamSettings` не режется этим guard, потому что H3 использует собственный TLS path.
 
 ## 4. Карта клиентского path
@@ -143,7 +148,7 @@
 - H3 CONNECT через `quic-go` / `http3.ClientConn` с raw request-stream tunnel semantics
 - H2 CONNECT / `_udp2` / `_icmp` поверх общего Xray `streamSettings.security = "reality"` без ложного HTTP/1.1 fallback при пустом negotiated ALPN у REALITY-wrapper
 - per-request `streamSettings` override через общий outbound layer Xray
-- ручная TLS verify semantics в `verifyTrustTunnelTLS()`
+- TrustTunnel-local `verifyTrustTunnelTLS()` только как fallback для path без authoritative generic `tlsSettings`; non-HTTP3 generic TLS path больше не строит второй verify-layer поверх transport TLS
 - совместимость H2/TLS outbound с generic Xray `streamSettings.tlsSettings` по `ServerName`, authority-verify через custom CA, `VerifyPeerCertByName`, `PinnedPeerCertSha256` и `Fingerprint`
 - UDP CONNECT на official authority `_udp2`; server-side reserved-host matcher сохраняет backward-compat на `_udp2` и legacy `_udp2:0`
 - ICMP CONNECT на `_icmp:0` для H2 и H3
@@ -171,6 +176,11 @@
 - authority-verify через custom CA работает на том же path;
 - `VerifyPeerCertByName` реально матчит peer certificate names;
 - `PinnedPeerCertSha256` и `Fingerprint` не остаются декларативными полями и совместимы с TrustTunnel H2/TLS.
+
+Текущее practically significant уточнение на `4bfd8ac9`:
+- non-HTTP3 generic `tlsSettings` являются authoritative TLS surface;
+- compatibility fields `hostname` и `skipVerification` только дополняют missing `serverName` / `allowInsecure`, а не создают второй TrustTunnel-local verify router;
+- если generic TLS уже задаёт explicit verify surface (`VerifyPeerCertByName`, `PinnedPeerCertSha256`, authority-verify cert), compatibility fields не переписывают его, а validator режет двусмысленные конфигурации ещё на config-build этапе.
 
 Практическая граница:
 - на Windows current generic TLS transport требует `DisableSystemRoot=true` для воспроизводимого custom-CA verify path; это поведение относится к общему TLS transport layer Xray, а не к TrustTunnel-specific verify logic.

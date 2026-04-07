@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-07
-Коммит состояния: `d350388e`
+Коммит состояния: `4bfd8ac9`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -32,7 +32,7 @@
 
 ## 1. Общая тестовая рамка
 
-Подтверждено на `d350388e`:
+Подтверждено на `4bfd8ac9`:
 - `go test ./testing/scenarios -run "TestTrustTunnel(OutboundTLS|InboundRejectUnknownSNI)" -count=1 -timeout 30m -v`
 - `go test ./infra/conf -run "TestTrustTunnel|TestConfigBuildRejectsTrustTunnel|TestConfigBuildAllowsTrustTunnelHTTP3PostQuantumWithoutOutboundSecurity" -count=1`
 - `go test ./testing/scenarios -run "TestTrustTunnel(CommanderAddRemoveUser|OutboundProxySettings|OutboundMux|OutboundSendThroughOrigin|OutboundTargetStrategyUseIPv4|InboundSniffingRouteOnly)$" -count=1 -timeout 30m -v`
@@ -53,7 +53,7 @@
 
 ### 1.1. TrustTunnel common-Xray integration scenarios
 
-Подтверждено на `d350388e`:
+Подтверждено на `4bfd8ac9`:
 - `TestTrustTunnelCommanderAddRemoveUser` доказывает, что `HandlerService` `AddUser` / `RemoveUser` и `GetInboundUsersCount` работают для TrustTunnel inbound, а traffic observable меняется вместе с составом пользователей;
 - `TestTrustTunnelOutboundProxySettings` подтверждает совместимость TrustTunnel outbound с generic `proxySettings`;
 - `TestTrustTunnelOutboundMux` подтверждает совместимость TrustTunnel outbound с generic `mux`;
@@ -64,6 +64,9 @@
 - `TestTrustTunnelOutboundTLSServerNameAuthorityVerify` подтверждает generic `serverName` + authority-verify через custom CA; на Windows этот path воспроизводимо требует `DisableSystemRoot=true`, иначе generic TLS transport уходит в системный cert pool вместо custom-CA verify surface;
 - `TestTrustTunnelOutboundTLSVerifyPeerCertByName` подтверждает generic `VerifyPeerCertByName` на том же H2/TLS path;
 - `TestTrustTunnelOutboundTLSFingerprintPinnedPeerCert` подтверждает, что generic `Fingerprint` и `PinnedPeerCertSha256` совместимы между собой и не ломают TrustTunnel tunnel-path;
+- `TestClientProcessAppliesTLSSkipVerificationCompatibilityOverride` подтверждает, что non-HTTP3 `skipVerification=true` теперь реально дополняет missing generic `allowInsecure=true` и `serverName`, а не остаётся мёртвым compatibility flag при наличии `streamSettings.tlsSettings`;
+- `TestTrustTunnelStreamSettingsWithTLSCompatibilityFillsServerNameForExplicitVerifySurface` подтверждает, что `hostname` по non-HTTP3 path дополняет missing generic `serverName` даже при explicit generic verify surface, не переписывая сам verify surface;
+- `TestConfigBuildRejectsTrustTunnelSkipVerificationConflictWithGenericTLSVerify`, `TestConfigBuildRejectsTrustTunnelSkipVerificationConflictWithCertificatePem` и `TestConfigBuildRejectsTrustTunnelTLSHostnameMismatchOnHTTP2EvenWhenSkipVerification` подтверждают новый fail-fast coverage validator для двусмысленных non-HTTP3 TLS combinations;
 - `TestTrustTunnelInboundRejectUnknownSNI` подтверждает generic inbound TLS `RejectUnknownSni` на TrustTunnel inbound: корректный SNI проходит, а чужой SNI режется до прикладного traffic path.
 
 Практическая граница:
@@ -662,14 +665,16 @@ Preflight:
 ### 2.25. Clean-HEAD full live functional/load matrix
 
 Preflight:
-- origin repo HEAD: `d350388ef48e4841b7347e80fcb5ff56faff935e`, tracked worktree clean; локально оставались только untracked `.gocache/`, `.gopath/`, `tmp/`;
+- origin repo HEAD: `4bfd8ac941c9fe8ac7664bc24a3612678e416d2a`, tracked worktree clean; локально оставались только untracked `.gocache/`, `.gopath/`, `tmp/`;
 - lab binary: `/opt/lab/xray-tt/tmp/xray-tt-current-live`;
 - remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-current-live`;
-- binary sha256: `6cff24c2dfa4b6f78d289c7e16d852d75bee45219fbb5bfd703428f60974461f`;
+- binary sha256: `82b623b5bf0f76e0dbc0f31dc90c4dfe233f1ea3b191e3e3a27349bf309d5cf2`;
 - remote server profiles: `/opt/trusttunnel-dev/configs/server_h2_tls_udp_remote.json`, `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json`, `/opt/trusttunnel-dev/configs/server_h3_tls_udp_remote.json`;
 - lab client configs root: `/opt/lab/xray-tt/configs-live/`;
-- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-134320`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-134320`;
+- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-153034`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-153034`;
 - authoritative load bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-140912`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-140912`.
+- representative current-head H2/TLS load smoke for touched non-HTTP3 TLS path: lab `/opt/lab/xray-tt/logs/full-live-20260407-153909-h2_tls_auto_load_tcp`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-153909-h2_tls_auto_load_tcp`;
+- remote runtime verification использовала прямой binary sync по SHA через `pscp` в `/opt/trusttunnel-dev/tmp/xray-tt-current-live`; dirty remote git tree сознательно не использовалось как источник истины для этого rerun.
 
 Functional verdict:
 - harness проходит `15/15` cases без fail-fast и без незапланированных negative-results;
@@ -683,7 +688,7 @@ Functional verdict:
 - downstream functional probes в success-cases дают live internet path: TCP trace содержит `ip=37.252.0.130`, `http=http/2` или рабочий H3 trace-path, а DNS cases возвращают живой answer для `1.1.1.1:53`.
 
 Load verdict:
-- harness проходит `12/12` load cases без fail-fast;
+- authoritative full-matrix harness проходит `12/12` load cases без fail-fast на clean rerun `full-live-20260407-140912`;
 - `h2_tls_auto_load_tcp`: `252.39 Mbit/s`, lab CPU avg/max `33.19 / 55`, remote CPU avg/max `54.05 / 101`;
 - `h2_tls_pq_on_load_tcp`: `336.39 Mbit/s`, lab CPU avg/max `39.82 / 81`, remote CPU avg/max `60.18 / 106`;
 - `h2_tls_pq_off_load_tcp`: `326.22 Mbit/s`, lab CPU avg/max `40.10 / 89`, remote CPU avg/max `61.05 / 109`;
@@ -696,9 +701,11 @@ Load verdict:
 - `h2_tls_udp_load_udp`: `105.82 Mbit/s`, lab CPU avg/max `96.21 / 173`, remote CPU avg/max `45.15 / 99`;
 - `h2_reality_udp_load_udp`: `108.50 Mbit/s`, lab CPU avg/max `98.12 / 190`, remote CPU avg/max `43.19 / 107`;
 - `h3_tls_udp_load_udp`: `85.85 Mbit/s`, lab CPU avg/max `107.27 / 199`, remote CPU avg/max `45.00 / 104`.
+- representative current-head smoke для непосредственно затронутого non-HTTP3 TLS path `h2_tls_auto_load_tcp` проходит отдельно через bundle `full-live-20260407-153909-h2_tls_auto_load_tcp` с `61.97 Mbit/s`, lab CPU avg/max `9.14 / 21`, remote CPU avg/max `23.23 / 47`; этот smoke подтверждает отсутствие functional/runtime regressions на `4bfd8ac9`, но не заменяет authoritative 12-case load rerun `140912`.
 
 Технический вывод:
 - intermediate full-load attempt under `full-live-20260407-134320` зафиксировал lab-local harness read race на `remote pidstat` для `h2_reality_pq_on_load_tcp`; это не был TrustTunnel runtime-fail, и авторитетным load verdict считать clean rerun `140912` после фикса ожидания/чтения `pidstat`;
+- current-head rerun `153034` подтверждает, что patch `4bfd8ac9` не ломает live functional matrix, а direct SHA-synced binary на remote host даёт тот же validated traffic path без зависимости от состояния удалённого git tree;
 - fastest TCP case текущего clean-HEAD matrix-run — `h2_reality_pq_off_load_tcp`;
 - H3 TLS path функционально рабочий и load-stable, но client-side CPU заметно выше H2;
 - UDP load figures относятся к flood-style `_udp2` stress-path и не должны трактоваться как функциональный DNS/interoperability fail.

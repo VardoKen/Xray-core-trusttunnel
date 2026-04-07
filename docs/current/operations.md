@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-07
-Коммит состояния: `d350388e`
+Коммит состояния: `4bfd8ac9`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -128,9 +128,10 @@
 
 ### 2.13. Clean-HEAD live traffic matrix
 
-Подтверждено clean-HEAD matrix-run на `d350388e`:
-- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-134320`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-134320`;
-- load bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-140912`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-140912`;
+Подтверждено clean-HEAD matrix-run на `4bfd8ac9`:
+- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-153034`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-153034`;
+- authoritative full-load bundle root для полной матрицы остаётся: lab `/opt/lab/xray-tt/logs/full-live-20260407-140912`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-140912`;
+- representative current-head H2/TLS load smoke для затронутого non-HTTP3 TLS path: lab `/opt/lab/xray-tt/logs/full-live-20260407-153909-h2_tls_auto_load_tcp`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-153909-h2_tls_auto_load_tcp`;
 - functional scope проходит `15/15`: H2 TLS TCP, H2 REALITY TCP, H3 TLS TCP, H2 TLS UDP DNS, H2 REALITY UDP DNS, H3 TLS UDP DNS, negative-case `hasIpv6=false` для domain target, allow-case `hasIpv6=false + targetStrategy forceipv4`, negative-case `http3 + reality`;
 - load scope проходит `12/12`: H2 TLS TCP, H2 REALITY TCP, H3 TLS TCP, H2 TLS UDP, H2 REALITY UDP, H3 TLS UDP.
 
@@ -147,13 +148,14 @@
 
 ### 2.16. Common Xray integration surface
 
-Подтверждено current-head scenario-тестами на `d350388e`:
+Подтверждено current-head scenario-тестами на `4bfd8ac9`:
 - TrustTunnel outbound совместим с общими механизмами Xray `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4`;
 - TrustTunnel inbound совместим с общими `sniffing + routeOnly`;
 - TrustTunnel H2/TLS outbound совместим с generic Xray `streamSettings.tlsSettings` по `serverName`, authority-verify через custom CA, `VerifyPeerCertByName`, `PinnedPeerCertSha256` и `Fingerprint`;
+- non-HTTP3 + generic `streamSettings.tlsSettings` больше не оставляет `skipVerification` и `hostname` двусмысленными compatibility flags: runtime дополняет missing `allowInsecure` / `serverName`, а validator режет conflicts с explicit generic verify surface и с `certificatePem` / `certificatePemFile`;
 - generic inbound TLS setting `rejectUnknownSni` подтверждён на TrustTunnel inbound;
 - dynamic user management через `HandlerService` `AddUser` / `RemoveUser` и `GetInboundUsersCount` работает на TrustTunnel inbound;
-- config-build validator fail-fast режет `http3 + reality`, `antiDpi=true` и H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`.
+- config-build validator fail-fast режет `http3 + reality`, `antiDpi=true`, H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`, non-HTTP3 `hostname` mismatch, `skipVerification` поверх explicit generic verify surface и `skipVerification` вместе с `certificatePem` / `certificatePemFile`.
 
 Практическое правило:
 - эти комбинации больше не считать непроверенными common-integration surface;
@@ -227,6 +229,8 @@
 - для REALITY-path: `streamSettings.realitySettings.serverName == settings.hostname`
 - для REALITY-path: `publicKey`, `shortId` и `fingerprint` соответствуют серверу
 - если используется `certificatePemFile`, PEM должен читаться в runtime verify path
+- если на non-HTTP3 path используется generic `streamSettings.tlsSettings`, считать их authoritative TLS surface: `hostname` только дополняет пустой `serverName`, а `skipVerification=true` только дополняет missing `allowInsecure=true`, но не переопределяет explicit generic verify surface;
+- если на non-HTTP3 path одновременно заданы `skipVerification=true` и explicit generic verify surface (`VerifyPeerCertByName`, `PinnedPeerCertSha256`, authority-verify cert) или `certificatePem` / `certificatePemFile`, current config-build validator считает это конфликтом и режет конфиг до runtime;
 - если на Windows используется authority-verify через custom CA в `streamSettings.tlsSettings`, нужно добавлять `disableSystemRoot = true`, иначе воспроизводимый verify path может уйти в системный cert pool вместо custom-CA surface
 - если используется REALITY-wrapper, пустой negotiated ALPN внутри TrustTunnel layer больше не должен трактоваться как причина падения в HTTP/1.1 fallback; авторитетным остаётся `settings.transport = "http2"`
 - если нужен deterministic allow/deny через server-side rules, `settings.clientRandom` должен совпадать с `client_random` rule-spec
