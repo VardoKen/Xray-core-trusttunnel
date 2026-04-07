@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — текущее состояние проекта
 
 Статус: current
-Дата фиксации: 2026-04-06
-Коммит состояния: `effe1927`
+Дата фиксации: 2026-04-07
+Коммит состояния: `c1e5dd7a`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -31,8 +31,12 @@ TrustTunnel в текущем дереве подтверждённо наход
 - core network model распознаёт `icmp` в `common/net`, config parsing и routing/API semantics;
 - server-side auth semantics на обычном CONNECT, `_check`, `_udp2` и `_icmp` выровнены;
 - H3 + REALITY больше не остаётся silent-misconfig: current runtime явно отклоняет эту комбинацию на client и server сторонах с marker `trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`;
-- `hasIpv6=false` больше не является чисто декларативным outbound-полем: client-side runtime режет явные IPv6 literal targets marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`, при этом явный IPv4 literal target продолжает проходить через тот же H2/REALITY live path;
+- `postQuantumGroupEnabled` больше не является декларативным outbound-полем: H2/TLS, H2/REALITY и H3/TLS client-side runtime переключает effective TLS/REALITY fingerprint и curve preferences через per-request `streamSettings` override или direct H3 TLS config;
+- `hasIpv6=false` больше не ограничен literal-IP gate: client-side runtime режет явные IPv6 literal targets marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`, а domain targets требует вести через outbound `targetStrategy useipv4/forceipv4` marker'ом `trusttunnel hasIpv6=false requires outbound targetStrategy useipv4/forceipv4 for domain targets`;
 - `antiDpi=true` больше не остаётся silent no-op: current outbound runtime явно отклоняет его marker'ом `trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime`;
+- общий outbound layer Xray теперь принимает per-request `streamSettings` override и не заставляет TrustTunnel мутировать handler-level transport config;
+- H3 TCP/TLS current-head path снова держит live tunnel traffic после `CONNECT 200`: client и server используют raw HTTP/3 stream вместо zero-length response-body модели;
+- clean-head live matrix lab → remote server → internet на `c1e5dd7a` проходит по H2 TLS, H2 REALITY и H3 TLS с functional `15/15` и load `12/12`; fastest TCP case текущего matrix-run — H2/REALITY `pq=off` ~`423.28 Mbit/s`, тогда как H3 paths остаются заметно дороже по lab/client CPU;
 - server-side inbound/outbound/user traffic counters и `onlineMap` sanity-check;
 - полный `testing/scenarios` проходит как локально, так и на Debian lab; текущие full-tree ограничения остаются только внешними для `app/dns` QUIC probe и asset-зависимыми для `geoip.dat`, а не branch-регрессиями TrustTunnel;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
@@ -150,8 +154,8 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - practically significant fix заключается в том, что H2 path больше не требует буквального `NegotiatedProtocol == "h2"` для REALITY-wrapper: при `UsesReality=true` и пустом negotiated ALPN client пишет `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path` и продолжает по HTTP/2 preface path;
 - живой H2/TCP current-head smoke через lab client `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality.json`, runtime binary `/opt/lab/xray-tt/tmp/xray-tt-regress-linux`, remote runtime binary `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux`, lab bundle `/opt/lab/xray-tt/logs/workerfix-h2-reality-lab-20260406-153646` и remote bundle `/opt/trusttunnel-dev/logs/workerfix-h2-reality-remote-20260406-153646` повторно подтверждает `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`, `trusttunnel H2 CONNECT accepted for tcp:www.cloudflare.com:443`, `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`, а downstream probe через SOCKS даёт `ip=37.252.0.130`, `http=http/2` и `{\"ip\":\"37.252.0.130\"}`;
 - живой H2/UDP current-head smoke через lab client `/opt/lab/xray-tt/configs/our_client_udp_to_remote_server_h2_reality.json`, runtime binary `/opt/lab/xray-tt/tmp/xray-tt-regress-linux`, remote runtime binary `/opt/trusttunnel-dev/tmp/xray-tt-regress-linux`, lab bundle `/opt/lab/xray-tt/logs/workerfix-h2-reality-udp-lab-20260406-153758` и remote bundle `/opt/trusttunnel-dev/logs/workerfix-h2-reality-udp-remote-20260406-153758` повторно подтверждает `trusttunnel H2 UDP mux accepted`, `dispatch request to: udp:1.1.1.1:53`, `proxy/freedom: connection opened to udp:1.1.1.1:53` и real DNS answer для `cloudflare.com`.
-- controlled load-test через lab client `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality_iperf_tcp.json`, remote iperf target `127.0.0.1:5201` и bundle `load-h2-reality-20260406-111027` подтверждает, что H2/REALITY path переносит большой TCP traffic без функционального срыва: на `iperf3 -P 4 -t 20` uplink receiver получает ~`166 Mbit/s`, reverse/downlink receiver получает ~`88 Mbit/s`, а на stress-case `iperf3 -P 8 -t 20` uplink receiver получает ~`238 Mbit/s`, reverse/downlink receiver получает ~`148 Mbit/s`;
-- practically significant CPU verdict по этому load-test: lab-side Xray client на stress uplink (`-P 8`) держит в среднем ~`92.9%` process CPU с пиками до `117%`, а remote-side Xray server ~`69.7%` с пиками до `87%`; на stress reverse/downlink lab-side client остаётся основным горячим участком со средним ~`90.0%` и пиками до `119.8%`, тогда как remote-side server остаётся заметно ниже, ~`23.4%` среднего и `39%` peak.
+- clean-HEAD full live functional matrix на `c1e5dd7a` через lab bundle `/opt/lab/xray-tt/logs/full-live-20260407-052052` и remote bundle `/opt/trusttunnel-dev/logs/full-live-20260407-052052` закрывает не только H2/REALITY success-path, но и H2 TLS, H3 TLS, UDP DNS, `hasIpv6=false` domain-target fail и `http3 + reality` explicit reject;
+- clean-HEAD full live load matrix на `c1e5dd7a` через lab bundle `/opt/lab/xray-tt/logs/full-live-20260407-052727` и remote bundle `/opt/trusttunnel-dev/logs/full-live-20260407-052727` подтверждает sustained TCP/UDP traffic и CPU-профиль по всем поддержанным комбинациям; practically significant H2/REALITY verdict текущего run — fastest TCP case `pq=off` ~`423.28 Mbit/s` при lab/client CPU avg/max `56.86 / 110.0` и remote/server `68.0 / 109.0`.
 
 ## 3. Что считается текущей истиной
 
@@ -166,9 +170,12 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 
 ## 4. Что остаётся открытым после этой фиксации
 
+Client-side parity surface для поддержанных H2/H3 + TLS и H2 + REALITY path на текущем этапе больше не считается открытым блоком: `post_quantum_group_enabled` wired в runtime, `hasIpv6=false` получил domain-target policy guard, а `antiDpi=true` зафиксирован как explicit unsupported verdict, а не silent compatibility field.
+
 Открытыми задачами текущего этапа считаются не H3-баги и не уже закрытый H2 REALITY production path, а следующие блоки:
-- оставшаяся client-side parity surface после закрытия H2 REALITY production path: `post_quantum_group_enabled`, domain-target semantics для `hasIpv6` вне literal-IP gate и любая будущая transport-compatible реализация `antiDpi` сверх текущего explicit reject;
-- нормализация TrustTunnel вокруг `streamSettings` и общей модели Xray.
+- нормализация TrustTunnel вокруг `streamSettings` и общей transport/security модели Xray;
+- общая TLS/REALITY, outbound и inbound integration surface Xray;
+- `_icmp` в routing/policy/stats модели Xray, dynamic user management и финальная compatibility matrix/validator.
 
 H3 + REALITY на текущем этапе больше не считается обычным parity-gap: R&D завершён stop-factor verdict'ом. Любая будущая реализация потребует нового QUIC-capable REALITY transport в Xray core, а не локального патча в TrustTunnel.
 

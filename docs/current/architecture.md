@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — архитектура и runtime-path
 
 Статус: current
-Дата фиксации: 2026-04-06
-Коммит состояния: `effe1927`
+Дата фиксации: 2026-04-07
+Коммит состояния: `c1e5dd7a`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -41,6 +41,9 @@
 
 - `proxy/trusttunnel/*`
 - `infra/conf/trusttunnel.go`
+- `proxy/trusttunnel/post_quantum.go`
+- `app/proxyman/outbound/handler.go`
+- `transport/internet/stream_settings_override.go`
 - `transport/internet/tcp/trusttunnel_clienthello.go`
 - `transport/internet/tcp/http3_conn.go`
 - `transport/internet/tcp/http3_clienthello.go`
@@ -122,8 +125,9 @@
 
 - H1 CONNECT
 - H2 CONNECT через `http2.Transport.NewClientConn`
-- H3 CONNECT через `apernet/quic-go/http3.Transport`
+- H3 CONNECT через `quic-go` / `http3.ClientConn` с raw request-stream tunnel semantics
 - H2 CONNECT / `_udp2` / `_icmp` поверх общего Xray `streamSettings.security = "reality"` без ложного HTTP/1.1 fallback при пустом negotiated ALPN у REALITY-wrapper
+- per-request `streamSettings` override через общий outbound layer Xray
 - ручная TLS verify semantics в `verifyTrustTunnelTLS()`
 - UDP CONNECT на official authority `_udp2`; server-side reserved-host matcher сохраняет backward-compat на `_udp2` и legacy `_udp2:0`
 - ICMP CONNECT на `_icmp:0` для H2 и H3
@@ -137,27 +141,30 @@
 - `CertificatePem`
 - `EnableUdp`
 - outbound `ClientRandom`
-- `HasIpv6` как client-side gate для явных IPv6 literal targets
+- `PostQuantumGroupEnabled` как client-side toggle для effective TLS/REALITY fingerprint и H3 TLS curve preferences
+- `HasIpv6` как client-side gate для явных IPv6 literal targets и domain targets без `targetStrategy useipv4/forceipv4`
 
-Явно unsupported на текущем состоянии:
+Явно unsupported beyond explicit reject на текущем состоянии:
 - `AntiDpi`
-
-Пока отсутствует в текущем Xray TrustTunnel config surface:
-- `post_quantum_group_enabled`
 
 ### 4.4. H2 REALITY runtime-path
 
 Файлы:
 - `proxy/trusttunnel/security_state.go`
 - `proxy/trusttunnel/client.go`
+- `proxy/trusttunnel/post_quantum.go`
 - `proxy/trusttunnel/udp_client.go`
 - `proxy/trusttunnel/icmp_client.go`
+- `app/proxyman/outbound/handler.go`
+- `transport/internet/stream_settings_override.go`
 
 Реализовано:
 - выбор H2 path больше не завязан только на буквальный `NegotiatedProtocol == "h2"`;
 - helper `trustTunnelShouldUseHTTP2(...)` учитывает requested TrustTunnel transport и security state соединения;
 - если outbound использует `settings.transport = "http2"` и общий Xray `streamSettings.security = "reality"`, то пустой negotiated ALPN у REALITY-wrapper больше не переводит client в ложный HTTP/1.1 fallback;
 - тот же helper покрывает TCP CONNECT, `_udp2` и `_icmp`, потому что все три path используют один и тот же выбор H2 transport branch;
+- common outbound handler теперь уважает per-request `streamSettings` override из context вместо жёсткого handler-level `streamSettings`;
+- `postQuantumGroupEnabled` для H2/TLS и H2/REALITY реализован именно через этот override path и не мутирует shared handler config;
 - practically significant marker: client log `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`.
 
 Подтверждено real-traffic retest на `ae621d24`, затем повторно подтверждено current-head smoke на `c6ff745b`:
@@ -180,26 +187,30 @@
 - outbound H3 path не идёт через общий Xray `internet.Dial(..., streamSettings)` и сейчас сам строит QUIC/TLS handshake в `proxy/trusttunnel/h3_client.go`;
 - current REALITY surface в Xray оборачивает только TCP `net.Conn` через `reality.UClient(...)` / `reality.Server(...)`, а не QUIC `PacketConn`;
 - inbound H3 listener в `transport/internet/tcp/hub.go` поднимается только через TLS-based QUIC listener и не имеет QUIC-capable REALITY wrapper.
+- При этом сам H3/TLS path уже не является проблемным tunnel-слоем: client и server используют raw HTTP/3 stream и clean-head live matrix подтверждает sustained TCP traffic; unsupported verdict относится именно к `http3 + reality`, а не к H3 transport вообще.
 
 Следствие:
 - H3 + REALITY в текущем дереве не является “ещё не допиленным fallback”, а отдельной unsupported combination;
 - current runtime теперь явно режет её marker'ом `trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`;
 - для будущей реализации нужен новый transport/security layer для QUIC + REALITY, а не локальный фикс внутри TrustTunnel handler.
 
-### 4.6. Client-Side IPv6 / AntiDpi policy gates
+### 4.6. Client-Side IPv6 / AntiDpi / Post-Quantum policy
 
 Файлы:
 - `proxy/trusttunnel/client.go`
 - `proxy/trusttunnel/client_test.go`
+- `proxy/trusttunnel/post_quantum.go`
 
 Реализовано:
 - `hasIpv6=false` теперь реально участвует в client-side policy layer и режет явные IPv6 literal targets до dial marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`;
+- тот же guard для domain targets требует outbound `targetStrategy useipv4/forceipv4` и иначе режет запрос marker'ом `trusttunnel hasIpv6=false requires outbound targetStrategy useipv4/forceipv4 for domain targets`;
 - тот же guard не затрагивает явные IPv4 literal targets: live H2/REALITY retest подтверждает, что `tcp:1.1.1.1:443` продолжает идти через тот же working path;
 - `antiDpi=true` больше не остаётся декларативным no-op: runtime явно отклоняет его marker'ом `trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime`.
+- `postQuantumGroupEnabled` для H2/TLS и H2/REALITY переключает effective TLS/REALITY fingerprint между Chrome-family PQ/non-PQ вариантами через per-request override, а для H3/TLS переключает `CurvePreferences` между `X25519MLKEM768 + X25519` и `X25519`.
 
 Граница текущего состояния:
-- `hasIpv6` пока является literal-IP gate, а не полной domain-target semantics, потому что domain routing/resolution может происходить downstream в общей модели Xray;
 - `antiDpi` остаётся открытым parity-вопросом только как будущий transport-compatible feature, но не как silent compatibility field.
+- `postQuantumGroupEnabled` пока сознательно ограничен default Chrome-family TLS/REALITY fingerprint surface и H3 TLS curve preferences; arbitrary uTLS/fingerprint families не переключаются автоматически.
 
 ### 4.7. Outbound `clientRandom` runtime-path
 
@@ -465,9 +476,8 @@ Server side:
 ### 11.2. Пока не образуют полный product surface
 
 Client side:
-- `HasIpv6` beyond explicit literal-IPv6 gate
-- `AntiDpi` как transport feature; current runtime пока только явно режет `antiDpi=true`
-- `post_quantum_group_enabled`
+- `AntiDpi` как transport feature beyond current explicit reject
+- дальнейшая нормализация вокруг common `streamSettings` surface вместо protocol-local compatibility toggles
 
 Server side:
 - `Hosts`

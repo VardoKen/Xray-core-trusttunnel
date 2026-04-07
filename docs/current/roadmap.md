@@ -1,9 +1,9 @@
 # TrustTunnel / Xray-Core — roadmap
 
 Статус: current
-Дата фиксации: 2026-04-06
-База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path, outbound clientRandom, полного UDP interop matrix, auth/stats sanity-check и observable timeout surface
-Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom, `_icmp` protocol/runtime surface, полного UDP interop matrix, auth/stats sanity-check и observable timeout surface
+Дата фиксации: 2026-04-07
+База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path, outbound clientRandom, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, client-side `postQuantumGroupEnabled`, `hasIpv6` domain-target guard, explicit `antiDpi` reject, H3 raw-stream tunnel fix и clean-head live traffic matrix
+Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom, `_icmp` protocol/runtime surface, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface и immediate client-side parity gaps после REALITY
 Не использовать для: фиксации уже закрытых багов и исторической хронологии
 
 ## 1. Принцип чтения roadmap
@@ -48,10 +48,14 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 ### 2.4. Client-side parity после REALITY
 
-После закрытия H2 production-ready REALITY остаются:
-- `post_quantum_group_enabled`;
-- `has_ipv6` beyond explicit literal-IPv6 gate, то есть domain-target semantics и интеграция с общей resolution/targetStrategy моделью Xray;
-- `anti_dpi` как потенциальный future transport-compatible feature; current runtime уже не держит его silent no-op и явно режет `antiDpi=true`.
+Этот блок на текущем этапе закрыт для поддержанных H2/H3 + TLS и H2 + REALITY path:
+- `post_quantum_group_enabled` wired в runtime через effective TLS/REALITY fingerprint и H3 TLS curve preferences;
+- `has_ipv6` больше не ограничен literal-IPv6 gate: domain targets требуют outbound `targetStrategy useipv4/forceipv4`, а нарушение режется marker'ом `trusttunnel hasIpv6=false requires outbound targetStrategy useipv4/forceipv4 for domain targets`;
+- `anti_dpi` перестал быть silent no-op и имеет explicit unsupported verdict, который уже покрывается live negative-case.
+
+Практический вывод:
+- client-side parity fields после REALITY больше не являются ближайшим открытым блоком;
+- дальше нужен не ещё один parity-патч, а нормализация вокруг общей модели Xray.
 
 ## 3. Интеграция с общей моделью Xray
 
@@ -110,11 +114,10 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 ## 5. Порядок выполнения
 
-1. client-side parity fields после REALITY
-2. нормализация вокруг `streamSettings`
-3. full TLS/REALITY surface
-4. common outbound features
-5. common inbound features
-6. `_icmp` в routing/policy/stats модели Xray
-7. dynamic user management
-8. финальная матрица совместимости и validator
+1. нормализация вокруг `streamSettings`
+2. full TLS/REALITY surface
+3. common outbound features
+4. common inbound features
+5. `_icmp` в routing/policy/stats модели Xray
+6. dynamic user management
+7. финальная матрица совместимости и validator

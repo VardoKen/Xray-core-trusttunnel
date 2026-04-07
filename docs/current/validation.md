@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — подтверждённые проверки и границы тестирования
 
 Статус: current
-Дата фиксации: 2026-04-06
-Коммит состояния: `effe1927`
+Дата фиксации: 2026-04-07
+Коммит состояния: `c1e5dd7a`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -613,7 +613,7 @@ Preflight:
 - это больше не “непроверенный H3 REALITY path”, а explicit unsupported combination;
 - future support потребует нового QUIC-capable REALITY transport/security layer в Xray core, а не локального TrustTunnel patch.
 
-### 2.24. Client-Side `hasIpv6` / `antiDpi` runtime gates
+### 2.24. Client-Side `hasIpv6` / `antiDpi` / `postQuantumGroupEnabled` runtime gates
 
 Preflight:
 - origin repo HEAD: `effe19274b23e10c46a98833c9880fec23c8dca8`, tracked worktree clean;
@@ -633,9 +633,51 @@ Preflight:
 - config с `antiDpi=true` на `127.0.0.1:10833` режет explicit IPv4 literal target `https://1.1.1.1/cdn-cgi/trace` с `curl exit=35` и client log marker'ом `trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime`.
 
 Технический вывод:
-- `hasIpv6` больше не является чисто декларативным полем: current runtime реально режет явные IPv6 literal targets и не ломает explicit IPv4 literal path;
-- это ещё не полная parity semantics для domain targets, потому что resolution/targetStrategy может происходить downstream в общей модели Xray;
+- `hasIpv6` больше не является чисто декларативным полем: current runtime реально режет явные IPv6 literal targets, не ломает explicit IPv4 literal path и на clean-HEAD matrix дополнительно режет domain targets без `targetStrategy useipv4/forceipv4`;
 - `antiDpi` больше не остаётся silent no-op: current runtime явно отклоняет его как unsupported combination.
+- `postQuantumGroupEnabled` является реальной guarded runtime-функцией на поддержанных H2/TLS, H2/REALITY и H3/TLS path.
+
+### 2.25. Clean-HEAD full live functional/load matrix
+
+Preflight:
+- origin repo HEAD: `c1e5dd7a497f29d1a3d9163b700a0c30aa81208a`, tracked worktree clean; локально оставались только untracked `.gocache/`, `.gopath/`, `tmp/`;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-current-live`;
+- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-current-live`;
+- remote server profiles: `/opt/trusttunnel-dev/configs/server_h2_tls_udp_remote.json`, `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json`, `/opt/trusttunnel-dev/configs/server_h3_tls_udp_remote.json`;
+- lab client configs root: `/opt/lab/xray-tt/configs-live/`;
+- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-052052`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-052052`;
+- load bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-052727`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-052727`.
+
+Functional verdict:
+- harness проходит `15/15` cases без fail-fast и без незапланированных negative-results;
+- H2 TLS TCP cases `h2_tls_auto`, `h2_tls_pq_on`, `h2_tls_pq_off` используют lab configs `/opt/lab/xray-tt/configs-live/h2_tls_*_socks.json`, server profile `/opt/trusttunnel-dev/configs/server_h2_tls_udp_remote.json`, client marker `transport/internet/tcp: dialing TCP to tcp:37.252.0.130:9443`, server marker `trusttunnel H2 CONNECT accepted`;
+- H2 REALITY TCP cases `h2_reality_auto`, `h2_reality_pq_on`, `h2_reality_pq_off` используют lab configs `/opt/lab/xray-tt/configs-live/h2_reality_*_socks.json`, server profile `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json`, client marker `trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path`, server marker `trusttunnel H2 CONNECT accepted`;
+- H3 TLS TCP cases `h3_tls_auto`, `h3_tls_pq_on`, `h3_tls_pq_off` используют lab configs `/opt/lab/xray-tt/configs-live/h3_tls_*_socks.json`, server profile `/opt/trusttunnel-dev/configs/server_h3_tls_udp_remote.json`, client marker `accepted tcp:www.cloudflare.com:443`, server marker `trusttunnel H3 CONNECT accepted`;
+- H2 TLS / H2 REALITY / H3 TLS UDP DNS cases используют lab configs `/opt/lab/xray-tt/configs-live/h2_tls_udp_dns.json`, `/opt/lab/xray-tt/configs-live/h2_reality_udp_dns.json`, `/opt/lab/xray-tt/configs-live/h3_tls_udp_dns.json`, client marker `accepted udp:1.1.1.1:53`, server markers `trusttunnel H2 UDP mux accepted` или `trusttunnel H3 UDP mux accepted`;
+- negative-case `h2_reality_hasipv6_domain_fail` через `/opt/lab/xray-tt/configs-live/h2_reality_hasipv6_domain_fail.json` ожидаемо возвращает marker `trusttunnel hasIpv6=false requires outbound targetStrategy useipv4/forceipv4 for domain targets`;
+- allow-case `h2_reality_hasipv6_forceipv4` через `/opt/lab/xray-tt/configs-live/h2_reality_hasipv6_forceipv4.json` снова проходит working H2/REALITY path с client marker `resolved to:` и server marker `trusttunnel H2 CONNECT accepted`;
+- negative-case `h3_reality_unsupported` через `/opt/lab/xray-tt/configs-live/h3_reality_unsupported_socks.json` ожидаемо возвращает marker `trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`;
+- downstream functional probes в success-cases дают live internet path: TCP trace содержит `ip=37.252.0.130`, `http=http/2` или рабочий H3 trace-path, а DNS cases возвращают живой answer для `1.1.1.1:53`.
+
+Load verdict:
+- harness проходит `12/12` load cases без fail-fast;
+- `h2_tls_auto_load_tcp`: `282.59 Mbit/s`, lab CPU avg/max `36.19 / 69.0`, remote CPU avg/max `53.33 / 96.0`;
+- `h2_tls_pq_on_load_tcp`: `319.10 Mbit/s`, lab CPU avg/max `39.52 / 77.0`, remote CPU avg/max `55.1 / 97.0`;
+- `h2_tls_pq_off_load_tcp`: `323.86 Mbit/s`, lab CPU avg/max `40.52 / 89.0`, remote CPU avg/max `58.14 / 103.0`;
+- `h2_reality_auto_load_tcp`: `341.14 Mbit/s`, lab CPU avg/max `43.24 / 79.0`, remote CPU avg/max `62.81 / 105.0`;
+- `h2_reality_pq_on_load_tcp`: `340.16 Mbit/s`, lab CPU avg/max `42.71 / 85.0`, remote CPU avg/max `62.81 / 110.0`;
+- `h2_reality_pq_off_load_tcp`: `423.28 Mbit/s`, lab CPU avg/max `56.86 / 110.0`, remote CPU avg/max `68.0 / 109.0`;
+- `h3_tls_auto_load_tcp`: `279.93 Mbit/s`, lab CPU avg/max `117.95 / 198.0`, remote CPU avg/max `78.86 / 122.0`;
+- `h3_tls_pq_on_load_tcp`: `314.88 Mbit/s`, lab CPU avg/max `121.1 / 181.0`, remote CPU avg/max `80.67 / 119.0`;
+- `h3_tls_pq_off_load_tcp`: `195.12 Mbit/s`, lab CPU avg/max `85.5 / 150.0`, remote CPU avg/max `67.76 / 113.0`;
+- `h2_tls_udp_load_udp`: `139.79 Mbit/s`, lab CPU avg/max `99.65 / 179.0`, remote CPU avg/max `53.42 / 107.0`;
+- `h2_reality_udp_load_udp`: `107.22 Mbit/s`, lab CPU avg/max `99.62 / 193.0`, remote CPU avg/max `45.69 / 106.0`;
+- `h3_tls_udp_load_udp`: `80.71 Mbit/s`, lab CPU avg/max `105.31 / 199.0`, remote CPU avg/max `41.31 / 103.0`.
+
+Технический вывод:
+- fastest TCP case текущего clean-HEAD matrix-run — `h2_reality_pq_off_load_tcp`;
+- H3 TLS path функционально рабочий и load-stable, но client-side CPU заметно выше H2;
+- UDP load figures относятся к flood-style `_udp2` stress-path и не должны трактоваться как функциональный DNS/interoperability fail.
 
 Для воспроизводимости outbound `clientRandom` retest зафиксированы:
 - server H2 rules: `testing/trusttunnel/server_h2_rules.json`;
