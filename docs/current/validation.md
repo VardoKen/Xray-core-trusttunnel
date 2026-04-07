@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-07
-Коммит состояния: `c1e5dd7a`
+Коммит состояния: `50cfca99`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -32,7 +32,10 @@
 
 ## 1. Общая тестовая рамка
 
-Подтверждено на `c6ff745b`:
+Подтверждено на `50cfca99`:
+- `go test ./infra/conf -run "TestTrustTunnel|TestConfigBuildRejectsTrustTunnel|TestConfigBuildAllowsTrustTunnelHTTP3PostQuantumWithoutOutboundSecurity" -count=1`
+- `go test ./testing/scenarios -run "TestTrustTunnel(CommanderAddRemoveUser|OutboundProxySettings|OutboundMux|OutboundSendThroughOrigin|OutboundTargetStrategyUseIPv4|InboundSniffingRouteOnly)$" -count=1 -timeout 30m -v`
+- `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound ./app/proxyman/outbound -count=1`
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound`
 - `go test ./common/signal ./common/net ./common/mux ./common/singbridge ./transport/internet/tcp ./transport/internet/tls ./app/dispatcher ./app/proxyman/inbound ./app/proxyman/outbound ./transport/internet ./proxy/trusttunnel/...`
 - `go test ./proxy/freedom ./proxy/http ./proxy/socks ./proxy/trojan ./proxy/vmess/... ./proxy/vless/... ./proxy/shadowsocks ./proxy/hysteria ./proxy/wireguard ./transport/internet/udp ./app/reverse`
@@ -46,6 +49,19 @@
 - `app/dns` останавливается на `TestQUICNameServer` с `quic://dns.adguard-dns.com got answer: google.com. -> [] ... <app/dns: record not found>`, то есть на внешнем QUIC DNS runtime, а не на TrustTunnel path;
 - `app/router` (`TestGeoIPMatcher4CN`) и `infra/conf` (`TestToCidrList`) требуют `geoip.dat` в standard asset locations или `{project_root}/resources`;
 - эти ограничения не выглядят следствием TrustTunnel / inbound-worker изменений текущей ветки.
+
+### 1.1. TrustTunnel common-Xray integration scenarios
+
+Подтверждено на `50cfca99`:
+- `TestTrustTunnelCommanderAddRemoveUser` доказывает, что `HandlerService` `AddUser` / `RemoveUser` и `GetInboundUsersCount` работают для TrustTunnel inbound, а traffic observable меняется вместе с составом пользователей;
+- `TestTrustTunnelOutboundProxySettings` подтверждает совместимость TrustTunnel outbound с generic `proxySettings`;
+- `TestTrustTunnelOutboundMux` подтверждает совместимость TrustTunnel outbound с generic `mux`;
+- `TestTrustTunnelOutboundSendThroughOrigin` подтверждает `sendThrough=origin` по marker'у `use inbound local ip as sendthrough: 127.0.0.1`;
+- `TestTrustTunnelOutboundTargetStrategyUseIPv4` подтверждает, что domain target с `hasIpv6=false` снова проходит через явный outbound `targetStrategy useipv4`;
+- `TestTrustTunnelInboundSniffingRouteOnly` подтверждает `sniffing + routeOnly` через sniffed TLS SNI `sniffed.test`.
+
+Практическая граница:
+- `metadataOnly` не образует отдельный positive TLS SNI routing-path для TrustTunnel: current `app/dispatcher` в режиме `metadataOnly=true` возвращает только metadata sniffers и не выполняет TLS content sniffing; отсутствие TLS-SNI override в этом режиме не считать отдельным TrustTunnel bug.
 
 ## 2. Подтверждённые runtime-проверки
 
@@ -640,13 +656,13 @@ Preflight:
 ### 2.25. Clean-HEAD full live functional/load matrix
 
 Preflight:
-- origin repo HEAD: `c1e5dd7a497f29d1a3d9163b700a0c30aa81208a`, tracked worktree clean; локально оставались только untracked `.gocache/`, `.gopath/`, `tmp/`;
+- origin repo HEAD: `50cfca99fcb356ff7f3945f7976668910de86b8a`, tracked worktree clean; локально оставались только untracked `.gocache/`, `.gopath/`, `tmp/`;
 - lab binary: `/opt/lab/xray-tt/tmp/xray-tt-current-live`;
 - remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-current-live`;
 - remote server profiles: `/opt/trusttunnel-dev/configs/server_h2_tls_udp_remote.json`, `/opt/trusttunnel-dev/configs/server_h2_udp_reality_remote.json`, `/opt/trusttunnel-dev/configs/server_h3_tls_udp_remote.json`;
 - lab client configs root: `/opt/lab/xray-tt/configs-live/`;
-- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-052052`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-052052`;
-- load bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-052727`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-052727`.
+- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-115351`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-115351`;
+- load bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-114219`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-114219`.
 
 Functional verdict:
 - harness проходит `15/15` cases без fail-fast и без незапланированных negative-results;
@@ -661,21 +677,22 @@ Functional verdict:
 
 Load verdict:
 - harness проходит `12/12` load cases без fail-fast;
-- `h2_tls_auto_load_tcp`: `282.59 Mbit/s`, lab CPU avg/max `36.19 / 69.0`, remote CPU avg/max `53.33 / 96.0`;
-- `h2_tls_pq_on_load_tcp`: `319.10 Mbit/s`, lab CPU avg/max `39.52 / 77.0`, remote CPU avg/max `55.1 / 97.0`;
-- `h2_tls_pq_off_load_tcp`: `323.86 Mbit/s`, lab CPU avg/max `40.52 / 89.0`, remote CPU avg/max `58.14 / 103.0`;
-- `h2_reality_auto_load_tcp`: `341.14 Mbit/s`, lab CPU avg/max `43.24 / 79.0`, remote CPU avg/max `62.81 / 105.0`;
-- `h2_reality_pq_on_load_tcp`: `340.16 Mbit/s`, lab CPU avg/max `42.71 / 85.0`, remote CPU avg/max `62.81 / 110.0`;
-- `h2_reality_pq_off_load_tcp`: `423.28 Mbit/s`, lab CPU avg/max `56.86 / 110.0`, remote CPU avg/max `68.0 / 109.0`;
-- `h3_tls_auto_load_tcp`: `279.93 Mbit/s`, lab CPU avg/max `117.95 / 198.0`, remote CPU avg/max `78.86 / 122.0`;
-- `h3_tls_pq_on_load_tcp`: `314.88 Mbit/s`, lab CPU avg/max `121.1 / 181.0`, remote CPU avg/max `80.67 / 119.0`;
-- `h3_tls_pq_off_load_tcp`: `195.12 Mbit/s`, lab CPU avg/max `85.5 / 150.0`, remote CPU avg/max `67.76 / 113.0`;
-- `h2_tls_udp_load_udp`: `139.79 Mbit/s`, lab CPU avg/max `99.65 / 179.0`, remote CPU avg/max `53.42 / 107.0`;
-- `h2_reality_udp_load_udp`: `107.22 Mbit/s`, lab CPU avg/max `99.62 / 193.0`, remote CPU avg/max `45.69 / 106.0`;
-- `h3_tls_udp_load_udp`: `80.71 Mbit/s`, lab CPU avg/max `105.31 / 199.0`, remote CPU avg/max `41.31 / 103.0`.
+- `h2_tls_auto_load_tcp`: `191.36 Mbit/s`, lab CPU avg/max `25.52 / 48.0`, remote CPU avg/max `40.08 / 76.0`;
+- `h2_tls_pq_on_load_tcp`: `207.13 Mbit/s`, lab CPU avg/max `27.52 / 51.0`, remote CPU avg/max `43.69 / 83.0`;
+- `h2_tls_pq_off_load_tcp`: `226.14 Mbit/s`, lab CPU avg/max `25.48 / 53.0`, remote CPU avg/max `44.72 / 87.0`;
+- `h2_reality_auto_load_tcp`: `312.92 Mbit/s`, lab CPU avg/max `39.33 / 83.0`, remote CPU avg/max `60.71 / 112.0`;
+- `h2_reality_pq_on_load_tcp`: `223.33 Mbit/s`, lab CPU avg/max `26.12 / 64.0`, remote CPU avg/max `45.38 / 101.0`;
+- `h2_reality_pq_off_load_tcp`: `223.18 Mbit/s`, lab CPU avg/max `29.71 / 55.0`, remote CPU avg/max `47.36 / 85.0`;
+- `h3_tls_auto_load_tcp`: `200.89 Mbit/s`, lab CPU avg/max `91.71 / 172.0`, remote CPU avg/max `70.48 / 114.0`;
+- `h3_tls_pq_on_load_tcp`: `152.55 Mbit/s`, lab CPU avg/max `75.05 / 137.0`, remote CPU avg/max `60.81 / 101.0`;
+- `h3_tls_pq_off_load_tcp`: `166.33 Mbit/s`, lab CPU avg/max `75.81 / 155.0`, remote CPU avg/max `58.48 / 111.0`;
+- `h2_tls_udp_load_udp`: `96.6 Mbit/s`, lab CPU avg/max `99.58 / 182.0`, remote CPU avg/max `44.39 / 92.0`;
+- `h2_reality_udp_load_udp`: `99.17 Mbit/s`, lab CPU avg/max `96.15 / 179.0`, remote CPU avg/max `41.05 / 97.0`;
+- `h3_tls_udp_load_udp`: `74.24 Mbit/s`, lab CPU avg/max `108.35 / 197.0`, remote CPU avg/max `43.04 / 102.0`.
 
 Технический вывод:
-- fastest TCP case текущего clean-HEAD matrix-run — `h2_reality_pq_off_load_tcp`;
+- earliest mixed run `full-live-20260407-112000` имел локальный harness-only parse glitch на `h3_tls_auto_load_tcp`; авторитетным verdict считать clean rerun `114219` / `115351`, а не тот промежуточный bundle;
+- fastest TCP case текущего clean-HEAD matrix-run — `h2_reality_auto_load_tcp`;
 - H3 TLS path функционально рабочий и load-stable, но client-side CPU заметно выше H2;
 - UDP load figures относятся к flood-style `_udp2` stress-path и не должны трактоваться как функциональный DNS/interoperability fail.
 

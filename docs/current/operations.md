@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-07
-Коммит состояния: `c1e5dd7a`
+Коммит состояния: `50cfca99`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -128,22 +128,34 @@
 
 ### 2.13. Clean-HEAD live traffic matrix
 
-Подтверждено clean-HEAD matrix-run на `c1e5dd7a`:
-- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-052052`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-052052`;
-- load bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-052727`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-052727`;
+Подтверждено clean-HEAD matrix-run на `50cfca99`:
+- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-115351`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-115351`;
+- load bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-114219`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-114219`;
 - functional scope проходит `15/15`: H2 TLS TCP, H2 REALITY TCP, H3 TLS TCP, H2 TLS UDP DNS, H2 REALITY UDP DNS, H3 TLS UDP DNS, negative-case `hasIpv6=false` для domain target, allow-case `hasIpv6=false + targetStrategy forceipv4`, negative-case `http3 + reality`;
 - load scope проходит `12/12`: H2 TLS TCP, H2 REALITY TCP, H3 TLS TCP, H2 TLS UDP, H2 REALITY UDP, H3 TLS UDP.
 
 Практически значимые throughput / CPU verdict'ы текущего matrix-run:
-- H2 TLS TCP: `282.59 .. 323.86 Mbit/s`, lab/client CPU avg `36.19 .. 40.52`, remote/server avg `53.33 .. 58.14`;
-- H2 REALITY TCP: `341.14 .. 423.28 Mbit/s`, lab/client CPU avg `42.71 .. 56.86`, remote/server avg `62.81 .. 68.0`; fastest TCP case текущего run — `h2_reality_pq_off_load_tcp` с `423.28 Mbit/s`;
-- H3 TLS TCP: `195.12 .. 314.88 Mbit/s`, но lab/client CPU заметно выше, avg `85.5 .. 121.1`;
-- UDP flood-style load: H2 TLS `139.79 Mbit/s`, H2 REALITY `107.22 Mbit/s`, H3 TLS `80.71 Mbit/s`; это stress-path с высоким drop/loss и не должен трактоваться как функциональный DNS fail.
+- H2 TLS TCP: `191.36 .. 226.14 Mbit/s`, lab/client CPU avg `25.48 .. 27.52`, remote/server avg `40.08 .. 44.72`;
+- H2 REALITY TCP: `223.18 .. 312.92 Mbit/s`, lab/client CPU avg `26.12 .. 39.33`, remote/server avg `45.38 .. 60.71`; fastest TCP case текущего authorative rerun — `h2_reality_auto_load_tcp` с `312.92 Mbit/s`;
+- H3 TLS TCP: `152.55 .. 200.89 Mbit/s`, но lab/client CPU заметно выше, avg `75.05 .. 91.71`;
+- UDP flood-style load: H2 TLS `96.6 Mbit/s`, H2 REALITY `99.17 Mbit/s`, H3 TLS `74.24 Mbit/s`; это stress-path с высоким drop/loss и не должен трактоваться как функциональный DNS fail.
 
 Практический вывод:
 - текущий bottleneck для большого sustained traffic остаётся скорее на lab/client side, а не на CPU удалённого сервера;
 - H2 REALITY является fastest validated TCP path текущего matrix-run;
 - H3 TLS path функционально рабочий, но по CPU заметно дороже на client side.
+
+### 2.16. Common Xray integration surface
+
+Подтверждено current-head scenario-тестами на `50cfca99`:
+- TrustTunnel outbound совместим с общими механизмами Xray `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4`;
+- TrustTunnel inbound совместим с общими `sniffing + routeOnly`;
+- dynamic user management через `HandlerService` `AddUser` / `RemoveUser` и `GetInboundUsersCount` работает на TrustTunnel inbound;
+- config-build validator fail-fast режет `http3 + reality`, `antiDpi=true` и H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`.
+
+Практическое правило:
+- эти комбинации больше не считать непроверенными common-integration surface;
+- `metadataOnly` не использовать как путь для TLS SNI route override: current dispatcher в `metadataOnly=true` запускает только metadata sniffers и не выполняет TLS content sniffing.
 
 ### 2.14. H3 + REALITY
 
@@ -159,7 +171,7 @@
 
 ### 2.15. Client-Side `hasIpv6` / `antiDpi` / `postQuantumGroupEnabled`
 
-Подтверждено live runtime-retest через lab client bundle `/opt/lab/xray-tt/logs/client-parity-20260406-171758` и remote server bundle `/opt/trusttunnel-dev/logs/client-parity-remote-20260406-141747`, затем clean-HEAD matrix-run `/opt/lab/xray-tt/logs/full-live-20260407-052052`:
+Подтверждено live runtime-retest через lab client bundle `/opt/lab/xray-tt/logs/client-parity-20260406-171758` и remote server bundle `/opt/trusttunnel-dev/logs/client-parity-remote-20260406-141747`, затем clean-HEAD matrix-run `/opt/lab/xray-tt/logs/full-live-20260407-115351`:
 - baseline H2/REALITY config на `127.0.0.1:10831` даёт живой explicit-IPv4 path до `https://1.1.1.1/cdn-cgi/trace` с `ip=37.252.0.130`, `http=http/2`, `kex=X25519MLKEM768`;
 - config с `hasIpv6=false` на `127.0.0.1:10832` сохраняет тот же working path для explicit IPv4 literal target;
 - тот же config режет explicit IPv6 literal target `https://[2606:4700:4700::1111]/cdn-cgi/trace` marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`;

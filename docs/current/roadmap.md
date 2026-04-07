@@ -2,8 +2,8 @@
 
 Статус: current
 Дата фиксации: 2026-04-07
-База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path, outbound clientRandom, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, client-side `postQuantumGroupEnabled`, `hasIpv6` domain-target guard, explicit `antiDpi` reject, H3 raw-stream tunnel fix и clean-head live traffic matrix
-Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom, `_icmp` protocol/runtime surface, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface и immediate client-side parity gaps после REALITY
+База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path, outbound clientRandom, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, client-side `postQuantumGroupEnabled`, `hasIpv6` domain-target guard, explicit `antiDpi` reject, config-build validator, common outbound/inbound Xray integration scenarios, dynamic user management и clean-head live traffic matrix
+Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom, `_icmp` protocol/runtime surface, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, common outbound integration coverage, inbound `sniffing + routeOnly`, `_icmp` routing/policy/stats plumbing и dynamic user management
 Не использовать для: фиксации уже закрытых багов и исторической хронологии
 
 ## 1. Принцип чтения roadmap
@@ -14,6 +14,13 @@
 1. не переоткрывать уже закрытый H2 production path по REALITY без новых доказательств;
 2. довести TrustTunnel до корректной интеграции с общими механизмами Xray-Core;
 3. не переоткрывать H3 + REALITY как “просто ещё один parity-gap”: current R&D уже упёрся в stop-factor текущего Xray transport layer.
+
+Уже закрытые integration-блоки не возвращаются в roadmap без новых доказательств:
+- common outbound features `sendThrough`, `proxySettings`, `mux`, `targetStrategy`;
+- common inbound `sniffing + routeOnly`;
+- `_icmp` в routing/policy/stats модели;
+- dynamic user management через `HandlerService`;
+- initial config-build validator для unsupported TrustTunnel combinations.
 
 Переоткрывать закрытую H3-тройку можно только при появлении более новых доказательств, чем фиксация `99e59352`.
 
@@ -61,9 +68,14 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 ### 3.1. Нормализация вокруг `streamSettings`
 
-Нужно:
+Уже реализовано:
+- per-request `streamSettings` override в общем outbound layer;
+- config-build validator, который режет `http3 + reality`, `antiDpi=true` и H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`.
+
+Остаётся:
 - определить границу между compatibility fields и реальным transport/security layer;
-- ввести validator unsupported combinations;
+- не расползаться отдельными TrustTunnel-local policy checks там, где уже есть generic Xray surface;
+- довести validator до финального coverage по оставшимся integration-комбинациям;
 - не строить второй runtime-router поверх `streamSettings`.
 
 ### 3.2. Общая TLS/REALITY surface Xray
@@ -75,49 +87,34 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - fingerprint/uTLS surface там, где она должна применяться;
 - корректное сосуществование `tls` и `reality`.
 
-### 3.3. Common outbound features
+### 3.3. Остаточная inbound integration surface
 
-Нужно проверить совместимость TrustTunnel outbound с:
-- `sendThrough`;
-- `proxySettings`;
-- `mux`;
-- `targetStrategy`.
+Уже подтверждено:
+- `sniffing + routeOnly` на TrustTunnel inbound;
+- TLS SNI `metadataOnly` не является отдельным TrustTunnel bug surface и следует общей семантике dispatcher metadata sniffers.
 
-### 3.4. Common inbound features
+Остаётся:
+- добрать dedicated coverage для оставшихся `metadataOnly` сценариев, если они реально нужны как product path;
+- добрать generic inbound transport settings, которые ещё не были подтверждены отдельными scenario/runtime-проверками.
 
-Нужно проверить совместимость TrustTunnel inbound с:
-- `sniffing`;
-- route-only behavior;
-- metadataOnly scenarios;
-- общими inbound transport settings.
+### 3.4. Финальная матрица совместимости и validator hardening
 
-### 3.5. `_icmp` в модели Xray
-
-После реализации `_icmp` нужно определить его место в:
-- routing;
-- policy;
-- stats;
-- API semantics.
-
-### 3.6. Dynamic user management
-
-Нужно добавить AddUser/RemoveUser через `HandlerService` для TrustTunnel inbound.
-
-### 3.7. Финальная матрица совместимости
-
-Нужно зафиксировать и валидировать комбинации:
+Текущее состояние уже покрывает и валидирует комбинации:
 - H2/H3;
 - TLS/REALITY;
 - TCP / `_udp2` / `_icmp` / `_check`;
 - `clientRandom` / rules;
-- common Xray inbound/outbound features.
+- common Xray outbound features `sendThrough`, `proxySettings`, `mux`, `targetStrategy`;
+- common Xray inbound `sniffing + routeOnly`;
+- dynamic user management через `HandlerService`.
+
+Остаётся:
+- поддерживать matrix синхронной с общими integration-изменениями Xray;
+- расширять validator только там, где комбинация действительно должна fail-fast на config-build этапе.
 
 ## 5. Порядок выполнения
 
 1. нормализация вокруг `streamSettings`
 2. full TLS/REALITY surface
-3. common outbound features
-4. common inbound features
-5. `_icmp` в routing/policy/stats модели Xray
-6. dynamic user management
-7. финальная матрица совместимости и validator
+3. остаточная inbound integration surface
+4. финальная матрица совместимости и validator hardening

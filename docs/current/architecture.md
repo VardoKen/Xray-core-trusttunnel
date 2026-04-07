@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-07
-Коммит состояния: `c1e5dd7a`
+Коммит состояния: `50cfca99`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -41,6 +41,7 @@
 
 - `proxy/trusttunnel/*`
 - `infra/conf/trusttunnel.go`
+- `infra/conf/trusttunnel_lint.go`
 - `proxy/trusttunnel/post_quantum.go`
 - `app/proxyman/outbound/handler.go`
 - `transport/internet/stream_settings_override.go`
@@ -50,6 +51,7 @@
 - `transport/internet/tcp/hub.go`
 - `app/proxyman/inbound/always.go`
 - `app/proxyman/inbound/worker.go`
+- `testing/scenarios/trusttunnel_test.go`
 
 ### 2.4. Ключевые тестовые конфиги
 
@@ -113,6 +115,19 @@
 - config model шире, чем фактически используемый runtime;
 - часть полей существует как compatibility surface, но не как подтверждённая активная функция.
 
+### 3.3. Config-build validator
+
+Файл:
+- `infra/conf/trusttunnel_lint.go`
+
+Реализовано:
+- post-processing stage `TrustTunnel` проверяет TrustTunnel inbound/outbound после JSON build;
+- validator fail-fast режет outbound `antiDpi=true`;
+- validator fail-fast режет outbound `transport=http3` + `streamSettings.security = "reality"`;
+- validator fail-fast режет inbound `transports` содержащий `http3` + `streamSettings.security = "reality"`;
+- validator fail-fast режет H2 outbound `postQuantumGroupEnabled`, если общий `streamSettings` не даёт TLS/REALITY security surface;
+- H3 `postQuantumGroupEnabled` без outbound TLS `streamSettings` не режется этим guard, потому что H3 использует собственный TLS path.
+
 ## 4. Карта клиентского path
 
 ### 4.1. Основные файлы
@@ -131,6 +146,7 @@
 - ручная TLS verify semantics в `verifyTrustTunnelTLS()`
 - UDP CONNECT на official authority `_udp2`; server-side reserved-host matcher сохраняет backward-compat на `_udp2` и legacy `_udp2:0`
 - ICMP CONNECT на `_icmp:0` для H2 и H3
+- common outbound features `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4` проходят через тот же generic Xray outbound layer и не требуют TrustTunnel-specific routing surface
 
 ### 4.3. Поля outbound, реально участвующие в runtime
 
@@ -211,6 +227,15 @@
 Граница текущего состояния:
 - `antiDpi` остаётся открытым parity-вопросом только как будущий transport-compatible feature, но не как silent compatibility field.
 - `postQuantumGroupEnabled` пока сознательно ограничен default Chrome-family TLS/REALITY fingerprint surface и H3 TLS curve preferences; arbitrary uTLS/fingerprint families не переключаются автоматически.
+
+### 4.6.1. Common inbound integration
+
+Подтверждено:
+- TrustTunnel inbound совместим с общими `sniffing + routeOnly`;
+- `HandlerService` `AddUser` / `RemoveUser` и `GetInboundUsersCount` работают на TrustTunnel inbound без отдельного protocol-local management layer.
+
+Граница текущего состояния:
+- `metadataOnly` следует общей семантике `app/dispatcher`: в режиме `metadataOnly=true` выполняются только metadata sniffers, поэтому TLS SNI route override не образует отдельный TrustTunnel positive path.
 
 ### 4.7. Outbound `clientRandom` runtime-path
 
