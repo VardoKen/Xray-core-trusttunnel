@@ -1,8 +1,10 @@
 package scenarios
 
 import (
+	"bytes"
 	"context"
 	gotls "crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	stdnet "net"
@@ -25,6 +27,7 @@ import (
 	clog "github.com/xtls/xray-core/common/log"
 	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/protocol"
+	"github.com/xtls/xray-core/common/protocol/tls/cert"
 	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/common/uuid"
 	core "github.com/xtls/xray-core/core"
@@ -38,6 +41,7 @@ import (
 	"github.com/xtls/xray-core/proxy/vmess/outbound"
 	"github.com/xtls/xray-core/testing/servers/tcp"
 	"github.com/xtls/xray-core/transport/internet"
+	ttls "github.com/xtls/xray-core/transport/internet/tls"
 	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -76,17 +80,35 @@ func trustTunnelTestOutbound(port net.Port, username, password string) *trusttun
 	}
 }
 
+func trustTunnelTestReceiverConfig(port net.Port, stream *internet.StreamConfig) *proxyman.ReceiverConfig {
+	return &proxyman.ReceiverConfig{
+		PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(port)}},
+		Listen:   net.NewIPOrDomain(net.LocalHostIP),
+		StreamSettings: stream,
+	}
+}
+
 func trustTunnelTestInboundConfig(port net.Port, users ...*protocol.User) *core.InboundHandlerConfig {
+	return trustTunnelTestInboundConfigWithStream(port, nil, users...)
+}
+
+func trustTunnelTestInboundConfigWithStream(port net.Port, stream *internet.StreamConfig, users ...*protocol.User) *core.InboundHandlerConfig {
 	return &core.InboundHandlerConfig{
 		Tag: "tt",
-		ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
-			PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(port)}},
-			Listen:   net.NewIPOrDomain(net.LocalHostIP),
-		}),
+		ReceiverSettings: serial.ToTypedMessage(trustTunnelTestReceiverConfig(port, stream)),
 		ProxySettings: serial.ToTypedMessage(&trusttunnel.ServerConfig{
 			Users:      users,
 			Transports: []trusttunnel.TransportProtocol{trusttunnel.TransportProtocol_HTTP2},
 		}),
+	}
+}
+
+func trustTunnelTestTLSStreamConfig(cfg *ttls.Config) *internet.StreamConfig {
+	return &internet.StreamConfig{
+		SecurityType: serial.GetMessageType(&ttls.Config{}),
+		SecuritySettings: []*serial.TypedMessage{
+			serial.ToTypedMessage(cfg),
+		},
 	}
 }
 
@@ -620,6 +642,442 @@ func TestTrustTunnelInboundSniffingRouteOnly(t *testing.T) {
 	}
 	if string(body) != "sniffed-ok" {
 		t.Fatalf("body = %q, want %q", string(body), "sniffed-ok")
+	}
+}
+
+func TestTrustTunnelOutboundTLSPinnedPeerCertSha256(t *testing.T) {
+	tcpServer := tcp.Server{MsgProcessor: xor}
+	dest, err := tcpServer.Start()
+	common.Must(err)
+	defer tcpServer.Close()
+
+	serverCert, serverHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
+	serverPort := tcp.PickPort()
+	clientPort := tcp.PickPort()
+
+	serverConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			trustTunnelTestInboundConfigWithStream(
+				serverPort,
+				trustTunnelTestTLSStreamConfig(&ttls.Config{
+					Certificate: []*ttls.Certificate{ttls.ParseCertificate(serverCert)},
+				}),
+				trustTunnelTestServerUser("tt@example.com", "tt-user", "tt-pass"),
+			),
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{ProxySettings: serial.ToTypedMessage(&freedom.Config{})},
+		},
+	}
+
+	clientConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			{
+				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+				}),
+				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+					Address:  net.NewIPOrDomain(dest.Address),
+					Port:     uint32(dest.Port),
+					Networks: []net.Network{net.Network_TCP},
+				}),
+			},
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{
+				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+					StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
+						PinnedPeerCertSha256: [][]byte{serverHash[:]},
+					}),
+				}),
+				ProxySettings: serial.ToTypedMessage(&trusttunnel.ClientConfig{
+					Server:           trustTunnelTestServerEndpoint(serverPort, "tt-user", "tt-pass"),
+					Hostname:         "localhost",
+					Transport:        trusttunnel.TransportProtocol_HTTP2,
+					HasIpv6:          true,
+					SkipVerification: true,
+				}),
+			},
+		},
+	}
+
+	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+	common.Must(err)
+	defer CloseAllServers(servers)
+
+	if err := testTCPConn(clientPort, 1024, 5*time.Second)(); err != nil {
+		t.Fatalf("traffic with pinnedPeerCertSha256 failed: %v", err)
+	}
+}
+
+func TestTrustTunnelOutboundTLSPinnedPeerCertSha256WrongCert(t *testing.T) {
+	tcpServer := tcp.Server{MsgProcessor: xor}
+	dest, err := tcpServer.Start()
+	common.Must(err)
+	defer tcpServer.Close()
+
+	serverCert, serverHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
+	serverPort := tcp.PickPort()
+	clientPort := tcp.PickPort()
+	badHash := append([]byte(nil), serverHash[:]...)
+	badHash[0] ^= 0xff
+
+	serverConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			trustTunnelTestInboundConfigWithStream(
+				serverPort,
+				trustTunnelTestTLSStreamConfig(&ttls.Config{
+					Certificate: []*ttls.Certificate{ttls.ParseCertificate(serverCert)},
+				}),
+				trustTunnelTestServerUser("tt@example.com", "tt-user", "tt-pass"),
+			),
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{ProxySettings: serial.ToTypedMessage(&freedom.Config{})},
+		},
+	}
+
+	clientConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			{
+				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+				}),
+				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+					Address:  net.NewIPOrDomain(dest.Address),
+					Port:     uint32(dest.Port),
+					Networks: []net.Network{net.Network_TCP},
+				}),
+			},
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{
+				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+					StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
+						PinnedPeerCertSha256: [][]byte{badHash},
+					}),
+				}),
+				ProxySettings: serial.ToTypedMessage(&trusttunnel.ClientConfig{
+					Server:           trustTunnelTestServerEndpoint(serverPort, "tt-user", "tt-pass"),
+					Hostname:         "localhost",
+					Transport:        trusttunnel.TransportProtocol_HTTP2,
+					HasIpv6:          true,
+					SkipVerification: true,
+				}),
+			},
+		},
+	}
+
+	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+	common.Must(err)
+	defer CloseAllServers(servers)
+
+	if err := testTCPConn(clientPort, 1024, 5*time.Second)(); err == nil {
+		t.Fatal("expected wrong pinnedPeerCertSha256 to fail")
+	}
+}
+
+func TestTrustTunnelOutboundTLSServerNameAuthorityVerify(t *testing.T) {
+	tcpServer := tcp.Server{MsgProcessor: xor}
+	dest, err := tcpServer.Start()
+	common.Must(err)
+	defer tcpServer.Close()
+
+	caCert, err := cert.Generate(nil, cert.Authority(true), cert.KeyUsage(x509.KeyUsageDigitalSignature|x509.KeyUsageKeyEncipherment|x509.KeyUsageCertSign))
+	common.Must(err)
+	caCertPEM, caKeyPEM := caCert.ToPEM()
+
+	serverPort := tcp.PickPort()
+	clientPort := tcp.PickPort()
+
+	serverConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			trustTunnelTestInboundConfigWithStream(
+				serverPort,
+				trustTunnelTestTLSStreamConfig(&ttls.Config{
+					Certificate: []*ttls.Certificate{{
+						Certificate: caCertPEM,
+						Key:         caKeyPEM,
+						Usage:       ttls.Certificate_AUTHORITY_ISSUE,
+					}},
+				}),
+				trustTunnelTestServerUser("tt@example.com", "tt-user", "tt-pass"),
+			),
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{ProxySettings: serial.ToTypedMessage(&freedom.Config{})},
+		},
+	}
+
+	clientConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			{
+				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+				}),
+				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+					Address:  net.NewIPOrDomain(dest.Address),
+					Port:     uint32(dest.Port),
+					Networks: []net.Network{net.Network_TCP},
+				}),
+			},
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{
+				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+					StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
+						ServerName: "example.com",
+						DisableSystemRoot: true,
+						Certificate: []*ttls.Certificate{{
+							Certificate: caCertPEM,
+							Usage:       ttls.Certificate_AUTHORITY_VERIFY,
+						}},
+					}),
+				}),
+				ProxySettings: serial.ToTypedMessage(&trusttunnel.ClientConfig{
+					Server:           trustTunnelTestServerEndpoint(serverPort, "tt-user", "tt-pass"),
+					Hostname:         "localhost",
+					Transport:        trusttunnel.TransportProtocol_HTTP2,
+					HasIpv6:          true,
+					SkipVerification: true,
+				}),
+			},
+		},
+	}
+
+	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+	common.Must(err)
+	defer CloseAllServers(servers)
+
+	if err := testTCPConn(clientPort, 1024, 5*time.Second)(); err != nil {
+		t.Fatalf("traffic with generic serverName + authority verify failed: %v", err)
+	}
+}
+
+func TestTrustTunnelOutboundTLSVerifyPeerCertByName(t *testing.T) {
+	tcpServer := tcp.Server{MsgProcessor: xor}
+	dest, err := tcpServer.Start()
+	common.Must(err)
+	defer tcpServer.Close()
+
+	caCert, err := cert.Generate(nil, cert.Authority(true), cert.KeyUsage(x509.KeyUsageDigitalSignature|x509.KeyUsageKeyEncipherment|x509.KeyUsageCertSign))
+	common.Must(err)
+	serverCert, err := cert.Generate(caCert, cert.CommonName("example.com"), cert.DNSNames("example.com"))
+	common.Must(err)
+
+	caCertPEM, _ := caCert.ToPEM()
+	serverCertPEM, serverKeyPEM := serverCert.ToPEM()
+	serverPort := tcp.PickPort()
+	clientPort := tcp.PickPort()
+
+	serverConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			trustTunnelTestInboundConfigWithStream(
+				serverPort,
+				trustTunnelTestTLSStreamConfig(&ttls.Config{
+					Certificate: []*ttls.Certificate{{
+						Certificate: bytes.Join([][]byte{serverCertPEM, caCertPEM}, []byte("\n")),
+						Key:         serverKeyPEM,
+					}},
+				}),
+				trustTunnelTestServerUser("tt@example.com", "tt-user", "tt-pass"),
+			),
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{ProxySettings: serial.ToTypedMessage(&freedom.Config{})},
+		},
+	}
+
+	clientConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			{
+				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+				}),
+				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+					Address:  net.NewIPOrDomain(dest.Address),
+					Port:     uint32(dest.Port),
+					Networks: []net.Network{net.Network_TCP},
+				}),
+			},
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{
+				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+					StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
+						VerifyPeerCertByName: []string{"example.com"},
+						DisableSystemRoot:   true,
+						Certificate: []*ttls.Certificate{{
+							Certificate: caCertPEM,
+							Usage:       ttls.Certificate_AUTHORITY_VERIFY,
+						}},
+					}),
+				}),
+				ProxySettings: serial.ToTypedMessage(&trusttunnel.ClientConfig{
+					Server:           trustTunnelTestServerEndpoint(serverPort, "tt-user", "tt-pass"),
+					Hostname:         "localhost",
+					Transport:        trusttunnel.TransportProtocol_HTTP2,
+					HasIpv6:          true,
+					SkipVerification: true,
+				}),
+			},
+		},
+	}
+
+	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+	common.Must(err)
+	defer CloseAllServers(servers)
+
+	if err := testTCPConn(clientPort, 1024, 5*time.Second)(); err != nil {
+		t.Fatalf("traffic with verifyPeerCertByName failed: %v", err)
+	}
+}
+
+func TestTrustTunnelOutboundTLSFingerprintPinnedPeerCert(t *testing.T) {
+	tcpServer := tcp.Server{MsgProcessor: xor}
+	dest, err := tcpServer.Start()
+	common.Must(err)
+	defer tcpServer.Close()
+
+	serverCert, serverHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
+	serverPort := tcp.PickPort()
+	clientPort := tcp.PickPort()
+
+	serverConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			trustTunnelTestInboundConfigWithStream(
+				serverPort,
+				trustTunnelTestTLSStreamConfig(&ttls.Config{
+					Certificate: []*ttls.Certificate{ttls.ParseCertificate(serverCert)},
+				}),
+				trustTunnelTestServerUser("tt@example.com", "tt-user", "tt-pass"),
+			),
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{ProxySettings: serial.ToTypedMessage(&freedom.Config{})},
+		},
+	}
+
+	clientConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			{
+				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+				}),
+				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+					Address:  net.NewIPOrDomain(dest.Address),
+					Port:     uint32(dest.Port),
+					Networks: []net.Network{net.Network_TCP},
+				}),
+			},
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{
+				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+					StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
+						Fingerprint:          "random",
+						PinnedPeerCertSha256: [][]byte{serverHash[:]},
+					}),
+				}),
+				ProxySettings: serial.ToTypedMessage(&trusttunnel.ClientConfig{
+					Server:           trustTunnelTestServerEndpoint(serverPort, "tt-user", "tt-pass"),
+					Hostname:         "localhost",
+					Transport:        trusttunnel.TransportProtocol_HTTP2,
+					HasIpv6:          true,
+					SkipVerification: true,
+				}),
+			},
+		},
+	}
+
+	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+	common.Must(err)
+	defer CloseAllServers(servers)
+
+	if err := testTCPConn(clientPort, 1024, 5*time.Second)(); err != nil {
+		t.Fatalf("traffic with generic fingerprint + pinning failed: %v", err)
+	}
+}
+
+func TestTrustTunnelInboundRejectUnknownSNI(t *testing.T) {
+	tcpServer := tcp.Server{MsgProcessor: xor}
+	dest, err := tcpServer.Start()
+	common.Must(err)
+	defer tcpServer.Close()
+
+	serverCert, serverHash := cert.MustGenerate(nil, cert.CommonName("allowed.test"), cert.DNSNames("allowed.test"))
+	serverPort := tcp.PickPort()
+	goodClientPort := tcp.PickPort()
+	badClientPort := tcp.PickPort()
+
+	serverConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			trustTunnelTestInboundConfigWithStream(
+				serverPort,
+				trustTunnelTestTLSStreamConfig(&ttls.Config{
+					RejectUnknownSni: true,
+					Certificate: []*ttls.Certificate{
+						ttls.ParseCertificate(serverCert),
+					},
+				}),
+				trustTunnelTestServerUser("tt@example.com", "tt-user", "tt-pass"),
+			),
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{ProxySettings: serial.ToTypedMessage(&freedom.Config{})},
+		},
+	}
+
+	buildClientConfig := func(port net.Port, serverName string) *core.Config {
+		return &core.Config{
+			Inbound: []*core.InboundHandlerConfig{
+				{
+					ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+						PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(port)}},
+						Listen:   net.NewIPOrDomain(net.LocalHostIP),
+					}),
+					ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+						Address:  net.NewIPOrDomain(dest.Address),
+						Port:     uint32(dest.Port),
+						Networks: []net.Network{net.Network_TCP},
+					}),
+				},
+			},
+			Outbound: []*core.OutboundHandlerConfig{
+				{
+					SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+						StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
+							ServerName:              serverName,
+							PinnedPeerCertSha256:    [][]byte{serverHash[:]},
+						}),
+					}),
+					ProxySettings: serial.ToTypedMessage(&trusttunnel.ClientConfig{
+						Server:           trustTunnelTestServerEndpoint(serverPort, "tt-user", "tt-pass"),
+						Hostname:         "localhost",
+						Transport:        trusttunnel.TransportProtocol_HTTP2,
+						HasIpv6:          true,
+						SkipVerification: true,
+					}),
+				},
+			},
+		}
+	}
+
+	servers, err := InitializeServerConfigs(serverConfig, buildClientConfig(goodClientPort, "allowed.test"), buildClientConfig(badClientPort, "wrong.test"))
+	common.Must(err)
+	defer CloseAllServers(servers)
+
+	if err := testTCPConn(goodClientPort, 1024, 5*time.Second)(); err != nil {
+		t.Fatalf("traffic with allowed SNI failed: %v", err)
+	}
+
+	if err := testTCPConn(badClientPort, 1024, 5*time.Second)(); err == nil {
+		t.Fatal("expected rejectUnknownSni to reject wrong SNI")
 	}
 }
 
