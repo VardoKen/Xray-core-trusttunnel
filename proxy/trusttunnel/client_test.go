@@ -447,6 +447,100 @@ func TestClientProcessRejectsPostQuantumUnsupportedFingerprint(t *testing.T) {
 	}
 }
 
+func TestClientProcessAppliesTLSCompatibilityOverride(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			Hostname:         "vpn.lab.local",
+			SkipVerification: false,
+			CertificatePem:   "-----BEGIN CERTIFICATE-----\ncompat-ca\n-----END CERTIFICATE-----\n",
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				AllowInsecure: true,
+			},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	override := internet.StreamSettingsOverrideFromContext(dialer.lastCtx)
+	if override == nil {
+		t.Fatal("expected stream settings override, got nil")
+	}
+	tlsConfig := internettls.ConfigFromStreamSettings(override)
+	if tlsConfig == nil {
+		t.Fatal("expected tls override config, got nil")
+	}
+	if tlsConfig.GetAllowInsecure() {
+		t.Fatal("allowInsecure = true, want false")
+	}
+	if got := tlsConfig.GetServerName(); got != "vpn.lab.local" {
+		t.Fatalf("serverName = %q, want %q", got, "vpn.lab.local")
+	}
+	if !tlsConfig.GetDisableSystemRoot() {
+		t.Fatal("disableSystemRoot = false, want true")
+	}
+	if len(tlsConfig.GetCertificate()) != 1 {
+		t.Fatalf("certificate entries = %d, want 1", len(tlsConfig.GetCertificate()))
+	}
+	if usage := tlsConfig.GetCertificate()[0].GetUsage(); usage != internettls.Certificate_AUTHORITY_VERIFY {
+		t.Fatalf("certificate usage = %v, want AUTHORITY_VERIFY", usage)
+	}
+	if got := string(tlsConfig.GetCertificate()[0].GetCertificate()); got != client.config.GetCertificatePem() {
+		t.Fatalf("certificate bytes = %q, want %q", got, client.config.GetCertificatePem())
+	}
+}
+
+func TestTrustTunnelStreamSettingsWithTLSCompatibilityKeepsExplicitVerifySurface(t *testing.T) {
+	streamSettings := &internet.MemoryStreamConfig{
+		SecurityType: "tls",
+		SecuritySettings: &internettls.Config{
+			AllowInsecure:        true,
+			VerifyPeerCertByName: []string{"example.com"},
+		},
+	}
+
+	override, changed, handled := trustTunnelStreamSettingsWithTLSCompatibility(streamSettings, &ClientConfig{
+		Hostname:         "vpn.lab.local",
+		SkipVerification: false,
+		CertificatePem:   "-----BEGIN CERTIFICATE-----\ncompat-ca\n-----END CERTIFICATE-----\n",
+	})
+
+	if !handled {
+		t.Fatal("handled = false, want true")
+	}
+	if changed {
+		t.Fatal("changed = true, want false")
+	}
+	if override != streamSettings {
+		t.Fatal("override pointer changed unexpectedly")
+	}
+}
+
 type fakeTrustTunnelStreamConn struct {
 	readBuf  bytes.Buffer
 	writeBuf bytes.Buffer

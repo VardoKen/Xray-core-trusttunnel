@@ -310,7 +310,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	}
 
 	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
-	updatedCtx, err := trustTunnelContextWithPostQuantumOverride(ctx, dialer, c.config)
+	updatedCtx, tlsHandledByStreamSettings, err := trustTunnelContextWithTransportSecurityOverrides(ctx, dialer, c.config)
 	if err != nil {
 		return err
 	}
@@ -339,7 +339,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		return err
 	}
 
-	if !securityState.UsesReality {
+	if !securityState.UsesReality && !tlsHandledByStreamSettings {
 		if err := verifyTrustTunnelTLS(securityState.PeerCertificates, c.config); err != nil {
 			_ = conn.Close()
 			return errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()

@@ -234,3 +234,96 @@ func TestConfigBuildAllowsTrustTunnelHTTP3PostQuantumWithoutOutboundSecurity(t *
 		t.Fatalf("Build() failed: %v", err)
 	}
 }
+
+func TestConfigBuildRejectsTrustTunnelTLSHostnameMismatchOnHTTP2(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "127.0.0.1",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "vpn.lab.local",
+		"transport": "http2",
+		"skipVerification": false
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security: "tls",
+					TLSSettings: &TLSConfig{
+						ServerName: "wrong.lab.local",
+					},
+				},
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "hostname conflicts with tlsSettings.serverName") {
+		t.Fatalf("Build() error = %v, want hostname conflict", err)
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelCertificatePemConflictWithGenericTLSVerify(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "127.0.0.1",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "vpn.lab.local",
+		"transport": "http2",
+		"skipVerification": false,
+		"certificatePem": "-----BEGIN CERTIFICATE-----\ncompat-ca\n-----END CERTIFICATE-----\n"
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security: "tls",
+					TLSSettings: &TLSConfig{
+						VerifyPeerCertByName: "example.com",
+					},
+				},
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "certificatePem/certificatePemFile conflicts") {
+		t.Fatalf("Build() error = %v, want certificatePem conflict", err)
+	}
+}
+
+func TestConfigBuildAllowsTrustTunnelCertificatePemCompatibilityFallbackOnHTTP2(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "127.0.0.1",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "vpn.lab.local",
+		"transport": "http2",
+		"skipVerification": false,
+		"certificatePem": "-----BEGIN CERTIFICATE-----\ncompat-ca\n-----END CERTIFICATE-----\n"
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security: "tls",
+					TLSSettings: &TLSConfig{
+						ServerName:    "vpn.lab.local",
+						AllowInsecure: true,
+					},
+				},
+			},
+		},
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+}

@@ -139,6 +139,10 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer, a
 	}
 
 	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
+	ctx, tlsHandledByStreamSettings, err := trustTunnelContextWithTransportSecurityOverrides(ctx, dialer, c.config)
+	if err != nil {
+		return nil, err
+	}
 
 	rawConn, err := dialer.Dial(ctx, c.server.Destination)
 	if err != nil {
@@ -163,7 +167,7 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer, a
 		return nil, err
 	}
 
-	if !securityState.UsesReality {
+	if !securityState.UsesReality && !tlsHandledByStreamSettings {
 		if err := verifyTrustTunnelTLS(securityState.PeerCertificates, c.config); err != nil {
 			_ = conn.Close()
 			return nil, errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()

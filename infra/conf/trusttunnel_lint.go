@@ -72,8 +72,31 @@ func validateTrustTunnelOutboundConfig(outbound OutboundDetourConfig) error {
 		return errors.New("trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only").AtError()
 	}
 
+	if err := validateTrustTunnelOutboundTLSCompatibility(outbound.StreamSetting, settings, transport); err != nil {
+		return err
+	}
+
 	if settings.PostQuantumGroup != nil && transport != trusttunnel.TransportProtocol_HTTP3 && !trustTunnelSecuritySupportsPostQuantum(outbound.StreamSetting) {
 		return errors.New("trusttunnel postQuantumGroupEnabled is unsupported: current outbound streamSettings have no TLS/REALITY security").AtWarning()
+	}
+
+	return nil
+}
+
+func validateTrustTunnelOutboundTLSCompatibility(stream *StreamConfig, settings *TrustTunnelClientConfig, transport trusttunnel.TransportProtocol) error {
+	if settings == nil || stream == nil || stream.TLSSettings == nil || transport == trusttunnel.TransportProtocol_HTTP3 || !strings.EqualFold(stream.Security, "tls") {
+		return nil
+	}
+
+	tlsSettings := stream.TLSSettings
+	compatibilityVerifyActive := !settings.SkipVerification || settings.CertificatePEM != "" || settings.CertificatePEMFile != ""
+
+	if compatibilityVerifyActive && settings.Hostname != "" && tlsSettings.ServerName != "" && !strings.EqualFold(settings.Hostname, tlsSettings.ServerName) {
+		return errors.New("trusttunnel hostname conflicts with tlsSettings.serverName on non-HTTP3 path: generic tlsSettings are authoritative").AtError()
+	}
+
+	if (settings.CertificatePEM != "" || settings.CertificatePEMFile != "") && trustTunnelTLSSettingsHaveExplicitVerifySurface(tlsSettings) {
+		return errors.New("trusttunnel certificatePem/certificatePemFile conflicts with generic tlsSettings verification surface on non-HTTP3 path; choose one authoritative verification source").AtError()
 	}
 
 	return nil
@@ -115,4 +138,22 @@ func trustTunnelSecuritySupportsPostQuantum(stream *StreamConfig) bool {
 	default:
 		return false
 	}
+}
+
+func trustTunnelTLSSettingsHaveExplicitVerifySurface(settings *TLSConfig) bool {
+	if settings == nil {
+		return false
+	}
+
+	if strings.TrimSpace(settings.PinnedPeerCertSha256) != "" || strings.TrimSpace(settings.VerifyPeerCertByName) != "" {
+		return true
+	}
+
+	for _, cert := range settings.Certs {
+		if cert != nil && strings.EqualFold(cert.Usage, "verify") {
+			return true
+		}
+	}
+
+	return false
 }
