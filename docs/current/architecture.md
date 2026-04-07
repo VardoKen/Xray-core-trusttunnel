@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-07
-Коммит состояния: `50cfca99`
+Коммит состояния: `d350388e`
 Ветка: `feat/trusttunnel-v1-sync-upstream-2026-03-30`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -144,6 +144,7 @@
 - H2 CONNECT / `_udp2` / `_icmp` поверх общего Xray `streamSettings.security = "reality"` без ложного HTTP/1.1 fallback при пустом negotiated ALPN у REALITY-wrapper
 - per-request `streamSettings` override через общий outbound layer Xray
 - ручная TLS verify semantics в `verifyTrustTunnelTLS()`
+- совместимость H2/TLS outbound с generic Xray `streamSettings.tlsSettings` по `ServerName`, authority-verify через custom CA, `VerifyPeerCertByName`, `PinnedPeerCertSha256` и `Fingerprint`
 - UDP CONNECT на official authority `_udp2`; server-side reserved-host matcher сохраняет backward-compat на `_udp2` и legacy `_udp2:0`
 - ICMP CONNECT на `_icmp:0` для H2 и H3
 - common outbound features `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4` проходят через тот же generic Xray outbound layer и не требуют TrustTunnel-specific routing surface
@@ -162,6 +163,17 @@
 
 Явно unsupported beyond explicit reject на текущем состоянии:
 - `AntiDpi`
+
+### 4.3.1. Generic TLS surface на поддержанном H2/TLS path
+
+Подтверждено scenario-тестами в `testing/scenarios/trusttunnel_test.go`:
+- `streamSettings.tlsSettings.serverName` реально участвует в verify path для TrustTunnel H2/TLS outbound;
+- authority-verify через custom CA работает на том же path;
+- `VerifyPeerCertByName` реально матчит peer certificate names;
+- `PinnedPeerCertSha256` и `Fingerprint` не остаются декларативными полями и совместимы с TrustTunnel H2/TLS.
+
+Практическая граница:
+- на Windows current generic TLS transport требует `DisableSystemRoot=true` для воспроизводимого custom-CA verify path; это поведение относится к общему TLS transport layer Xray, а не к TrustTunnel-specific verify logic.
 
 ### 4.4. H2 REALITY runtime-path
 
@@ -232,6 +244,7 @@
 
 Подтверждено:
 - TrustTunnel inbound совместим с общими `sniffing + routeOnly`;
+- generic inbound TLS setting `RejectUnknownSni` подтверждён отдельным scenario-тестом и не ломает TrustTunnel inbound path;
 - `HandlerService` `AddUser` / `RemoveUser` и `GetInboundUsersCount` работают на TrustTunnel inbound без отдельного protocol-local management layer.
 
 Граница текущего состояния:

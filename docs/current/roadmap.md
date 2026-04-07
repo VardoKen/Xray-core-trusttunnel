@@ -18,6 +18,8 @@
 Уже закрытые integration-блоки не возвращаются в roadmap без новых доказательств:
 - common outbound features `sendThrough`, `proxySettings`, `mux`, `targetStrategy`;
 - common inbound `sniffing + routeOnly`;
+- generic H2/TLS transport settings `serverName`, custom-CA verify, `VerifyPeerCertByName`, `PinnedPeerCertSha256`, `Fingerprint`;
+- generic inbound TLS `rejectUnknownSni`;
 - `_icmp` в routing/policy/stats модели;
 - dynamic user management через `HandlerService`;
 - initial config-build validator для unsupported TrustTunnel combinations.
@@ -80,22 +82,25 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 ### 3.2. Общая TLS/REALITY surface Xray
 
-Нужно проверить и доработать:
-- `serverName`;
-- verify options;
-- pinning;
-- fingerprint/uTLS surface там, где она должна применяться;
-- корректное сосуществование `tls` и `reality`.
+Широкий integration-gap по этому блоку больше не открыт для поддержанных path:
+- H2/TLS scenario-тестами подтверждены `serverName`, authority-verify через custom CA, `VerifyPeerCertByName`, `PinnedPeerCertSha256` и `Fingerprint`;
+- H2 + REALITY уже подтверждён отдельным live production-path retest;
+- `http3 + reality` зафиксирован как explicit unsupported combination, а не как “ещё не закрытая TLS/REALITY parity-задача”.
+
+Остаётся:
+- держать эту поверхность синхронной с upstream-изменениями generic TLS/REALITY layer Xray;
+- не трактовать Windows-требование `disableSystemRoot=true` для custom-CA verify path как TrustTunnel-specific bug;
+- расширять validator только там, где новая generic combination действительно должна fail-fast ещё на config-build этапе.
 
 ### 3.3. Остаточная inbound integration surface
 
 Уже подтверждено:
 - `sniffing + routeOnly` на TrustTunnel inbound;
+- `rejectUnknownSni` на generic inbound TLS surface;
 - TLS SNI `metadataOnly` не является отдельным TrustTunnel bug surface и следует общей семантике dispatcher metadata sniffers.
 
 Остаётся:
-- добрать dedicated coverage для оставшихся `metadataOnly` сценариев, если они реально нужны как product path;
-- добрать generic inbound transport settings, которые ещё не были подтверждены отдельными scenario/runtime-проверками.
+- добирать dedicated coverage для `metadataOnly` или новых generic inbound transport settings только если они реально понадобятся как product path сверх уже подтверждённых сценариев.
 
 ### 3.4. Финальная матрица совместимости и validator hardening
 
@@ -115,6 +120,5 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 ## 5. Порядок выполнения
 
 1. нормализация вокруг `streamSettings`
-2. full TLS/REALITY surface
-3. остаточная inbound integration surface
-4. финальная матрица совместимости и validator hardening
+2. финальная матрица совместимости и validator hardening
+3. dedicated inbound / generic TLS coverage только при появлении новых product-level требований

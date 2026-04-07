@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-07
-Коммит состояния: `50cfca99`
+Коммит состояния: `d350388e`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -128,17 +128,17 @@
 
 ### 2.13. Clean-HEAD live traffic matrix
 
-Подтверждено clean-HEAD matrix-run на `50cfca99`:
-- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-115351`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-115351`;
-- load bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-114219`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-114219`;
+Подтверждено clean-HEAD matrix-run на `d350388e`:
+- functional bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-134320`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-134320`;
+- load bundle root: lab `/opt/lab/xray-tt/logs/full-live-20260407-140912`, remote `/opt/trusttunnel-dev/logs/full-live-20260407-140912`;
 - functional scope проходит `15/15`: H2 TLS TCP, H2 REALITY TCP, H3 TLS TCP, H2 TLS UDP DNS, H2 REALITY UDP DNS, H3 TLS UDP DNS, negative-case `hasIpv6=false` для domain target, allow-case `hasIpv6=false + targetStrategy forceipv4`, negative-case `http3 + reality`;
 - load scope проходит `12/12`: H2 TLS TCP, H2 REALITY TCP, H3 TLS TCP, H2 TLS UDP, H2 REALITY UDP, H3 TLS UDP.
 
 Практически значимые throughput / CPU verdict'ы текущего matrix-run:
-- H2 TLS TCP: `191.36 .. 226.14 Mbit/s`, lab/client CPU avg `25.48 .. 27.52`, remote/server avg `40.08 .. 44.72`;
-- H2 REALITY TCP: `223.18 .. 312.92 Mbit/s`, lab/client CPU avg `26.12 .. 39.33`, remote/server avg `45.38 .. 60.71`; fastest TCP case текущего authorative rerun — `h2_reality_auto_load_tcp` с `312.92 Mbit/s`;
-- H3 TLS TCP: `152.55 .. 200.89 Mbit/s`, но lab/client CPU заметно выше, avg `75.05 .. 91.71`;
-- UDP flood-style load: H2 TLS `96.6 Mbit/s`, H2 REALITY `99.17 Mbit/s`, H3 TLS `74.24 Mbit/s`; это stress-path с высоким drop/loss и не должен трактоваться как функциональный DNS fail.
+- H2 TLS TCP: `252.39 .. 336.39 Mbit/s`, lab/client CPU avg `33.19 .. 40.10`, remote/server avg `54.05 .. 61.05`;
+- H2 REALITY TCP: `264.72 .. 373.45 Mbit/s`, lab/client CPU avg `30.43 .. 45.62`, remote/server avg `50.05 .. 64.38`; fastest TCP case текущего authoritative rerun — `h2_reality_pq_off_load_tcp` с `373.45 Mbit/s`;
+- H3 TLS TCP: `176.42 .. 219.23 Mbit/s`, но lab/client CPU заметно выше, avg `77.33 .. 91.15`;
+- UDP flood-style load: H2 TLS `105.82 Mbit/s`, H2 REALITY `108.50 Mbit/s`, H3 TLS `85.85 Mbit/s`; это stress-path с высоким drop/loss и не должен трактоваться как функциональный DNS fail.
 
 Практический вывод:
 - текущий bottleneck для большого sustained traffic остаётся скорее на lab/client side, а не на CPU удалённого сервера;
@@ -147,15 +147,18 @@
 
 ### 2.16. Common Xray integration surface
 
-Подтверждено current-head scenario-тестами на `50cfca99`:
+Подтверждено current-head scenario-тестами на `d350388e`:
 - TrustTunnel outbound совместим с общими механизмами Xray `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4`;
 - TrustTunnel inbound совместим с общими `sniffing + routeOnly`;
+- TrustTunnel H2/TLS outbound совместим с generic Xray `streamSettings.tlsSettings` по `serverName`, authority-verify через custom CA, `VerifyPeerCertByName`, `PinnedPeerCertSha256` и `Fingerprint`;
+- generic inbound TLS setting `rejectUnknownSni` подтверждён на TrustTunnel inbound;
 - dynamic user management через `HandlerService` `AddUser` / `RemoveUser` и `GetInboundUsersCount` работает на TrustTunnel inbound;
 - config-build validator fail-fast режет `http3 + reality`, `antiDpi=true` и H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`.
 
 Практическое правило:
 - эти комбинации больше не считать непроверенными common-integration surface;
 - `metadataOnly` не использовать как путь для TLS SNI route override: current dispatcher в `metadataOnly=true` запускает только metadata sniffers и не выполняет TLS content sniffing.
+- на Windows custom-CA verify path для `streamSettings.tlsSettings` воспроизводимо работает с `disableSystemRoot = true`; это ограничение общего Xray TLS transport, а не TrustTunnel-specific special-case.
 
 ### 2.14. H3 + REALITY
 
@@ -224,6 +227,7 @@
 - для REALITY-path: `streamSettings.realitySettings.serverName == settings.hostname`
 - для REALITY-path: `publicKey`, `shortId` и `fingerprint` соответствуют серверу
 - если используется `certificatePemFile`, PEM должен читаться в runtime verify path
+- если на Windows используется authority-verify через custom CA в `streamSettings.tlsSettings`, нужно добавлять `disableSystemRoot = true`, иначе воспроизводимый verify path может уйти в системный cert pool вместо custom-CA surface
 - если используется REALITY-wrapper, пустой negotiated ALPN внутри TrustTunnel layer больше не должен трактоваться как причина падения в HTTP/1.1 fallback; авторитетным остаётся `settings.transport = "http2"`
 - если нужен deterministic allow/deny через server-side rules, `settings.clientRandom` должен совпадать с `client_random` rule-spec
 
