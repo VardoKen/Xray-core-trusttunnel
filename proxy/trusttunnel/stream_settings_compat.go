@@ -5,6 +5,7 @@ import (
 
 	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/transport/internet"
+	"github.com/xtls/xray-core/transport/internet/reality"
 	xtlstls "github.com/xtls/xray-core/transport/internet/tls"
 )
 
@@ -44,15 +45,19 @@ func trustTunnelContextWithTransportSecurityOverrides(ctx context.Context, diale
 
 	if cfg.GetAntiDpi() {
 		if cfg.GetTransport() != TransportProtocol_HTTP2 {
-			return nil, false, errors.New("trusttunnel antiDpi is supported only for http2 over TLS: current transport is not compatible").AtWarning()
+			return nil, false, errors.New("trusttunnel antiDpi is supported only for http2 over TLS or REALITY: current transport is not compatible").AtWarning()
 		}
-		if xtlstls.ConfigFromStreamSettings(effective) == nil {
-			return nil, false, errors.New("trusttunnel antiDpi is supported only for http2 over TLS: current outbound streamSettings have no TLS security").AtWarning()
+		if !trustTunnelAntiDPICompatibleSecurity(effective) {
+			return nil, false, errors.New("trusttunnel antiDpi is supported only for http2 over TLS or REALITY: current outbound streamSettings have no compatible security").AtWarning()
 		}
 		ctx = xtlstls.ContextWithAntiDPI(ctx)
 	}
 
 	return ctx, tlsHandledByStreamSettings, nil
+}
+
+func trustTunnelAntiDPICompatibleSecurity(streamSettings *internet.MemoryStreamConfig) bool {
+	return xtlstls.ConfigFromStreamSettings(streamSettings) != nil || reality.ConfigFromStreamSettings(streamSettings) != nil
 }
 
 func trustTunnelStreamSettingsWithTLSCompatibility(streamSettings *internet.MemoryStreamConfig, cfg *ClientConfig) (*internet.MemoryStreamConfig, bool, bool) {

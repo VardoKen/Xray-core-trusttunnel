@@ -107,6 +107,9 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 			return nil, errors.New("MITM freedom RAW TLS: unexpected Negotiated Protocol (" + negotiatedProtocol + ") with " + mitmServerName).AtWarning()
 		}
 	} else if config := reality.ConfigFromStreamSettings(streamSettings); config != nil {
+		if tls.AntiDPIEnabledFromContext(ctx) {
+			conn = tls.WrapConnWithAntiDPI(conn)
+		}
 		if conn, err = reality.UClient(conn, config, ctx, dest); err != nil {
 			return nil, err
 		}

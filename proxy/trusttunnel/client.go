@@ -290,7 +290,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 
 	if c.config.GetTransport() == TransportProtocol_HTTP3 {
 		if c.config.GetAntiDpi() {
-			return errors.New("trusttunnel antiDpi is supported only for http2 over TLS: http3 has no compatible QUIC anti-DPI runtime").AtWarning()
+			return errors.New("trusttunnel antiDpi is supported only for http2 over TLS or REALITY: http3 has no compatible QUIC anti-DPI runtime").AtWarning()
 		}
 		if trustTunnelHTTP3RealityUnsupported(dialer) {
 			return errors.New("trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only").AtWarning()

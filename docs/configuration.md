@@ -40,13 +40,13 @@ In practice, start from a recommended example unless you explicitly need the sma
 | Combination | Status | Notes |
 | --- | --- | --- |
 | HTTP/2 over TLS | Supported | Main certificate-based H2 path; supports optional `antiDpi=true` |
-| HTTP/2 over REALITY | Supported | Uses `streamSettings.security = "reality"` |
+| HTTP/2 over REALITY | Supported | Uses `streamSettings.security = "reality"`; supports optional `antiDpi=true` |
 | HTTP/3 over TLS | Supported | H3 path over QUIC |
 | HTTP/3 over REALITY | Unsupported | Current REALITY runtime is TCP-stream based |
 
 Additional limits:
 
-- `antiDpi=true` is supported only for `HTTP/2 over TLS`.
+- `antiDpi=true` is supported only for `HTTP/2 over TLS` and `HTTP/2 over REALITY`.
 - UDP domain targets are not documented as a supported product path. Use IP targets for UDP.
 - With `hasIpv6=false`, domain targets require `targetStrategy: "useipv4"` or `"forceipv4"`.
 
@@ -92,9 +92,9 @@ Optional anti-DPI addition for `HTTP/2 over TLS` only:
 Rules:
 
 - it requires `streamSettings.security = "tls"`
-- it is rejected for `HTTP/2 over REALITY`
+- it also works with `streamSettings.security = "reality"` on `HTTP/2`
 - it is rejected for `HTTP/3`
-- the current runtime implements it by splitting the first TLS ClientHello write on the TCP/TLS path
+- the current runtime implements it by splitting the first TCP-based ClientHello write
 
 Tracked examples:
 
@@ -135,6 +135,12 @@ Recommended addition:
 
 ```json
 "clientRandom": "deadbeef"
+```
+
+Optional anti-DPI addition:
+
+```json
+"antiDpi": true
 ```
 
 Rules:
@@ -299,7 +305,7 @@ Tracked rule example:
 | `clientRandom` | string | No, but strongly recommended | Shapes ClientHello random for `client_random` rules | Set it explicitly unless you have a reason not to |
 | `hasIpv6` | boolean | No | Controls IPv6 target allowance | `false` blocks literal IPv6 and requires IPv4-only target strategy for domain targets |
 | `postQuantumGroupEnabled` | boolean | No | Enables the post-quantum group profile where supported | Runtime-active for H2 TLS, H2 REALITY, and H3 TLS |
-| `antiDpi` | boolean | No | Enables split-ClientHello anti-DPI behavior | Supported only for `HTTP/2 over TLS`; rejected for REALITY, `http3`, or missing TLS `streamSettings` |
+| `antiDpi` | boolean | No | Enables split-ClientHello anti-DPI behavior | Supported only for `HTTP/2 over TLS` or `HTTP/2 over REALITY`; rejected for `http3` or missing compatible security `streamSettings` |
 
 ## 7. Inbound quick start
 
@@ -425,7 +431,7 @@ That means:
 The validator rejects these combinations before runtime:
 
 - `http3 + reality`
-- `antiDpi=true` outside `HTTP/2 over TLS`
+- `antiDpi=true` outside `HTTP/2 over TLS` or `HTTP/2 over REALITY`
 - H2 `postQuantumGroupEnabled=true` without TLS or REALITY `streamSettings`
 - `hostname` conflicting with generic `tlsSettings.serverName`
 - `skipVerification=true` combined with explicit generic verify settings
@@ -457,7 +463,7 @@ Windows note:
 ## 11. Unsupported or guarded combinations
 
 - `HTTP/3 over REALITY` is unsupported because the current REALITY runtime is TCP-stream based.
-- `antiDpi=true` is guarded to `HTTP/2 over TLS` only, because the current implementation only splits the first TLS ClientHello on the TCP/TLS path.
+- `antiDpi=true` is guarded to `HTTP/2 over TLS` and `HTTP/2 over REALITY` only, because the current implementation only splits the first TCP-based ClientHello write.
 - UDP domain targets are not a documented product path.
 - `settings.hosts[]` is not a standalone generic host-routing layer.
 - `settings.transports[]` is not a standalone generic transport-routing layer.

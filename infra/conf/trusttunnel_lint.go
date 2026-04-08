@@ -66,10 +66,10 @@ func validateTrustTunnelOutboundConfig(outbound OutboundDetourConfig) error {
 
 	if settings.AntiDpi {
 		if transport != trusttunnel.TransportProtocol_HTTP2 {
-			return errors.New("trusttunnel antiDpi is supported only for http2 over TLS: http3 has no compatible QUIC anti-DPI runtime").AtWarning()
+			return errors.New("trusttunnel antiDpi is supported only for http2 over TLS or REALITY: http3 has no compatible QUIC anti-DPI runtime").AtWarning()
 		}
-		if outbound.StreamSetting == nil || !strings.EqualFold(outbound.StreamSetting.Security, "tls") {
-			return errors.New("trusttunnel antiDpi is supported only for http2 over TLS: current outbound streamSettings have no TLS security").AtWarning()
+		if outbound.StreamSetting == nil || (!strings.EqualFold(outbound.StreamSetting.Security, "tls") && !strings.EqualFold(outbound.StreamSetting.Security, "reality")) {
+			return errors.New("trusttunnel antiDpi is supported only for http2 over TLS or REALITY: current outbound streamSettings have no compatible security").AtWarning()
 		}
 	}
 

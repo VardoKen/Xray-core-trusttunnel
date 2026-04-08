@@ -210,8 +210,41 @@ func TestConfigBuildRejectsTrustTunnelAntiDpiWithoutTLS(t *testing.T) {
 			},
 		},
 	}).Build()
-	if err == nil || !strings.Contains(err.Error(), "antiDpi is supported only for http2 over TLS") {
+	if err == nil || !strings.Contains(err.Error(), "antiDpi is supported only for http2 over TLS or REALITY") {
 		t.Fatalf("Build() error = %v, want antiDpi TLS guard", err)
+	}
+}
+
+func TestConfigBuildAllowsTrustTunnelAntiDpiOnHTTP2Reality(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "127.0.0.1",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http2",
+		"antiDpi": true
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security: "reality",
+					REALITYSettings: &REALITYConfig{
+						ServerName: "www.example.com",
+						Password:   "E59WjnvZcQMu7tR7_BgyhycuEdBS-CtKxfImRCdAvFM",
+						ShortId:    "0123456789abcdef",
+						SpiderX:    "/",
+					},
+				},
+			},
+		},
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
 	}
 }
 
@@ -238,7 +271,7 @@ func TestConfigBuildRejectsTrustTunnelAntiDpiOnHTTP3(t *testing.T) {
 			},
 		},
 	}).Build()
-	if err == nil || !strings.Contains(err.Error(), "antiDpi is supported only for http2 over TLS") {
+	if err == nil || !strings.Contains(err.Error(), "antiDpi is supported only for http2 over TLS or REALITY") {
 		t.Fatalf("Build() error = %v, want antiDpi http3 guard", err)
 	}
 }

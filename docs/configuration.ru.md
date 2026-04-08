@@ -40,13 +40,13 @@ TrustTunnel доступен и как:
 | Комбинация | Статус | Примечание |
 | --- | --- | --- |
 | HTTP/2 over TLS | Поддержано | Основной certificate-based H2 path; поддерживает опциональный `antiDpi=true` |
-| HTTP/2 over REALITY | Поддержано | Использует `streamSettings.security = "reality"` |
+| HTTP/2 over REALITY | Поддержано | Использует `streamSettings.security = "reality"`; поддерживает опциональный `antiDpi=true` |
 | HTTP/3 over TLS | Поддержано | H3 path поверх QUIC |
 | HTTP/3 over REALITY | Не поддержано | Текущий REALITY runtime построен вокруг TCP stream layer |
 
 Дополнительные ограничения:
 
-- `antiDpi=true` поддерживается только для `HTTP/2 over TLS`.
+- `antiDpi=true` поддерживается только для `HTTP/2 over TLS` и `HTTP/2 over REALITY`.
 - UDP domain targets не описываются как поддержанный product path. Для UDP нужно использовать IP-назначения.
 - При `hasIpv6=false` для domain targets нужен `targetStrategy: "useipv4"` или `"forceipv4"`.
 
@@ -92,9 +92,9 @@ TrustTunnel доступен и как:
 Правила:
 
 - требует `streamSettings.security = "tls"`
-- отклоняется для `HTTP/2 over REALITY`
+- также работает с `streamSettings.security = "reality"` на `HTTP/2`
 - отклоняется для `HTTP/3`
-- текущий runtime реализует это как split первой записи TLS ClientHello на TCP/TLS path
+- текущий runtime реализует это как split первой TCP-based записи ClientHello
 
 Tracked examples:
 
@@ -135,6 +135,12 @@ Tracked examples:
 
 ```json
 "clientRandom": "deadbeef"
+```
+
+Опциональное anti-DPI дополнение:
+
+```json
+"antiDpi": true
 ```
 
 Правила:
@@ -299,7 +305,7 @@ Tracked rule example:
 | `clientRandom` | string | Нет, но крайне рекомендуется | Формирует ClientHello random для `client_random` rules | Лучше задавать явно, если нет причины этого не делать |
 | `hasIpv6` | boolean | Нет | Управляет разрешением IPv6-целей | `false` режет literal IPv6 и требует IPv4-only target strategy для domain targets |
 | `postQuantumGroupEnabled` | boolean | Нет | Включает post-quantum group profile там, где он поддержан | Runtime-active для H2 TLS, H2 REALITY и H3 TLS |
-| `antiDpi` | boolean | Нет | Включает anti-DPI поведение через split ClientHello | Поддержано только для `HTTP/2 over TLS`; отклоняется для REALITY, `http3` и отсутствующих TLS `streamSettings` |
+| `antiDpi` | boolean | Нет | Включает anti-DPI поведение через split ClientHello | Поддержано только для `HTTP/2 over TLS` или `HTTP/2 over REALITY`; отклоняется для `http3` и отсутствующих совместимых `streamSettings` |
 
 ## 7. Быстрый старт для inbound
 
@@ -425,7 +431,7 @@ Tracked example:
 Validator режет эти комбинации ещё до runtime:
 
 - `http3 + reality`
-- `antiDpi=true` вне `HTTP/2 over TLS`
+- `antiDpi=true` вне `HTTP/2 over TLS` или `HTTP/2 over REALITY`
 - H2 `postQuantumGroupEnabled=true` без TLS или REALITY `streamSettings`
 - конфликт `hostname` с generic `tlsSettings.serverName`
 - `skipVerification=true` вместе с явно заданными generic verify settings
@@ -457,7 +463,7 @@ Validator режет эти комбинации ещё до runtime:
 ## 11. Неподдержанные или guarded-комбинации
 
 - `HTTP/3 over REALITY` не поддерживается, потому что текущий REALITY runtime построен вокруг TCP stream layer.
-- `antiDpi=true` ограничен только `HTTP/2 over TLS`, потому что текущая реализация умеет делать split только первой записи TLS ClientHello на TCP/TLS path.
+- `antiDpi=true` ограничен только `HTTP/2 over TLS` и `HTTP/2 over REALITY`, потому что текущая реализация умеет делать split только первой TCP-based записи ClientHello.
 - UDP domain targets не являются документированным product path.
 - `settings.hosts[]` не является самостоятельным generic host-routing layer.
 - `settings.transports[]` не является самостоятельным generic transport-routing layer.
