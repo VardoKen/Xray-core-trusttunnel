@@ -12,6 +12,7 @@ The goal of the fork is straightforward: keep TrustTunnel usable as a maintained
 - HTTP/2 over REALITY
 - HTTP/3 over TLS
 - `transport: "auto"` with HTTP/3-first selection and HTTP/2 fallback
+- Per-client inbound connection limits with separate H1/H2 and H3 counters
 - TCP tunneling
 - UDP multiplexing via `_udp2`
 - ICMP tunneling via `_icmp`
@@ -28,6 +29,7 @@ The configuration guide includes:
 - minimal examples, which show the shortest valid config shape
 - recommended examples, which show the safer default for real deployments
 - a precise explanation of `client_random` rules and how to write them
+- inbound limit-policy examples for per-client H1/H2 and H3 connection limits
 
 ## Unsupported combinations
 

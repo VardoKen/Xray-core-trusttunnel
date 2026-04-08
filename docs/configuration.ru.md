@@ -30,6 +30,11 @@ TrustTunnel доступен и как:
 - ICMP-мультиплексирование через `_icmp`
 - путь health-check через `_check`
 
+Подтверждённые серверные policy-механизмы:
+
+- лимиты входящих соединений по клиентам с отдельными счётчиками для H1/H2 и H3
+- явный HTTP `429 Too Many Requests` при превышении лимита
+
 Для `HTTP/2 over REALITY` нужно использовать `streamSettings.security = "reality"`. Этот path не использует обычную certificate-chain model доверия так же, как `HTTP/2 over TLS` или `HTTP/3 over TLS`.
 
 ## 2. Минимальные и рекомендуемые примеры
@@ -430,15 +435,48 @@ Tracked example:
 
 - [../testing/trusttunnel/server_h3.json](../testing/trusttunnel/server_h3.json)
 
+### 7.4. Рекомендуемая политика лимитов входящих соединений
+
+Пример добавлений внутрь `settings`:
+
+```json
+{
+  "users": [
+    { "email": "u1@example.com", "username": "u1", "password": "p1", "maxHttp2Conns": 1, "maxHttp3Conns": 2 },
+    { "email": "u2@example.com", "username": "u2", "password": "p2" }
+  ],
+  "defaultMaxHttp2ConnsPerClient": 2,
+  "defaultMaxHttp3ConnsPerClient": 4
+}
+```
+
+Правила:
+
+- `users[].maxHttp2Conns` и `users[].maxHttp3Conns` переопределяют значения по умолчанию, если они не равны `0`.
+- `0` означает отсутствие персонального override. Если и персональное значение, и default равны `0`, то соответствующий счётчик не ограничен.
+- HTTP/1 и HTTP/2 используют общий счётчик лимитов.
+- HTTP/3 использует отдельный счётчик.
+- `_check` не расходует слот.
+- обычный CONNECT, `_udp2` и `_icmp` расходуют слот.
+- при превышении лимита сервер явно отвечает HTTP `429 Too Many Requests`.
+
+Tracked example:
+
+- [../testing/trusttunnel/server_h2_limits.json](../testing/trusttunnel/server_h2_limits.json)
+
 ## 8. Справочник inbound-полей
 
 | Поле | Тип | Обязательно | Назначение | Примечание |
 | --- | --- | --- | --- | --- |
 | `users` | array | Да | Пользователи TrustTunnel, которых принимает сервер | У каждого должны быть `username` и `password`; `email` полезен для identity и stats |
+| `users[].maxHttp2Conns` | integer | Нет | Персональное переопределение лимита для общего счётчика HTTP/1 и HTTP/2 | `0` означает использовать `defaultMaxHttp2ConnsPerClient`; если и там `0`, счётчик не ограничен |
+| `users[].maxHttp3Conns` | integer | Нет | Персональное переопределение лимита для счётчика HTTP/3 | `0` означает использовать `defaultMaxHttp3ConnsPerClient`; если и там `0`, счётчик не ограничен |
 | `hosts` | array | Нет | Compatibility host/certificate mapping | Не надо трактовать как generic host-routing system |
 | `transports` | array | Нет | Список разрешённых transport | Не надо трактовать как generic transport-routing system |
 | `rules` | array | Нет | Правила доступа, которые применяются до dispatch | См. раздел 5 |
 | `authFailureStatusCode` | integer | Нет | HTTP status для auth-failure | Типичное значение `407` |
+| `defaultMaxHttp2ConnsPerClient` | integer | Нет | Лимит по умолчанию для общего счётчика HTTP/1 и HTTP/2 | `0` означает отсутствие лимита, если нет персонального override |
+| `defaultMaxHttp3ConnsPerClient` | integer | Нет | Лимит по умолчанию для счётчика HTTP/3 | `0` означает отсутствие лимита, если нет персонального override |
 | `udp` | boolean | Нет | Включает поддержку UDP mux | Нужен для `_udp2` |
 | `allowPrivateNetworkConnections` | boolean | Нет | Разрешает private-network ICMP-targets | Относится к `_icmp` |
 | `icmp.interfaceName` | string | Нет | Имя исходящего интерфейса для ICMP | Только для `_icmp` |
@@ -450,6 +488,14 @@ Tracked example:
 | `tcpConnectionsTimeoutSecs` | integer | Нет | Таймаут неактивности TCP-соединения в секундах | Контроль inbound timeout |
 | `udpConnectionsTimeoutSecs` | integer | Нет | Таймаут UDP-сессии в секундах | Контроль inbound timeout |
 | `ipv6Available` | boolean | Нет | Управляет доступностью IPv6 для `_icmp` runtime | Только для `_icmp` |
+
+Семантика лимитера:
+
+- H1 и H2 используют общий счётчик, потому что проходят через один TCP-side path допуска tunnel-соединений.
+- H3 использует отдельный счётчик.
+- `_check` не подпадает под connection limits.
+- `_udp2` и `_icmp` учитываются в том же счётчике, что и обычный CONNECT на соответствующем transport.
+- При превышении лимита сервер отклоняет запрос с HTTP `429 Too Many Requests`.
 
 ## 9. Граница между `settings` и `streamSettings`
 
@@ -508,6 +554,7 @@ Validator режет эти комбинации ещё до runtime:
 
 - [../testing/trusttunnel/client_h2.json](../testing/trusttunnel/client_h2.json)
 - [../testing/trusttunnel/server_h2.json](../testing/trusttunnel/server_h2.json)
+- [../testing/trusttunnel/server_h2_limits.json](../testing/trusttunnel/server_h2_limits.json)
 - [../testing/trusttunnel/server_h2_reality_remote.json](../testing/trusttunnel/server_h2_reality_remote.json)
 - [../testing/trusttunnel/server_h3.json](../testing/trusttunnel/server_h3.json)
 - [../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json)

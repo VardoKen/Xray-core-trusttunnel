@@ -13,6 +13,8 @@ import "common/protocol/server_spec.proto";
 message Account {
   string username = 1;
   string password = 2;
+  uint32 max_http2_conns = 3;
+  uint32 max_http3_conns = 4;
 }
 
 enum TransportProtocol {
@@ -69,4 +71,6 @@ message ServerConfig {
   uint32 connection_establishment_timeout_secs = 14;
   uint32 tcp_connections_timeout_secs = 15;
   uint32 udp_connections_timeout_secs = 16;
+  uint32 default_max_http2_conns_per_client = 17;
+  uint32 default_max_http3_conns_per_client = 18;
 }

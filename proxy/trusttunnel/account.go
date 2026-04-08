@@ -9,15 +9,19 @@ import (
 )
 
 type MemoryAccount struct {
-	Username  string
-	Password  string
-	BasicAuth string
+	Username      string
+	Password      string
+	BasicAuth     string
+	MaxHTTP2Conns uint32
+	MaxHTTP3Conns uint32
 }
 
 func (a *Account) AsAccount() (protocol.Account, error) {
 	ma := &MemoryAccount{
-		Username: a.GetUsername(),
-		Password: a.GetPassword(),
+		Username:      a.GetUsername(),
+		Password:      a.GetPassword(),
+		MaxHTTP2Conns: a.GetMaxHttp2Conns(),
+		MaxHTTP3Conns: a.GetMaxHttp3Conns(),
 	}
 	ma.BasicAuth = buildBasicAuthValue(ma.Username, ma.Password)
 	return ma, nil
@@ -42,8 +46,10 @@ func (a *MemoryAccount) ToProto() proto.Message {
 	}
 
 	return &Account{
-		Username: a.Username,
-		Password: a.Password,
+		Username:      a.Username,
+		Password:      a.Password,
+		MaxHttp2Conns: a.MaxHTTP2Conns,
+		MaxHttp3Conns: a.MaxHTTP3Conns,
 	}
 }
 

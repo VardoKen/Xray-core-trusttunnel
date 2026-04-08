@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xtls/xray-core/common"
@@ -39,20 +40,65 @@ func init() {
 }
 
 type Server struct {
-	config         *ServerConfig
-	users          *UserStore
-	policyManager  policy.Manager
-	statsManager   stats.Manager
-	newICMPSession func(options trustTunnelICMPSessionOptions) (trustTunnelICMPHandler, error)
+	config            *ServerConfig
+	users             *UserStore
+	policyManager     policy.Manager
+	statsManager      stats.Manager
+	connectionLimiter *trustTunnelConnectionLimiter
+	newICMPSession    func(options trustTunnelICMPSessionOptions) (trustTunnelICMPHandler, error)
 }
 
 type bufferedConn struct {
 	stat.Connection
 	reader *bufio.Reader
+	mu     sync.Mutex
+	guard  *trustTunnelConnectionGuard
+	auth   string
 }
 
 func (c *bufferedConn) Read(p []byte) (int, error) {
 	return c.reader.Read(p)
+}
+
+func (c *bufferedConn) bindConnectionGuard(basicAuth string, acquire func() *trustTunnelConnectionGuard) error {
+	if c == nil || acquire == nil {
+		return nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.guard != nil {
+		if c.auth != basicAuth {
+			return errors.New("trusttunnel authenticated HTTP/2 connection cannot switch credentials").AtWarning()
+		}
+		return nil
+	}
+
+	guard := acquire()
+	if guard == nil {
+		return errors.New("trusttunnel connection limit exceeded").AtInfo()
+	}
+
+	c.guard = guard
+	c.auth = basicAuth
+	return nil
+}
+
+func (c *bufferedConn) releaseConnectionGuard() {
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	guard := c.guard
+	c.guard = nil
+	c.auth = ""
+	c.mu.Unlock()
+
+	if guard != nil {
+		guard.Release()
+	}
 }
 
 type flushWriter struct {
@@ -106,6 +152,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	v := core.MustFromContext(ctx)
 
 	store := &UserStore{}
+	memoryUsers := make([]*protocol.MemoryUser, 0, len(config.Users))
 
 	for _, user := range config.Users {
 		u, err := user.ToMemoryUser()
@@ -115,13 +162,15 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		if err := store.Add(u); err != nil {
 			return nil, errors.New("failed to add trusttunnel user").Base(err).AtError()
 		}
+		memoryUsers = append(memoryUsers, u)
 	}
 
 	return &Server{
-		config:        config,
-		users:         store,
-		policyManager: v.GetFeature(policy.ManagerType()).(policy.Manager),
-		statsManager:  v.GetFeature(stats.ManagerType()).(stats.Manager),
+		config:            config,
+		users:             store,
+		policyManager:     v.GetFeature(policy.ManagerType()).(policy.Manager),
+		statsManager:      v.GetFeature(stats.ManagerType()).(stats.Manager),
+		connectionLimiter: newTrustTunnelConnectionLimiter(memoryUsers, config.GetDefaultMaxHttp2ConnsPerClient(), config.GetDefaultMaxHttp3ConnsPerClient()),
 	}, nil
 }
 
@@ -283,6 +332,68 @@ func forceCloseTrustTunnelConn(conn stdnet.Conn) error {
 	return conn.Close()
 }
 
+func trustTunnelBasicAuthFromUser(user *protocol.MemoryUser) string {
+	if user == nil {
+		return ""
+	}
+	acc, ok := user.Account.(*MemoryAccount)
+	if !ok || acc == nil {
+		return ""
+	}
+	return acc.BasicAuth
+}
+
+func (s *Server) acquireRequestConnectionGuard(user *protocol.MemoryUser, proto string, cleanupConn stat.Connection) (func(), error) {
+	if s.connectionLimiter == nil {
+		return func() {}, nil
+	}
+
+	basicAuth := trustTunnelBasicAuthFromUser(user)
+	if basicAuth == "" {
+		return nil, errors.New("trusttunnel authenticated user is missing connection limit key").AtWarning()
+	}
+
+	protocol := trustTunnelConnectionProtocolFromLabel(proto)
+	if proto == "H2" {
+		if conn, ok := cleanupConn.(*bufferedConn); ok {
+			if err := conn.bindConnectionGuard(basicAuth, func() *trustTunnelConnectionGuard {
+				return s.connectionLimiter.tryAcquire(basicAuth, protocol)
+			}); err != nil {
+				return nil, err
+			}
+			return func() {}, nil
+		}
+	}
+
+	guard := s.connectionLimiter.tryAcquire(basicAuth, protocol)
+	if guard == nil {
+		return nil, errors.New("trusttunnel connection limit exceeded").AtInfo()
+	}
+	return guard.Release, nil
+}
+
+func trustTunnelLogRejectedConnection(ctx context.Context, from interface{}, to string, user *protocol.MemoryUser, reason string) {
+	email := ""
+	if user != nil {
+		email = user.Email
+	}
+	log.Record(&log.AccessMessage{
+		From:   from,
+		To:     to,
+		Status: log.AccessRejected,
+		Reason: errors.New(reason),
+		Email:  email,
+	})
+	errors.LogInfo(ctx, reason)
+}
+
+func trustTunnelConnectionRejection(err error) (int, string) {
+	if err != nil && strings.Contains(err.Error(), "cannot switch credentials") {
+		return http.StatusBadRequest, "authenticated HTTP/2 connection cannot switch credentials\n"
+	}
+	return http.StatusTooManyRequests, "connection limit exceeded\n"
+}
+
 func (s *Server) processHTTP3(ctx context.Context, h3conn tcptransport.HTTP3RequestConn, conn stat.Connection, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound) error {
 	rawStream := h3conn.H3Stream()
 	if rawStream == nil {
@@ -424,6 +535,17 @@ Start:
 		return errors.New("malformed trusttunnel target: ", req.Host).Base(err).AtWarning()
 	}
 
+	releaseGuard, err := s.acquireRequestConnectionGuard(user, "H1", conn)
+	if err != nil {
+		statusCode, body := trustTunnelConnectionRejection(err)
+		writePlainResponse(conn, statusCode, http.StatusText(statusCode), body, map[string]string{
+			"Connection": "close",
+		})
+		trustTunnelLogRejectedConnection(ctx, conn.RemoteAddr(), req.Host, user, err.Error())
+		return err
+	}
+	defer releaseGuard()
+
 	ctx = log.ContextWithAccessMessage(ctx, &log.AccessMessage{
 		From:   conn.RemoteAddr(),
 		To:     dest,
@@ -467,6 +589,7 @@ Start:
 
 func (s *Server) processHTTP2(ctx context.Context, conn *bufferedConn, dispatcher routing.Dispatcher, inboundTemplate *session.Inbound, clientRandom string) error {
 	done := make(chan struct{})
+	defer conn.releaseConnectionGuard()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		s.serveHTTP2Request(conn, w, req, dispatcher, inboundTemplate, clientRandom)
@@ -685,11 +808,28 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 			writeH2Response(w, http.StatusForbidden, "udp is disabled\n", nil)
 			return
 		}
+
+		releaseGuard, err := s.acquireRequestConnectionGuard(user, proto, cleanupConn)
+		if err != nil {
+			statusCode, body := trustTunnelConnectionRejection(err)
+			writeH2Response(w, statusCode, body, nil)
+			trustTunnelLogRejectedConnection(ctx, req.RemoteAddr, req.Host, user, err.Error())
+			return
+		}
+		defer releaseGuard()
 		s.serveUDPMuxRequest(proto, ctx, w, req, dispatcher)
 		return
 	}
 
 	if isTrustTunnelICMPHost(req.Host) {
+		releaseGuard, err := s.acquireRequestConnectionGuard(user, proto, cleanupConn)
+		if err != nil {
+			statusCode, body := trustTunnelConnectionRejection(err)
+			writeH2Response(w, statusCode, body, nil)
+			trustTunnelLogRejectedConnection(ctx, req.RemoteAddr, req.Host, user, err.Error())
+			return
+		}
+		defer releaseGuard()
 		s.serveICMPMuxRequest(proto, ctx, w, req)
 		return
 	}
@@ -700,6 +840,15 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 		errors.LogWarningInner(ctx, err, "malformed trusttunnel "+strings.ToLower(proto)+" target")
 		return
 	}
+
+	releaseGuard, err := s.acquireRequestConnectionGuard(user, proto, cleanupConn)
+	if err != nil {
+		statusCode, body := trustTunnelConnectionRejection(err)
+		writeH2Response(w, statusCode, body, nil)
+		trustTunnelLogRejectedConnection(ctx, req.RemoteAddr, req.Host, user, err.Error())
+		return
+	}
+	defer releaseGuard()
 
 	ctx = log.ContextWithAccessMessage(ctx, &log.AccessMessage{
 		From:   req.RemoteAddr,

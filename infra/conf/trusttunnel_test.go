@@ -13,8 +13,10 @@ func TestTrustTunnelServerConfigBuildSupportsICMPSettings(t *testing.T) {
 	config, err := (&TrustTunnelServerConfig{
 		Users: []*TrustTunnelUserConfig{
 			{
-				Username: "u1",
-				Password: "p1",
+				Username:      "u1",
+				Password:      "p1",
+				MaxHTTP2Conns: 8,
+				MaxHTTP3Conns: 1,
 			},
 		},
 		AllowPrivateNetworkConnections:     true,
@@ -25,6 +27,8 @@ func TestTrustTunnelServerConfigBuildSupportsICMPSettings(t *testing.T) {
 		ConnectionEstablishmentTimeoutSecs: 30,
 		TCPConnectionsTimeoutSecs:          604800,
 		UDPConnectionsTimeoutSecs:          300,
+		DefaultMaxHTTP2ConnsPerClient:      16,
+		DefaultMaxHTTP3ConnsPerClient:      2,
 		ICMP: &TrustTunnelICMPConfig{
 			InterfaceName:            "eth0",
 			RequestTimeoutSecs:       9,
@@ -65,6 +69,26 @@ func TestTrustTunnelServerConfigBuildSupportsICMPSettings(t *testing.T) {
 	}
 	if built.GetUdpConnectionsTimeoutSecs() != 300 {
 		t.Fatalf("udpConnectionsTimeoutSecs = %d, want 300", built.GetUdpConnectionsTimeoutSecs())
+	}
+	if built.GetDefaultMaxHttp2ConnsPerClient() != 16 {
+		t.Fatalf("defaultMaxHttp2ConnsPerClient = %d, want 16", built.GetDefaultMaxHttp2ConnsPerClient())
+	}
+	if built.GetDefaultMaxHttp3ConnsPerClient() != 2 {
+		t.Fatalf("defaultMaxHttp3ConnsPerClient = %d, want 2", built.GetDefaultMaxHttp3ConnsPerClient())
+	}
+	memoryUser, err := built.GetUsers()[0].ToMemoryUser()
+	if err != nil {
+		t.Fatalf("ToMemoryUser() failed: %v", err)
+	}
+	trustTunnelAccount, ok := memoryUser.Account.(*trusttunnel.MemoryAccount)
+	if !ok {
+		t.Fatalf("user account type = %T, want *trusttunnel.MemoryAccount", memoryUser.Account)
+	}
+	if trustTunnelAccount.MaxHTTP2Conns != 8 {
+		t.Fatalf("user maxHTTP2Conns = %d, want 8", trustTunnelAccount.MaxHTTP2Conns)
+	}
+	if trustTunnelAccount.MaxHTTP3Conns != 1 {
+		t.Fatalf("user maxHTTP3Conns = %d, want 1", trustTunnelAccount.MaxHTTP3Conns)
 	}
 }
 

@@ -3,8 +3,10 @@ package scenarios
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	gotls "crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"io"
 	stdnet "net"
@@ -42,6 +44,7 @@ import (
 	"github.com/xtls/xray-core/testing/servers/tcp"
 	"github.com/xtls/xray-core/transport/internet"
 	ttls "github.com/xtls/xray-core/transport/internet/tls"
+	"golang.org/x/net/http2"
 	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -57,6 +60,18 @@ func trustTunnelTestServerUser(email, username, password string) *protocol.User 
 	return &protocol.User{
 		Email:   email,
 		Account: serial.ToTypedMessage(trustTunnelTestAccount(username, password)),
+	}
+}
+
+func trustTunnelTestServerUserWithLimits(email, username, password string, maxHTTP2, maxHTTP3 uint32) *protocol.User {
+	return &protocol.User{
+		Email: email,
+		Account: serial.ToTypedMessage(&trusttunnel.Account{
+			Username:      username,
+			Password:      password,
+			MaxHttp2Conns: maxHTTP2,
+			MaxHttp3Conns: maxHTTP3,
+		}),
 	}
 }
 
@@ -82,8 +97,8 @@ func trustTunnelTestOutbound(port net.Port, username, password string) *trusttun
 
 func trustTunnelTestReceiverConfig(port net.Port, stream *internet.StreamConfig) *proxyman.ReceiverConfig {
 	return &proxyman.ReceiverConfig{
-		PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(port)}},
-		Listen:   net.NewIPOrDomain(net.LocalHostIP),
+		PortList:       &net.PortList{Range: []*net.PortRange{net.SinglePortRange(port)}},
+		Listen:         net.NewIPOrDomain(net.LocalHostIP),
 		StreamSettings: stream,
 	}
 }
@@ -94,7 +109,7 @@ func trustTunnelTestInboundConfig(port net.Port, users ...*protocol.User) *core.
 
 func trustTunnelTestInboundConfigWithStream(port net.Port, stream *internet.StreamConfig, users ...*protocol.User) *core.InboundHandlerConfig {
 	return &core.InboundHandlerConfig{
-		Tag: "tt",
+		Tag:              "tt",
 		ReceiverSettings: serial.ToTypedMessage(trustTunnelTestReceiverConfig(port, stream)),
 		ProxySettings: serial.ToTypedMessage(&trusttunnel.ServerConfig{
 			Users:      users,
@@ -110,6 +125,88 @@ func trustTunnelTestTLSStreamConfig(cfg *ttls.Config) *internet.StreamConfig {
 			serial.ToTypedMessage(cfg),
 		},
 	}
+}
+
+type trustTunnelScenarioH2Tunnel struct {
+	rawConn  stdnet.Conn
+	reqBody  *io.PipeWriter
+	respBody io.ReadCloser
+}
+
+func (t *trustTunnelScenarioH2Tunnel) Read(p []byte) (int, error) {
+	return t.respBody.Read(p)
+}
+
+func (t *trustTunnelScenarioH2Tunnel) Write(p []byte) (int, error) {
+	return t.reqBody.Write(p)
+}
+
+func (t *trustTunnelScenarioH2Tunnel) Close() error {
+	if t.reqBody != nil {
+		_ = t.reqBody.Close()
+	}
+	if t.respBody != nil {
+		_ = t.respBody.Close()
+	}
+	if t.rawConn != nil {
+		return t.rawConn.Close()
+	}
+	return nil
+}
+
+func trustTunnelScenarioOpenH2Tunnel(serverPort net.Port, target string, username string, password string) (*trustTunnelScenarioH2Tunnel, int, error) {
+	rawConn, err := gotls.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", serverPort), &gotls.Config{
+		ServerName:         "localhost",
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"h2"},
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	req, err := http.NewRequest(http.MethodConnect, "http://"+target, nil)
+	if err != nil {
+		_ = rawConn.Close()
+		return nil, 0, err
+	}
+	req.Host = target
+	req.Header.Set("Host", target)
+	req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
+
+	pr, pw := io.Pipe()
+	req.Body = pr
+
+	h2Transport := http2.Transport{}
+	h2Conn, err := h2Transport.NewClientConn(rawConn)
+	if err != nil {
+		_ = pr.Close()
+		_ = pw.Close()
+		_ = rawConn.Close()
+		return nil, 0, err
+	}
+
+	resp, err := h2Conn.RoundTrip(req)
+	if err != nil {
+		_ = pr.Close()
+		_ = pw.Close()
+		_ = rawConn.Close()
+		return nil, 0, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		_ = pr.Close()
+		_ = pw.Close()
+		_ = rawConn.Close()
+		return nil, resp.StatusCode, fmt.Errorf("status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	return &trustTunnelScenarioH2Tunnel{
+		rawConn:  rawConn,
+		reqBody:  pw,
+		respBody: resp.Body,
+	}, resp.StatusCode, nil
 }
 
 func TestTrustTunnelCommanderAddRemoveUser(t *testing.T) {
@@ -300,6 +397,83 @@ func TestTrustTunnelOutboundHTTP3FallsBackToHTTP2TLS(t *testing.T) {
 	if err := testTCPConn(clientPort, 1024, 5*time.Second)(); err != nil {
 		t.Fatalf("traffic with http3->http2 fallback failed: %v", err)
 	}
+}
+
+func TestTrustTunnelInboundConnectionLimitHTTP2(t *testing.T) {
+	tcpServer := tcp.Server{MsgProcessor: xor}
+	dest, err := tcpServer.Start()
+	common.Must(err)
+	defer tcpServer.Close()
+
+	serverCert, _ := cert.MustGenerate(nil, cert.CommonName("localhost"))
+	serverPort := tcp.PickPort()
+
+	serverConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			trustTunnelTestInboundConfigWithStream(
+				serverPort,
+				trustTunnelTestTLSStreamConfig(&ttls.Config{
+					Certificate: []*ttls.Certificate{ttls.ParseCertificate(serverCert)},
+				}),
+				trustTunnelTestServerUserWithLimits("tt@example.com", "tt-user", "tt-pass", 1, 0),
+			),
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{ProxySettings: serial.ToTypedMessage(&freedom.Config{})},
+		},
+	}
+
+	servers, err := InitializeServerConfigs(serverConfig)
+	common.Must(err)
+	defer CloseAllServers(servers)
+
+	tunnel1, status, err := trustTunnelScenarioOpenH2Tunnel(serverPort, dest.NetAddr(), "tt-user", "tt-pass")
+	if err != nil {
+		t.Fatalf("failed to open first H2 tunnel: status=%d err=%v", status, err)
+	}
+	defer tunnel1.Close()
+
+	payload := make([]byte, 256)
+	if _, err := rand.Read(payload); err != nil {
+		t.Fatalf("failed to generate payload: %v", err)
+	}
+	if _, err := tunnel1.Write(payload); err != nil {
+		t.Fatalf("failed to write first tunnel payload: %v", err)
+	}
+	_ = tunnel1.rawConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	reply := make([]byte, len(payload))
+	if _, err := io.ReadFull(tunnel1, reply); err != nil {
+		t.Fatalf("failed to read first tunnel reply: %v", err)
+	}
+	_ = tunnel1.rawConn.SetReadDeadline(time.Time{})
+	if !bytes.Equal(reply, xor(payload)) {
+		t.Fatalf("first tunnel reply mismatch")
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	tunnel2, status, err := trustTunnelScenarioOpenH2Tunnel(serverPort, dest.NetAddr(), "tt-user", "tt-pass")
+	if err == nil {
+		tunnel2.Close()
+		t.Fatal("expected second H2 tunnel to be rejected while first slot is held")
+	}
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("second tunnel status = %d, want %d (err=%v)", status, http.StatusTooManyRequests, err)
+	}
+
+	tunnel1.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		tunnel3, status, err := trustTunnelScenarioOpenH2Tunnel(serverPort, dest.NetAddr(), "tt-user", "tt-pass")
+		if err == nil {
+			tunnel3.Close()
+			return
+		}
+		lastErr = fmt.Errorf("status=%d err=%w", status, err)
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("third tunnel after release failed: %v", lastErr)
 }
 
 func TestTrustTunnelOutboundAutoFallsBackToHTTP2TLS(t *testing.T) {
@@ -963,7 +1137,7 @@ func TestTrustTunnelOutboundTLSServerNameAuthorityVerify(t *testing.T) {
 			{
 				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
 					StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
-						ServerName: "example.com",
+						ServerName:        "example.com",
 						DisableSystemRoot: true,
 						Certificate: []*ttls.Certificate{{
 							Certificate: caCertPEM,
@@ -1044,7 +1218,7 @@ func TestTrustTunnelOutboundTLSVerifyPeerCertByName(t *testing.T) {
 				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
 					StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
 						VerifyPeerCertByName: []string{"example.com"},
-						DisableSystemRoot:   true,
+						DisableSystemRoot:    true,
 						Certificate: []*ttls.Certificate{{
 							Certificate: caCertPEM,
 							Usage:       ttls.Certificate_AUTHORITY_VERIFY,
@@ -1186,8 +1360,8 @@ func TestTrustTunnelInboundRejectUnknownSNI(t *testing.T) {
 				{
 					SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
 						StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
-							ServerName:              serverName,
-							PinnedPeerCertSha256:    [][]byte{serverHash[:]},
+							ServerName:           serverName,
+							PinnedPeerCertSha256: [][]byte{serverHash[:]},
 						}),
 					}),
 					ProxySettings: serial.ToTypedMessage(&trusttunnel.ClientConfig{

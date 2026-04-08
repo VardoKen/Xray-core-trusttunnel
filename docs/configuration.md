@@ -30,6 +30,11 @@ Validated payload paths:
 - ICMP multiplexing via `_icmp`
 - health-check path via `_check`
 
+Validated inbound policy controls:
+
+- per-client connection limits with separate H1/H2 and H3 counters
+- explicit `429 Too Many Requests` rejection when a limit is exceeded
+
 For `HTTP/2 over REALITY`, use `streamSettings.security = "reality"`. This path does not use the regular certificate-chain trust model in the same way as `HTTP/2 over TLS` or `HTTP/3 over TLS`.
 
 ## 2. Minimal vs recommended examples
@@ -430,15 +435,48 @@ Tracked example:
 
 - [../testing/trusttunnel/server_h3.json](../testing/trusttunnel/server_h3.json)
 
+### 7.4. Recommended inbound connection-limit policy
+
+Example additions inside `settings`:
+
+```json
+{
+  "users": [
+    { "email": "u1@example.com", "username": "u1", "password": "p1", "maxHttp2Conns": 1, "maxHttp3Conns": 2 },
+    { "email": "u2@example.com", "username": "u2", "password": "p2" }
+  ],
+  "defaultMaxHttp2ConnsPerClient": 2,
+  "defaultMaxHttp3ConnsPerClient": 4
+}
+```
+
+Rules:
+
+- `users[].maxHttp2Conns` and `users[].maxHttp3Conns` override the defaults when they are non-zero.
+- `0` means no per-user override. If both the per-user value and the default are `0`, that counter is unlimited.
+- HTTP/1 and HTTP/2 share the same connection-limit counter.
+- HTTP/3 uses a separate counter.
+- `_check` does not consume a slot.
+- ordinary CONNECT, `_udp2`, and `_icmp` consume a slot.
+- limit rejection is explicit: the server returns HTTP `429 Too Many Requests`.
+
+Tracked example:
+
+- [../testing/trusttunnel/server_h2_limits.json](../testing/trusttunnel/server_h2_limits.json)
+
 ## 8. Inbound field reference
 
 | Field | Type | Required | Meaning | Notes |
 | --- | --- | --- | --- | --- |
 | `users` | array | Yes | TrustTunnel users accepted by the server | Each user needs `username` and `password`; `email` is useful for identity and stats |
+| `users[].maxHttp2Conns` | integer | No | Per-user override for the shared HTTP/1 and HTTP/2 limit counter | `0` means use `defaultMaxHttp2ConnsPerClient`; if both are `0`, the counter is unlimited |
+| `users[].maxHttp3Conns` | integer | No | Per-user override for the HTTP/3 limit counter | `0` means use `defaultMaxHttp3ConnsPerClient`; if both are `0`, the counter is unlimited |
 | `hosts` | array | No | Compatibility host/certificate mapping | Do not treat it as a generic host-routing system |
 | `transports` | array | No | Allowed transport list | Do not treat it as a generic transport-routing system |
 | `rules` | array | No | Access rules evaluated before dispatch | See Section 5 |
 | `authFailureStatusCode` | integer | No | HTTP status used for auth failure | `407` is the common value |
+| `defaultMaxHttp2ConnsPerClient` | integer | No | Default limit for the shared HTTP/1 and HTTP/2 counter | `0` means unlimited unless overridden per user |
+| `defaultMaxHttp3ConnsPerClient` | integer | No | Default limit for the HTTP/3 counter | `0` means unlimited unless overridden per user |
 | `udp` | boolean | No | Enables UDP mux support | Required for `_udp2` |
 | `allowPrivateNetworkConnections` | boolean | No | Allows private-network ICMP targets | Applies to `_icmp` |
 | `icmp.interfaceName` | string | No | Outgoing interface name for ICMP | `_icmp` only |
@@ -450,6 +488,14 @@ Tracked example:
 | `tcpConnectionsTimeoutSecs` | integer | No | TCP connection idle timeout in seconds | Inbound timeout control |
 | `udpConnectionsTimeoutSecs` | integer | No | UDP session timeout in seconds | Inbound timeout control |
 | `ipv6Available` | boolean | No | Controls IPv6 availability for `_icmp` runtime | `_icmp` only |
+
+Limiter semantics:
+
+- The H1 and H2 paths share one counter because both use the same TCP-side tunnel admission path.
+- The H3 path uses a separate counter.
+- `_check` is exempt from connection limits.
+- `_udp2` and `_icmp` consume the same counter as ordinary CONNECT on the corresponding transport.
+- When the limit is exceeded, the server rejects the request with HTTP `429 Too Many Requests`.
 
 ## 9. Boundary between `settings` and `streamSettings`
 
@@ -508,6 +554,7 @@ Useful starting points:
 
 - [../testing/trusttunnel/client_h2.json](../testing/trusttunnel/client_h2.json)
 - [../testing/trusttunnel/server_h2.json](../testing/trusttunnel/server_h2.json)
+- [../testing/trusttunnel/server_h2_limits.json](../testing/trusttunnel/server_h2_limits.json)
 - [../testing/trusttunnel/server_h2_reality_remote.json](../testing/trusttunnel/server_h2_reality_remote.json)
 - [../testing/trusttunnel/server_h3.json](../testing/trusttunnel/server_h3.json)
 - [../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json)

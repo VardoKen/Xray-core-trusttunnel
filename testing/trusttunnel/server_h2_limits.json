@@ -1,0 +1,46 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "tt-in-h2-limits",
+      "listen": "0.0.0.0",
+      "port": 9443,
+      "protocol": "trusttunnel",
+      "settings": {
+        "users": [
+          { "email": "u1@example.com", "username": "u1", "password": "p1", "maxHttp2Conns": 1, "maxHttp3Conns": 2 },
+          { "email": "u2@example.com", "username": "u2", "password": "p2" }
+        ],
+        "hosts": [
+          {
+            "hostname": "vpn.example.com",
+            "certificateFile": "/path/to/server.crt",
+            "keyFile": "/path/to/server.key"
+          }
+        ],
+        "transports": ["http2"],
+        "rules": [],
+        "authFailureStatusCode": 407,
+        "defaultMaxHttp2ConnsPerClient": 2,
+        "defaultMaxHttp3ConnsPerClient": 4,
+        "udp": false
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": ["h2"],
+          "certificates": [
+            {
+              "certificateFile": "/path/to/server.crt",
+              "keyFile": "/path/to/server.key"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ]
+}

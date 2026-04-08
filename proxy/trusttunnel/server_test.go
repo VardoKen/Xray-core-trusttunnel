@@ -76,8 +76,9 @@ func newTestTrustTunnelServer(t *testing.T, cfg *ServerConfig) *Server {
 	}
 
 	return &Server{
-		config: cfg,
-		users:  store,
+		config:            cfg,
+		users:             store,
+		connectionLimiter: newTrustTunnelConnectionLimiter(store.GetAll(), cfg.GetDefaultMaxHttp2ConnsPerClient(), cfg.GetDefaultMaxHttp3ConnsPerClient()),
 		newICMPSession: func(trustTunnelICMPSessionOptions) (trustTunnelICMPHandler, error) {
 			return nil, goerrors.New("icmp unavailable in unit test")
 		},
@@ -187,6 +188,80 @@ func TestServeHTTP2CheckReturnsOKWithoutDispatch(t *testing.T) {
 	req := newTestConnectRequest("_check:443", buildBasicAuthValue("u1", "p1"))
 
 	server.serveHTTP2Request(nil, recorder, req, dispatcher, nil, "")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestProcessHTTP1ConnectConnectionLimitExceededReturnsTooManyRequests(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{
+		DefaultMaxHttp2ConnsPerClient: 1,
+	})
+	dispatcher := &testDispatcher{}
+
+	guard := server.connectionLimiter.tryAcquire(buildBasicAuthValue("u1", "p1"), trustTunnelConnectionProtocolHTTP2)
+	if guard == nil {
+		t.Fatal("expected pre-acquired connection guard")
+	}
+	defer guard.Release()
+
+	resp, err := runTestHTTP1ConnectRequest(t, server, "example.com:443", buildBasicAuthValue("u1", "p1"), dispatcher)
+	defer resp.Body.Close()
+
+	if err == nil || !strings.Contains(err.Error(), "connection limit exceeded") {
+		t.Fatalf("unexpected server error: %v", err)
+	}
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status: got %d, want %d", resp.StatusCode, http.StatusTooManyRequests)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestServeHTTP2ConnectConnectionLimitExceededReturnsTooManyRequests(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{
+		DefaultMaxHttp2ConnsPerClient: 1,
+	})
+	dispatcher := &testDispatcher{}
+	recorder := httptest.NewRecorder()
+	req := newTestConnectRequest("example.com:443", buildBasicAuthValue("u1", "p1"))
+
+	guard := server.connectionLimiter.tryAcquire(buildBasicAuthValue("u1", "p1"), trustTunnelConnectionProtocolHTTP2)
+	if guard == nil {
+		t.Fatal("expected pre-acquired connection guard")
+	}
+	defer guard.Release()
+
+	server.serveHTTP2Request(&bufferedConn{}, recorder, req, dispatcher, nil, "")
+
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusTooManyRequests)
+	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestServeHTTP2CheckIgnoresConnectionLimit(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{
+		DefaultMaxHttp2ConnsPerClient: 1,
+	})
+	dispatcher := &testDispatcher{}
+	recorder := httptest.NewRecorder()
+	req := newTestConnectRequest("_check:443", buildBasicAuthValue("u1", "p1"))
+
+	guard := server.connectionLimiter.tryAcquire(buildBasicAuthValue("u1", "p1"), trustTunnelConnectionProtocolHTTP2)
+	if guard == nil {
+		t.Fatal("expected pre-acquired connection guard")
+	}
+	defer guard.Release()
+
+	server.serveHTTP2Request(&bufferedConn{}, recorder, req, dispatcher, nil, "")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("unexpected status: got %d, want %d", recorder.Code, http.StatusOK)

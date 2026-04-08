@@ -143,10 +143,12 @@ func (c *TrustTunnelClientConfig) Build() (proto.Message, error) {
 }
 
 type TrustTunnelUserConfig struct {
-	Email    string `json:"email"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Level    byte   `json:"level"`
+	Email         string `json:"email"`
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	Level         byte   `json:"level"`
+	MaxHTTP2Conns uint32 `json:"maxHttp2Conns"`
+	MaxHTTP3Conns uint32 `json:"maxHttp3Conns"`
 }
 
 type TrustTunnelHostConfig struct {
@@ -180,6 +182,8 @@ type TrustTunnelServerConfig struct {
 	ConnectionEstablishmentTimeoutSecs uint32                   `json:"connectionEstablishmentTimeoutSecs"`
 	TCPConnectionsTimeoutSecs          uint32                   `json:"tcpConnectionsTimeoutSecs"`
 	UDPConnectionsTimeoutSecs          uint32                   `json:"udpConnectionsTimeoutSecs"`
+	DefaultMaxHTTP2ConnsPerClient      uint32                   `json:"defaultMaxHttp2ConnsPerClient"`
+	DefaultMaxHTTP3ConnsPerClient      uint32                   `json:"defaultMaxHttp3ConnsPerClient"`
 	UDP                                bool                     `json:"udp"`
 	ICMP                               *TrustTunnelICMPConfig   `json:"icmp"`
 }
@@ -198,6 +202,8 @@ func (c *TrustTunnelServerConfig) Build() (proto.Message, error) {
 		ConnectionEstablishmentTimeoutSecs: c.ConnectionEstablishmentTimeoutSecs,
 		TcpConnectionsTimeoutSecs:          c.TCPConnectionsTimeoutSecs,
 		UdpConnectionsTimeoutSecs:          c.UDPConnectionsTimeoutSecs,
+		DefaultMaxHttp2ConnsPerClient:      c.DefaultMaxHTTP2ConnsPerClient,
+		DefaultMaxHttp3ConnsPerClient:      c.DefaultMaxHTTP3ConnsPerClient,
 		EnableUdp:                          c.UDP,
 	}
 
@@ -219,8 +225,10 @@ func (c *TrustTunnelServerConfig) Build() (proto.Message, error) {
 			Level: uint32(u.Level),
 			Email: u.Email,
 			Account: serial.ToTypedMessage(&trusttunnel.Account{
-				Username: u.Username,
-				Password: u.Password,
+				Username:      u.Username,
+				Password:      u.Password,
+				MaxHttp2Conns: u.MaxHTTP2Conns,
+				MaxHttp3Conns: u.MaxHTTP3Conns,
 			}),
 		})
 	}

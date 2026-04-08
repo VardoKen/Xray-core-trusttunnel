@@ -124,6 +124,8 @@ type Account struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
 	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	MaxHttp2Conns uint32                 `protobuf:"varint,3,opt,name=max_http2_conns,json=maxHttp2Conns,proto3" json:"max_http2_conns,omitempty"`
+	MaxHttp3Conns uint32                 `protobuf:"varint,4,opt,name=max_http3_conns,json=maxHttp3Conns,proto3" json:"max_http3_conns,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -170,6 +172,20 @@ func (x *Account) GetPassword() string {
 		return x.Password
 	}
 	return ""
+}
+
+func (x *Account) GetMaxHttp2Conns() uint32 {
+	if x != nil {
+		return x.MaxHttp2Conns
+	}
+	return 0
+}
+
+func (x *Account) GetMaxHttp3Conns() uint32 {
+	if x != nil {
+		return x.MaxHttp3Conns
+	}
+	return 0
 }
 
 type Rule struct {
@@ -426,6 +442,8 @@ type ServerConfig struct {
 	ConnectionEstablishmentTimeoutSecs uint32                 `protobuf:"varint,14,opt,name=connection_establishment_timeout_secs,json=connectionEstablishmentTimeoutSecs,proto3" json:"connection_establishment_timeout_secs,omitempty"`
 	TcpConnectionsTimeoutSecs          uint32                 `protobuf:"varint,15,opt,name=tcp_connections_timeout_secs,json=tcpConnectionsTimeoutSecs,proto3" json:"tcp_connections_timeout_secs,omitempty"`
 	UdpConnectionsTimeoutSecs          uint32                 `protobuf:"varint,16,opt,name=udp_connections_timeout_secs,json=udpConnectionsTimeoutSecs,proto3" json:"udp_connections_timeout_secs,omitempty"`
+	DefaultMaxHttp2ConnsPerClient      uint32                 `protobuf:"varint,17,opt,name=default_max_http2_conns_per_client,json=defaultMaxHttp2ConnsPerClient,proto3" json:"default_max_http2_conns_per_client,omitempty"`
+	DefaultMaxHttp3ConnsPerClient      uint32                 `protobuf:"varint,18,opt,name=default_max_http3_conns_per_client,json=defaultMaxHttp3ConnsPerClient,proto3" json:"default_max_http3_conns_per_client,omitempty"`
 	unknownFields                      protoimpl.UnknownFields
 	sizeCache                          protoimpl.SizeCache
 }
@@ -572,14 +590,30 @@ func (x *ServerConfig) GetUdpConnectionsTimeoutSecs() uint32 {
 	return 0
 }
 
+func (x *ServerConfig) GetDefaultMaxHttp2ConnsPerClient() uint32 {
+	if x != nil {
+		return x.DefaultMaxHttp2ConnsPerClient
+	}
+	return 0
+}
+
+func (x *ServerConfig) GetDefaultMaxHttp3ConnsPerClient() uint32 {
+	if x != nil {
+		return x.DefaultMaxHttp3ConnsPerClient
+	}
+	return 0
+}
+
 var File_proxy_trusttunnel_config_proto protoreflect.FileDescriptor
 
 const file_proxy_trusttunnel_config_proto_rawDesc = "" +
 	"\n" +
-	"\x1eproxy/trusttunnel/config.proto\x12\x16xray.proxy.trusttunnel\x1a\x1acommon/protocol/user.proto\x1a!common/protocol/server_spec.proto\"A\n" +
+	"\x1eproxy/trusttunnel/config.proto\x12\x16xray.proxy.trusttunnel\x1a\x1acommon/protocol/user.proto\x1a!common/protocol/server_spec.proto\"\x91\x01\n" +
 	"\aAccount\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"U\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\x12&\n" +
+	"\x0fmax_http2_conns\x18\x03 \x01(\rR\rmaxHttp2Conns\x12&\n" +
+	"\x0fmax_http3_conns\x18\x04 \x01(\rR\rmaxHttp3Conns\"U\n" +
 	"\x04Rule\x12\x12\n" +
 	"\x04cidr\x18\x01 \x01(\tR\x04cidr\x12#\n" +
 	"\rclient_random\x18\x02 \x01(\tR\fclientRandom\x12\x14\n" +
@@ -601,7 +635,7 @@ const file_proxy_trusttunnel_config_proto_rawDesc = "" +
 	"\n" +
 	"enable_udp\x18\t \x01(\bR\tenableUdp\x12l\n" +
 	"\x1apost_quantum_group_enabled\x18\n" +
-	" \x01(\x0e2/.xray.proxy.trusttunnel.PostQuantumGroupSettingR\x17postQuantumGroupEnabled\"\xc9\a\n" +
+	" \x01(\x0e2/.xray.proxy.trusttunnel.PostQuantumGroupSettingR\x17postQuantumGroupEnabled\"\xdf\b\n" +
 	"\fServerConfig\x120\n" +
 	"\x05users\x18\x01 \x03(\v2\x1a.xray.common.protocol.UserR\x05users\x128\n" +
 	"\x05hosts\x18\x02 \x03(\v2\".xray.proxy.trusttunnel.ServerHostR\x05hosts\x12I\n" +
@@ -622,7 +656,9 @@ const file_proxy_trusttunnel_config_proto_rawDesc = "" +
 	"\x1cclient_listener_timeout_secs\x18\r \x01(\rR\x19clientListenerTimeoutSecs\x12Q\n" +
 	"%connection_establishment_timeout_secs\x18\x0e \x01(\rR\"connectionEstablishmentTimeoutSecs\x12?\n" +
 	"\x1ctcp_connections_timeout_secs\x18\x0f \x01(\rR\x19tcpConnectionsTimeoutSecs\x12?\n" +
-	"\x1cudp_connections_timeout_secs\x18\x10 \x01(\rR\x19udpConnectionsTimeoutSecs*3\n" +
+	"\x1cudp_connections_timeout_secs\x18\x10 \x01(\rR\x19udpConnectionsTimeoutSecs\x12I\n" +
+	"\"default_max_http2_conns_per_client\x18\x11 \x01(\rR\x1ddefaultMaxHttp2ConnsPerClient\x12I\n" +
+	"\"default_max_http3_conns_per_client\x18\x12 \x01(\rR\x1ddefaultMaxHttp3ConnsPerClient*3\n" +
 	"\x11TransportProtocol\x12\t\n" +
 	"\x05HTTP2\x10\x00\x12\t\n" +
 	"\x05HTTP3\x10\x01\x12\b\n" +
