@@ -255,6 +255,7 @@ Tracked example:
 - клиент пробует endpoint в том порядке, в котором они перечислены
 - после успешного подключения последующие соединения сначала пробуют последний успешный endpoint
 - если endpoint ломается до установления tunnel, клиент переходит к следующему endpoint
+- pre-establishment fail дополнительно уводит такой endpoint в короткий cooldown, чтобы следующее соединение не билось в него первым
 - если tunnel уже установлен, runtime-ошибка на нём не вызывает скрытого переключения на другой endpoint
 - `servers` нельзя смешивать с shorthand-полями `address` и `port` в одном outbound-конфиге
 - shorthand `address` + `port` остаётся валидным и трактуется как single-endpoint конфиг
@@ -367,7 +368,7 @@ Tracked rule example:
 | --- | --- | --- | --- | --- |
 | `address` | string | Да, если не задан `servers` | Адрес TrustTunnel-сервера | IP или домен; shorthand для single-endpoint конфига |
 | `port` | integer | Да, если не задан `servers` | Порт TrustTunnel-сервера | В примерах обычно `9443` |
-| `servers` | array | Да, если не заданы `address` и `port` | Упорядоченный список TrustTunnel endpoint | Последовательный fallback в указанном порядке; не смешивать с `address` и `port` |
+| `servers` | array | Да, если не заданы `address` и `port` | Упорядоченный список TrustTunnel endpoint | Последовательный fallback, предпочтение последнего успешного endpoint и короткий cooldown после pre-establishment fail; не смешивать с `address` и `port` |
 | `username` | string | Да | Имя пользователя для TrustTunnel auth | Должно совпадать с сервером |
 | `password` | string | Да | Пароль для TrustTunnel auth | Должен совпадать с сервером |
 | `hostname` | string | Да | Логическое имя хоста TrustTunnel | Для REALITY должно совпадать с `realitySettings.serverName` |

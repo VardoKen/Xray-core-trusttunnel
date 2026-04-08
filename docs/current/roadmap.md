@@ -1,7 +1,7 @@
 # TrustTunnel / Xray-Core — roadmap
 
 Статус: current
-Дата фиксации: 2026-04-07
+Дата фиксации: 2026-04-09
 База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path, outbound clientRandom, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, client-side `postQuantumGroupEnabled`, `hasIpv6` domain-target guard, explicit `antiDpi` reject, config-build validator, common outbound/inbound Xray integration scenarios, dynamic user management и clean-head live traffic matrix
 Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom, `_icmp` protocol/runtime surface, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, common outbound integration coverage, inbound `sniffing + routeOnly`, `_icmp` routing/policy/stats plumbing и dynamic user management
 Не использовать для: фиксации уже закрытых багов и исторической хронологии
@@ -122,8 +122,22 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - расширять validator только там, где комбинация действительно должна fail-fast на config-build этапе.
 - после каждого merge/rebase на upstream main повторять non-TrustTunnel live regression audit минимум по `direct`, `tun`, `vless + tls`, `vless + reality`, `hysteria`; одноразовый throughput-noise не считать регрессией без повторяемого функционального расхождения.
 
+### 3.5. Multi-endpoint outbound policy
+
+Уже реализовано локальным runtime-слоем:
+- ordered outbound `servers[]` без схлопывания до одного endpoint;
+- единый fallback до establish для stream / UDP / ICMP path;
+- preference последнего успешно established endpoint;
+- короткий cooldown после pre-establishment fail, чтобы следующий connect временно не бился в тот же проблемный endpoint первым.
+
+Что остаётся дальше:
+- решить, насколько глубоко форк должен повторять original client endpoint policy;
+- ближайший следующий выбор архитектуры — оставаться на deterministic ordered fallback или добавлять delayed racing / active probing между transport и endpoint path;
+- не смешивать этот блок с уже закрытыми H2/H3 transport gaps, `_icmp`, REALITY, validator или generic Xray integration.
+
 ## 5. Порядок выполнения
 
-1. держать `streamSettings`-нормализацию синхронной с upstream generic TLS / REALITY / outbound plumbing
-2. держать compatibility matrix и validator синхронными с новыми integration-комбинациями
-3. добирать dedicated inbound / generic TLS coverage только при появлении новых product-level требований
+1. добить следующий этап multi-endpoint outbound policy: определить, нужен ли original-style delayed racing / active probing поверх уже готовых `servers[]` fallback и cooldown
+2. держать `streamSettings`-нормализацию синхронной с upstream generic TLS / REALITY / outbound plumbing
+3. держать compatibility matrix и validator синхронными с новыми integration-комбинациями
+4. добирать dedicated inbound / generic TLS coverage только при появлении новых product-level требований

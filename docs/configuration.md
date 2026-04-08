@@ -255,6 +255,7 @@ Rules:
 - the client tries endpoints in the listed order
 - after one endpoint succeeds, subsequent connections try that last successful endpoint first
 - if one endpoint fails before the tunnel is established, the client moves to the next endpoint
+- a pre-establishment failure also puts that endpoint into a short cooldown window before it is tried first again
 - once a tunnel is established, runtime errors on that tunnel do not trigger a hidden switch to another endpoint
 - do not combine `servers` with the shorthand `address` and `port` in the same outbound config
 - the shorthand `address` + `port` remains valid and is treated as a single-endpoint config
@@ -367,7 +368,7 @@ Tracked rule example:
 | --- | --- | --- | --- | --- |
 | `address` | string | Yes, if `servers` is omitted | TrustTunnel server address | IP or domain; shorthand for single-endpoint configs |
 | `port` | integer | Yes, if `servers` is omitted | TrustTunnel server port | Usually `9443` in examples |
-| `servers` | array | Yes, if `address` and `port` are omitted | Ordered TrustTunnel endpoint list | Sequential fallback in listed order; do not combine with `address` and `port` |
+| `servers` | array | Yes, if `address` and `port` are omitted | Ordered TrustTunnel endpoint list | Sequential fallback, last-successful endpoint preference, and a short pre-establishment failure cooldown; do not combine with `address` and `port` |
 | `username` | string | Yes | Username for TrustTunnel auth | Must match server user |
 | `password` | string | Yes | Password for TrustTunnel auth | Must match server user |
 | `hostname` | string | Yes | Logical TrustTunnel host name | For REALITY, match `realitySettings.serverName` |

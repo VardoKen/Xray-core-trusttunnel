@@ -12,7 +12,7 @@ The goal of the fork is straightforward: keep TrustTunnel usable as a maintained
 - HTTP/2 over REALITY
 - HTTP/3 over TLS
 - `transport: "auto"` with HTTP/3-first selection and HTTP/2 fallback
-- Ordered outbound `servers[]` lists with sequential fallback and last-successful endpoint preference
+- Ordered outbound `servers[]` lists with sequential fallback, last-successful endpoint preference, and short cooldown after pre-establishment failure
 - Per-client inbound connection limits with separate H1/H2 and H3 counters
 - TCP tunneling
 - UDP multiplexing via `_udp2`

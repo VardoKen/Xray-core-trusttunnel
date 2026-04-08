@@ -12,7 +12,7 @@ English version: [README.md](README.md)
 - HTTP/2 over REALITY
 - HTTP/3 over TLS
 - `transport: "auto"` с выбором HTTP/3-first и fallback на HTTP/2
-- упорядоченные outbound-списки `servers[]` с последовательным fallback и предпочтением последнего успешного endpoint
+- упорядоченные outbound-списки `servers[]` с последовательным fallback, предпочтением последнего успешного endpoint и коротким cooldown после pre-establishment fail
 - лимиты входящих соединений по клиентам с отдельными счётчиками для H1/H2 и H3
 - TCP-туннелирование
 - UDP-мультиплексирование через `_udp2`

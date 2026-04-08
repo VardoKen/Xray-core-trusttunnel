@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — подтверждённые проверки и границы тестирования
 
 Статус: current
-Дата фиксации: 2026-04-07
-Коммит состояния: `4bfd8ac9`
+Дата фиксации: 2026-04-09
+Коммит состояния: `e749988e`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -71,6 +71,21 @@
 
 Практическая граница:
 - `metadataOnly` не образует отдельный positive TLS SNI routing-path для TrustTunnel: current `app/dispatcher` в режиме `metadataOnly=true` возвращает только metadata sniffers и не выполняет TLS content sniffing; отсутствие TLS-SNI override в этом режиме не считать отдельным TrustTunnel bug.
+
+### 1.2. Multi-endpoint outbound fallback / preference / cooldown
+
+Подтверждено локально на 2026-04-09:
+- `go test ./proxy/trusttunnel -run 'Test(ClientServerAttemptsPreferLastSuccessfulEndpoint|ClientServerAttemptsMoveCoolingDownEndpointToBack|ClientServerAttemptsCoolingDownPreferredEndpointTemporarilyUsesNextServer|ConnectUDPTunnelPrefersLastSuccessfulServer|ClientProcessFallsBackToNextConfiguredServer)$' -count=1`
+- `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound ./app/proxyman/outbound -count=1`
+- `$env:GOFLAGS='-buildvcs=false'; go test ./testing/scenarios -run 'TestTrustTunnel' -count=1 -timeout 90m -v`
+- `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main`
+
+Что именно подтверждено:
+- ordered `servers[]` реально используется runtime-слоем как список endpoint, а не схлопывается до одного адреса;
+- `TestTrustTunnelOutboundFallsBackToNextConfiguredServerTLS` в `testing/scenarios` подтверждает фактический fallback на следующий endpoint в live local scenario;
+- `TestClientServerAttemptsPreferLastSuccessfulEndpoint` подтверждает preference последнего успешно established endpoint на следующих соединениях;
+- `TestClientServerAttemptsMoveCoolingDownEndpointToBack` и `TestClientServerAttemptsCoolingDownPreferredEndpointTemporarilyUsesNextServer` подтверждают короткий cooldown после pre-establishment fail и возврат endpoint в нормальный порядок после истечения cooldown;
+- `TestConnectUDPTunnelPrefersLastSuccessfulServer` подтверждает, что runtime preference применяется не только к stream path, но и к UDP tunnel establish.
 
 ## 2. Подтверждённые runtime-проверки
 
