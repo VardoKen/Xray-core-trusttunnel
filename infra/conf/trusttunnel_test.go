@@ -117,6 +117,25 @@ func TestTrustTunnelClientConfigBuildSupportsPostQuantumGroupEnabled(t *testing.
 	}
 }
 
+func TestTrustTunnelClientConfigBuildSupportsAutoTransport(t *testing.T) {
+	config, err := (&TrustTunnelClientConfig{
+		Address:   &Address{Address: net.ParseAddress("127.0.0.1")},
+		Port:      9443,
+		Username:  "u1",
+		Password:  "p1",
+		Hostname:  "www.google.com",
+		Transport: "auto",
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+
+	built := config.(*trusttunnel.ClientConfig)
+	if built.GetTransport() != trusttunnel.TransportProtocol_AUTO {
+		t.Fatalf("transport = %v, want %v", built.GetTransport(), trusttunnel.TransportProtocol_AUTO)
+	}
+}
+
 func TestConfigBuildRejectsTrustTunnelHTTP3RealityOutbound(t *testing.T) {
 	raw := json.RawMessage(`{
 		"address": "127.0.0.1",
@@ -240,6 +259,58 @@ func TestConfigBuildAllowsTrustTunnelAntiDpiOnHTTP2Reality(t *testing.T) {
 						SpiderX:    "/",
 					},
 				},
+			},
+		},
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+}
+
+func TestConfigBuildAllowsTrustTunnelAutoAntiDpiOnHTTP2TLS(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "127.0.0.1",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "auto",
+		"antiDpi": true
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security:    "tls",
+					TLSSettings: &TLSConfig{},
+				},
+			},
+		},
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+}
+
+func TestConfigBuildAllowsTrustTunnelAutoPostQuantumWithoutOutboundSecurity(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "127.0.0.1",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "auto",
+		"postQuantumGroupEnabled": true
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
 			},
 		},
 	}).Build()

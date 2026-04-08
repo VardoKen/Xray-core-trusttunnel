@@ -288,32 +288,38 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		return c.processUDP(ctx, link, dialer, account, ob.Target)
 	}
 
-	if c.config.GetTransport() == TransportProtocol_HTTP3 {
-		if c.config.GetAntiDpi() {
-			return errors.New("trusttunnel antiDpi is supported only for http2 over TLS or REALITY: http3 has no compatible QUIC anti-DPI runtime").AtWarning()
-		}
-		if trustTunnelHTTP3RealityUnsupported(dialer) {
-			return errors.New("trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only").AtWarning()
-		}
-		serverAddr := c.server.Destination.NetAddr()
-		if serverAddr == "" {
-			return errors.New("invalid trusttunnel server address")
-		}
-
-		tunnelConn, err := connectHTTP3(ctx, serverAddr, host, account, c.config)
-		if err != nil {
-			return errors.New("failed to establish trusttunnel HTTP/3 CONNECT").Base(err).AtWarning()
-		}
-		defer tunnelConn.Close()
-		return runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
-	}
-
 	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
 	updatedCtx, tlsHandledByStreamSettings, err := trustTunnelContextWithTransportSecurityOverrides(ctx, dialer, c.config)
 	if err != nil {
 		return err
 	}
 	ctx = updatedCtx
+
+	attemptHTTP3, skipHTTP3Reason, err := trustTunnelHTTP3AttemptPolicy(c.config, dialer)
+	if err != nil {
+		return err
+	}
+	if attemptHTTP3 {
+		serverAddr := c.server.Destination.NetAddr()
+		if serverAddr == "" {
+			return errors.New("invalid trusttunnel server address")
+		}
+
+		http3Ctx, cancelHTTP3 := trustTunnelContextWithHTTP3FallbackTimeout(ctx, c.config)
+		tunnelConn, err := trustTunnelConnectHTTP3Func(http3Ctx, serverAddr, host, account, c.config)
+		cancelHTTP3()
+		if err != nil {
+			if !trustTunnelTransportAllowsHTTP2Fallback(c.config) || !trustTunnelHTTP3FallbackEligible(err) {
+				return errors.New("failed to establish trusttunnel HTTP/3 CONNECT").Base(err).AtWarning()
+			}
+			errors.LogWarning(ctx, "trusttunnel HTTP/3 CONNECT failed; falling back to HTTP/2 path: ", err)
+		} else {
+			defer tunnelConn.Close()
+			return runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
+		}
+	} else if c.config.GetTransport() == TransportProtocol_AUTO && skipHTTP3Reason != "" {
+		errors.LogInfo(ctx, "trusttunnel transport=auto bypasses HTTP/3: ", skipHTTP3Reason)
+	}
 
 	rawConn, err := dialer.Dial(ctx, c.server.Destination)
 	if err != nil {
@@ -348,15 +354,13 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	var tunnelConn io.ReadWriteCloser
 
 	switch {
-	case c.config.GetTransport() == TransportProtocol_HTTP2 && trustTunnelShouldUseHTTP2(securityState):
+	case trustTunnelShouldUseHTTP2(securityState):
 		if securityState.UsesReality && securityState.NegotiatedProtocol == "" {
-			errors.LogInfo(ctx, "trusttunnel transport=http2 requested with REALITY and empty negotiated ALPN; using HTTP/2 preface path")
+			errors.LogInfo(ctx, "trusttunnel HTTP/2 path selected with REALITY and empty negotiated ALPN; using HTTP/2 preface path")
 		}
 		tunnelConn, err = connectHTTP2(conn, req)
-	case c.config.GetTransport() == TransportProtocol_HTTP2 && !trustTunnelShouldUseHTTP2(securityState):
-		errors.LogWarning(ctx, "trusttunnel transport=http2 requested, but negotiated protocol is [", securityState.NegotiatedProtocol, "], falling back to HTTP/1.1 CONNECT")
-		tunnelConn, err = connectHTTP1(conn, req)
 	default:
+		errors.LogWarning(ctx, "trusttunnel HTTP/2-compatible path requested, but negotiated protocol is [", securityState.NegotiatedProtocol, "], falling back to HTTP/1.1 CONNECT")
 		tunnelConn, err = connectHTTP1(conn, req)
 	}
 

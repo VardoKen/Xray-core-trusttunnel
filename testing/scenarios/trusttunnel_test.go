@@ -235,6 +235,140 @@ func TestTrustTunnelCommanderAddRemoveUser(t *testing.T) {
 	}
 }
 
+func TestTrustTunnelOutboundHTTP3FallsBackToHTTP2TLS(t *testing.T) {
+	tcpServer := tcp.Server{MsgProcessor: xor}
+	dest, err := tcpServer.Start()
+	common.Must(err)
+	defer tcpServer.Close()
+
+	serverCert, serverHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
+	serverPort := tcp.PickPort()
+	clientPort := tcp.PickPort()
+
+	serverConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			trustTunnelTestInboundConfigWithStream(
+				serverPort,
+				trustTunnelTestTLSStreamConfig(&ttls.Config{
+					Certificate: []*ttls.Certificate{ttls.ParseCertificate(serverCert)},
+				}),
+				trustTunnelTestServerUser("tt@example.com", "tt-user", "tt-pass"),
+			),
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{ProxySettings: serial.ToTypedMessage(&freedom.Config{})},
+		},
+	}
+
+	clientConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			{
+				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+				}),
+				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+					Address:  net.NewIPOrDomain(dest.Address),
+					Port:     uint32(dest.Port),
+					Networks: []net.Network{net.Network_TCP},
+				}),
+			},
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{
+				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+					StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
+						ServerName:           "localhost",
+						PinnedPeerCertSha256: [][]byte{serverHash[:]},
+					}),
+				}),
+				ProxySettings: serial.ToTypedMessage(&trusttunnel.ClientConfig{
+					Server:           trustTunnelTestServerEndpoint(serverPort, "tt-user", "tt-pass"),
+					Hostname:         "localhost",
+					Transport:        trusttunnel.TransportProtocol_HTTP3,
+					HasIpv6:          true,
+					SkipVerification: true,
+				}),
+			},
+		},
+	}
+
+	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+	common.Must(err)
+	defer CloseAllServers(servers)
+
+	if err := testTCPConn(clientPort, 1024, 5*time.Second)(); err != nil {
+		t.Fatalf("traffic with http3->http2 fallback failed: %v", err)
+	}
+}
+
+func TestTrustTunnelOutboundAutoFallsBackToHTTP2TLS(t *testing.T) {
+	tcpServer := tcp.Server{MsgProcessor: xor}
+	dest, err := tcpServer.Start()
+	common.Must(err)
+	defer tcpServer.Close()
+
+	serverCert, serverHash := cert.MustGenerate(nil, cert.CommonName("localhost"))
+	serverPort := tcp.PickPort()
+	clientPort := tcp.PickPort()
+
+	serverConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			trustTunnelTestInboundConfigWithStream(
+				serverPort,
+				trustTunnelTestTLSStreamConfig(&ttls.Config{
+					Certificate: []*ttls.Certificate{ttls.ParseCertificate(serverCert)},
+				}),
+				trustTunnelTestServerUser("tt@example.com", "tt-user", "tt-pass"),
+			),
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{ProxySettings: serial.ToTypedMessage(&freedom.Config{})},
+		},
+	}
+
+	clientConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			{
+				ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+					PortList: &net.PortList{Range: []*net.PortRange{net.SinglePortRange(clientPort)}},
+					Listen:   net.NewIPOrDomain(net.LocalHostIP),
+				}),
+				ProxySettings: serial.ToTypedMessage(&dokodemo.Config{
+					Address:  net.NewIPOrDomain(dest.Address),
+					Port:     uint32(dest.Port),
+					Networks: []net.Network{net.Network_TCP},
+				}),
+			},
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{
+				SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
+					StreamSettings: trustTunnelTestTLSStreamConfig(&ttls.Config{
+						ServerName:           "localhost",
+						PinnedPeerCertSha256: [][]byte{serverHash[:]},
+					}),
+				}),
+				ProxySettings: serial.ToTypedMessage(&trusttunnel.ClientConfig{
+					Server:           trustTunnelTestServerEndpoint(serverPort, "tt-user", "tt-pass"),
+					Hostname:         "localhost",
+					Transport:        trusttunnel.TransportProtocol_AUTO,
+					HasIpv6:          true,
+					SkipVerification: true,
+				}),
+			},
+		},
+	}
+
+	servers, err := InitializeServerConfigs(serverConfig, clientConfig)
+	common.Must(err)
+	defer CloseAllServers(servers)
+
+	if err := testTCPConn(clientPort, 1024, 5*time.Second)(); err != nil {
+		t.Fatalf("traffic with auto->http2 fallback failed: %v", err)
+	}
+}
+
 func TestTrustTunnelOutboundProxySettings(t *testing.T) {
 	tcpServer := tcp.Server{MsgProcessor: xor}
 	dest, err := tcpServer.Start()

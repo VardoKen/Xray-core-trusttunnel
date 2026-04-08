@@ -17,6 +17,12 @@ TrustTunnel доступен и как:
 - HTTP/2 over REALITY
 - HTTP/3 over TLS
 
+Подтверждённые режимы выбора transport:
+
+- `transport: "http2"`
+- `transport: "http3"`
+- `transport: "auto"`
+
 Подтверждённые payload-path:
 
 - TCP CONNECT
@@ -44,9 +50,15 @@ TrustTunnel доступен и как:
 | HTTP/3 over TLS | Поддержано | H3 path поверх QUIC |
 | HTTP/3 over REALITY | Не поддержано | Текущий REALITY runtime построен вокруг TCP stream layer |
 
+Поведение выбора transport:
+
+- `transport: "http2"` жёстко выбирает HTTP/2 path.
+- `transport: "http3"` предпочитает HTTP/3 и переходит на HTTP/2 при transport-level ошибках поднятия H3 tunnel.
+- `transport: "auto"` предпочитает HTTP/3, если конфиг совместим с QUIC path, переходит на HTTP/2 при transport-level ошибках H3 и сразу идёт в HTTP/2, когда конфиг требует TCP-based path.
+
 Дополнительные ограничения:
 
-- `antiDpi=true` поддерживается только для `HTTP/2 over TLS` и `HTTP/2 over REALITY`.
+- `antiDpi=true` поддерживается на `HTTP/2 over TLS` и `HTTP/2 over REALITY`. При `transport: "auto"` оно сразу переводит клиент в HTTP/2 path.
 - UDP domain targets не описываются как поддержанный product path. Для UDP нужно использовать IP-назначения.
 - При `hasIpv6=false` для domain targets нужен `targetStrategy: "useipv4"` или `"forceipv4"`.
 
@@ -189,13 +201,35 @@ Tracked example:
 
 - использовать `transport: "http3"`
 - использовать TLS, а не REALITY
+- generic `tlsSettings` остаются authoritative для verify surface и host identity
 - ALPN должен быть `h3`
 
 Tracked example:
 
 - рекомендуемый: [../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h3_clientrandom_allow.json)
 
-### 4.4. UDP outbound
+### 4.4. Автоматический выбор transport
+
+Используй:
+
+```json
+"transport": "auto"
+```
+
+Поведение:
+
+- клиент сначала пробует HTTP/3, если конфиг совместим с QUIC path
+- если HTTP/3 CONNECT ломается на transport stage, тот же tunnel перезапускается через HTTP/2
+- если включен `antiDpi=true`, клиент пропускает HTTP/3 и сразу идёт в HTTP/2 path
+- если конфиг использует REALITY, клиент пропускает HTTP/3 и сразу идёт в HTTP/2 path
+
+Этот режим подтверждён для:
+
+- TCP over TLS
+- TCP over REALITY
+- UDP mux over TLS
+
+### 4.5. UDP outbound
 
 Нужно задать:
 
@@ -297,7 +331,7 @@ Tracked rule example:
 | `username` | string | Да | Имя пользователя для TrustTunnel auth | Должно совпадать с сервером |
 | `password` | string | Да | Пароль для TrustTunnel auth | Должен совпадать с сервером |
 | `hostname` | string | Да | Логическое имя хоста TrustTunnel | Для REALITY должно совпадать с `realitySettings.serverName` |
-| `transport` | string | Да | Выбор транспорта | `http2` или `http3` |
+| `transport` | string | Да | Выбор транспорта | `http2`, `http3` или `auto` |
 | `udp` | boolean | Нет | Включает UDP mux path | Использовать IP-назначения |
 | `skipVerification` | boolean | Нет | Разрешает insecure certificate verification behavior | Не смешивать двусмысленно с generic verify settings |
 | `certificatePem` | string | Нет | Inline trusted PEM certificate | Только для TLS-path |
@@ -305,7 +339,7 @@ Tracked rule example:
 | `clientRandom` | string | Нет, но крайне рекомендуется | Формирует ClientHello random для `client_random` rules | Лучше задавать явно, если нет причины этого не делать |
 | `hasIpv6` | boolean | Нет | Управляет разрешением IPv6-целей | `false` режет literal IPv6 и требует IPv4-only target strategy для domain targets |
 | `postQuantumGroupEnabled` | boolean | Нет | Включает post-quantum group profile там, где он поддержан | Runtime-active для H2 TLS, H2 REALITY и H3 TLS |
-| `antiDpi` | boolean | Нет | Включает anti-DPI поведение через split ClientHello | Поддержано только для `HTTP/2 over TLS` или `HTTP/2 over REALITY`; отклоняется для `http3` и отсутствующих совместимых `streamSettings` |
+| `antiDpi` | boolean | Нет | Включает anti-DPI поведение через split ClientHello | Поддержано на `HTTP/2 over TLS` и `HTTP/2 over REALITY`; `auto` переводит трафик сразу в HTTP/2; явный `http3` отклоняется |
 
 ## 7. Быстрый старт для inbound
 
@@ -419,7 +453,7 @@ Tracked example:
 
 ## 9. Граница между `settings` и `streamSettings`
 
-Для non-H3 path authoritative являются generic Xray `streamSettings`.
+Generic Xray `streamSettings` authoritative для transport security TrustTunnel. H3 использует отдельный QUIC CONNECT path, но verify surface и host identity всё равно берутся из effective generic `streamSettings`.
 
 Это означает:
 
@@ -449,12 +483,12 @@ Validator режет эти комбинации ещё до runtime:
 - inbound `sniffing + routeOnly`
 - inbound generic TLS `rejectUnknownSni`
 - динамическое управление inbound-пользователями через `HandlerService`
-- generic TLS-опции на non-H3 path:
+- generic TLS-опции на HTTP/2 и HTTP/3 TLS path:
   - `serverName`
   - custom-CA verify
   - `VerifyPeerCertByName`
   - `PinnedPeerCertSha256`
-  - `Fingerprint`
+- generic TLS `Fingerprint` на HTTP/2 TLS path
 
 Примечание для Windows:
 
@@ -463,7 +497,7 @@ Validator режет эти комбинации ещё до runtime:
 ## 11. Неподдержанные или guarded-комбинации
 
 - `HTTP/3 over REALITY` не поддерживается, потому что текущий REALITY runtime построен вокруг TCP stream layer.
-- `antiDpi=true` ограничен только `HTTP/2 over TLS` и `HTTP/2 over REALITY`, потому что текущая реализация умеет делать split только первой TCP-based записи ClientHello.
+- `antiDpi=true` ограничен только `HTTP/2 over TLS` и `HTTP/2 over REALITY`, потому что текущая реализация умеет делать split только первой TCP-based записи ClientHello. `transport: "auto"` обрабатывает это через прямой выбор HTTP/2.
 - UDP domain targets не являются документированным product path.
 - `settings.hosts[]` не является самостоятельным generic host-routing layer.
 - `settings.transports[]` не является самостоятельным generic transport-routing layer.

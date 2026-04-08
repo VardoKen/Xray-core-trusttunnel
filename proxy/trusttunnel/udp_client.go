@@ -122,26 +122,35 @@ func (c *Client) processUDP(ctx context.Context, link *transport.Link, dialer in
 }
 
 func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer, account *MemoryAccount) (io.ReadWriteCloser, error) {
-	if c.config.GetTransport() == TransportProtocol_HTTP3 {
-		if trustTunnelHTTP3RealityUnsupported(dialer) {
-			return nil, errors.New("trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only").AtWarning()
-		}
+	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
+	ctx, tlsHandledByStreamSettings, err := trustTunnelContextWithTransportSecurityOverrides(ctx, dialer, c.config)
+	if err != nil {
+		return nil, err
+	}
+
+	attemptHTTP3, skipHTTP3Reason, err := trustTunnelHTTP3AttemptPolicy(c.config, dialer)
+	if err != nil {
+		return nil, err
+	}
+	if attemptHTTP3 {
 		serverAddr := c.server.Destination.NetAddr()
 		if serverAddr == "" {
 			return nil, errors.New("invalid trusttunnel server address")
 		}
 
-		tunnelConn, err := connectHTTP3(ctx, serverAddr, trustTunnelUDPPseudoHost, account, c.config)
+		http3Ctx, cancelHTTP3 := trustTunnelContextWithHTTP3FallbackTimeout(ctx, c.config)
+		tunnelConn, err := trustTunnelConnectHTTP3Func(http3Ctx, serverAddr, trustTunnelUDPPseudoHost, account, c.config)
+		cancelHTTP3()
 		if err != nil {
-			return nil, errors.New("failed to establish trusttunnel HTTP/3 UDP CONNECT").Base(err).AtWarning()
+			if !trustTunnelTransportAllowsHTTP2Fallback(c.config) || !trustTunnelHTTP3FallbackEligible(err) {
+				return nil, errors.New("failed to establish trusttunnel HTTP/3 UDP CONNECT").Base(err).AtWarning()
+			}
+			errors.LogWarning(ctx, "trusttunnel HTTP/3 UDP CONNECT failed; falling back to HTTP/2 path: ", err)
+		} else {
+			return tunnelConn, nil
 		}
-		return tunnelConn, nil
-	}
-
-	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
-	ctx, tlsHandledByStreamSettings, err := trustTunnelContextWithTransportSecurityOverrides(ctx, dialer, c.config)
-	if err != nil {
-		return nil, err
+	} else if c.config.GetTransport() == TransportProtocol_AUTO && skipHTTP3Reason != "" {
+		errors.LogInfo(ctx, "trusttunnel transport=auto bypasses HTTP/3 UDP path: ", skipHTTP3Reason)
 	}
 
 	rawConn, err := dialer.Dial(ctx, c.server.Destination)

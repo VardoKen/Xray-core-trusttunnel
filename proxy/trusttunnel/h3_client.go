@@ -11,6 +11,7 @@ import (
 	"github.com/apernet/quic-go"
 	"github.com/apernet/quic-go/http3"
 	"github.com/xtls/xray-core/common/errors"
+	"github.com/xtls/xray-core/transport/internet"
 	xtlstls "github.com/xtls/xray-core/transport/internet/tls"
 )
 
@@ -88,20 +89,12 @@ func trustTunnelExtractHTTP3TunnelStream(reqStream *http3.RequestStream) (*http3
 func connectHTTP3(ctx context.Context, serverAddr string, targetHost string, account *MemoryAccount, cfg *ClientConfig) (io.ReadWriteCloser, error) {
 	req, err := buildHTTP3ConnectRequest(serverAddr, targetHost, account)
 	if err != nil {
-		return nil, err
+		return nil, trustTunnelWrapHTTP3ConnectError(err, false)
 	}
 
 	req = req.WithContext(ctx)
 
-	tlsCfg := &tls.Config{
-		ServerName:         cfg.GetHostname(),
-		InsecureSkipVerify: true,
-		NextProtos:         []string{"h3"},
-		VerifyConnection: func(cs tls.ConnectionState) error {
-			return verifyTrustTunnelTLS(cs.PeerCertificates, cfg)
-		},
-	}
-	trustTunnelApplyHTTP3PostQuantum(tlsCfg, cfg)
+	tlsCfg := trustTunnelBuildHTTP3TLSConfig(ctx, cfg)
 	if spec := cfg.GetClientRandom(); spec != "" {
 		reader, err := xtlstls.NewClientHelloRandomReader(spec, tlsCfg.Rand)
 		if err != nil {
@@ -116,40 +109,64 @@ func connectHTTP3(ctx context.Context, serverAddr string, targetHost string, acc
 	}
 	conn, err := quic.DialAddr(ctx, serverAddr, tlsCfg, transport.QUICConfig)
 	if err != nil {
-		return nil, err
+		return nil, trustTunnelWrapHTTP3ConnectError(err, true)
 	}
 	clientConn := transport.NewClientConn(conn)
 	stream, err := clientConn.OpenRequestStream(ctx)
 	if err != nil {
 		_ = conn.CloseWithError(0, "")
-		return nil, err
+		return nil, trustTunnelWrapHTTP3ConnectError(err, true)
 	}
 	if err := stream.SendRequestHeader(req); err != nil {
 		stream.CancelRead(quic.StreamErrorCode(http3.ErrCodeRequestCanceled))
 		_ = conn.CloseWithError(0, "")
-		return nil, err
+		return nil, trustTunnelWrapHTTP3ConnectError(err, true)
 	}
 
 	resp, err := stream.ReadResponse()
 	if err != nil {
 		_ = conn.CloseWithError(0, "")
-		return nil, err
+		return nil, trustTunnelWrapHTTP3ConnectError(err, true)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		_ = resp.Body.Close()
 		_ = conn.CloseWithError(0, "")
-		return nil, errors.New("trusttunnel CONNECT failed with status ", resp.StatusCode, ": ", string(body))
+		return nil, trustTunnelWrapHTTP3ConnectError(errors.New("trusttunnel CONNECT failed with status ", resp.StatusCode, ": ", string(body)), false)
 	}
 	rawStream, err := trustTunnelExtractHTTP3TunnelStream(stream)
 	if err != nil {
 		_ = conn.CloseWithError(0, "")
-		return nil, err
+		return nil, trustTunnelWrapHTTP3ConnectError(err, false)
 	}
 
 	return &http3Conn{
 		conn:   conn,
 		stream: rawStream,
 	}, nil
+}
+
+func trustTunnelBuildHTTP3TLSConfig(ctx context.Context, cfg *ClientConfig) *tls.Config {
+	streamSettings := internet.StreamSettingsFromContext(ctx, nil)
+	if tlsSettings := xtlstls.ConfigFromStreamSettings(streamSettings); tlsSettings != nil {
+		tlsCfg := tlsSettings.GetTLSConfig(xtlstls.WithNextProto("h3"))
+		if tlsCfg.ServerName == "" && cfg.GetHostname() != "" {
+			tlsCfg.ServerName = cfg.GetHostname()
+		}
+		tlsCfg.NextProtos = []string{"h3"}
+		trustTunnelApplyHTTP3PostQuantum(tlsCfg, cfg)
+		return tlsCfg
+	}
+
+	tlsCfg := &tls.Config{
+		ServerName:         cfg.GetHostname(),
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"h3"},
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			return verifyTrustTunnelTLS(cs.PeerCertificates, cfg)
+		},
+	}
+	trustTunnelApplyHTTP3PostQuantum(tlsCfg, cfg)
+	return tlsCfg
 }

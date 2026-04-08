@@ -57,6 +57,15 @@ type fakeTrustTunnelDialerWithStreamSettings struct {
 	err            error
 }
 
+func withTrustTunnelHTTP3Connector(t *testing.T, fn func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error)) {
+	t.Helper()
+	original := trustTunnelConnectHTTP3Func
+	trustTunnelConnectHTTP3Func = fn
+	t.Cleanup(func() {
+		trustTunnelConnectHTTP3Func = original
+	})
+}
+
 func (d *fakeTrustTunnelDialerWithStreamSettings) Dial(ctx context.Context, destination xnet.Destination) (stat.Connection, error) {
 	d.dialCalls++
 	d.lastCtx = ctx
@@ -114,6 +123,144 @@ func TestClientProcessRejectsHTTP3Reality(t *testing.T) {
 	}
 	if dialer.dialCalls != 0 {
 		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
+	}
+}
+
+func TestClientProcessFallsBackToHTTP2WhenHTTP3FailsTransport(t *testing.T) {
+	withTrustTunnelHTTP3Connector(t, func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error) {
+		return nil, trustTunnelWrapHTTP3ConnectError(io.EOF, true)
+	})
+
+	client := &Client{
+		config: &ClientConfig{
+			Transport: TransportProtocol_HTTP3,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				ServerName: "vpn.example.com",
+			},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 1 {
+		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
+	}
+}
+
+func TestClientProcessKeepsHTTP3ErrorWhenFallbackIsNotEligible(t *testing.T) {
+	withTrustTunnelHTTP3Connector(t, func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error) {
+		return nil, trustTunnelWrapHTTP3ConnectError(io.EOF, false)
+	})
+
+	client := &Client{
+		config: &ClientConfig{
+			Transport: TransportProtocol_HTTP3,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				ServerName: "vpn.example.com",
+			},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to establish trusttunnel HTTP/3 CONNECT") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 0 {
+		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
+	}
+}
+
+func TestClientProcessAutoFallsBackToHTTP2WhenHTTP3FailsTransport(t *testing.T) {
+	withTrustTunnelHTTP3Connector(t, func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error) {
+		return nil, trustTunnelWrapHTTP3ConnectError(io.EOF, true)
+	})
+
+	client := &Client{
+		config: &ClientConfig{
+			Transport: TransportProtocol_AUTO,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				ServerName: "vpn.example.com",
+			},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 1 {
+		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
 	}
 }
 
@@ -197,6 +344,61 @@ func TestClientProcessRejectsAntiDpiWithoutTLSSecurityStreamSettings(t *testing.
 	}
 }
 
+func TestClientProcessAutoSkipsHTTP3ForAntiDpi(t *testing.T) {
+	h3Calls := 0
+	withTrustTunnelHTTP3Connector(t, func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error) {
+		h3Calls++
+		return nil, trustTunnelWrapHTTP3ConnectError(io.EOF, true)
+	})
+
+	client := &Client{
+		config: &ClientConfig{
+			Transport: TransportProtocol_AUTO,
+			AntiDpi:   true,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				ServerName: "vpn.example.com",
+			},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if h3Calls != 0 {
+		t.Fatalf("h3Calls = %d, want 0", h3Calls)
+	}
+	if dialer.dialCalls != 1 {
+		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
+	}
+	if !internettls.AntiDPIEnabledFromContext(dialer.lastCtx) {
+		t.Fatal("antiDpi context flag = false, want true")
+	}
+}
+
 func TestClientProcessAppliesAntiDpiOnHTTP2Reality(t *testing.T) {
 	client := &Client{
 		config: &ClientConfig{
@@ -240,6 +442,58 @@ func TestClientProcessAppliesAntiDpiOnHTTP2Reality(t *testing.T) {
 	}
 	if !internettls.AntiDPIEnabledFromContext(dialer.lastCtx) {
 		t.Fatal("antiDpi context flag = false, want true")
+	}
+}
+
+func TestClientProcessAutoSkipsHTTP3ForReality(t *testing.T) {
+	h3Calls := 0
+	withTrustTunnelHTTP3Connector(t, func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error) {
+		h3Calls++
+		return nil, trustTunnelWrapHTTP3ConnectError(io.EOF, true)
+	})
+
+	client := &Client{
+		config: &ClientConfig{
+			Transport: TransportProtocol_AUTO,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "reality",
+			SecuritySettings: &reality.Config{
+				ServerName:  "vpn.example.com",
+				Fingerprint: "chrome",
+			},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if h3Calls != 0 {
+		t.Fatalf("h3Calls = %d, want 0", h3Calls)
+	}
+	if dialer.dialCalls != 1 {
+		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
 	}
 }
 
@@ -759,6 +1013,95 @@ func TestTrustTunnelStreamSettingsWithTLSCompatibilityFillsServerNameForExplicit
 	}
 	if tlsConfig.GetAllowInsecure() {
 		t.Fatal("allowInsecure = true, want false")
+	}
+}
+
+func TestConnectUDPTunnelFallsBackToHTTP2WhenHTTP3FailsTransport(t *testing.T) {
+	withTrustTunnelHTTP3Connector(t, func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error) {
+		return nil, trustTunnelWrapHTTP3ConnectError(io.EOF, true)
+	})
+
+	client := &Client{
+		config: &ClientConfig{
+			Transport: TransportProtocol_HTTP3,
+			EnableUdp: true,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				ServerName: "vpn.example.com",
+			},
+		},
+	}
+
+	_, err := client.connectUDPTunnel(context.Background(), dialer, &MemoryAccount{
+		Username: "u1",
+		Password: "p1",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 1 {
+		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
+	}
+}
+
+func TestConnectICMPTunnelFallsBackToHTTP2WhenHTTP3FailsTransport(t *testing.T) {
+	withTrustTunnelHTTP3Connector(t, func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error) {
+		return nil, trustTunnelWrapHTTP3ConnectError(io.EOF, true)
+	})
+
+	client := &Client{
+		config: &ClientConfig{
+			Transport: TransportProtocol_HTTP3,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				ServerName: "vpn.example.com",
+			},
+		},
+	}
+
+	_, err := client.connectICMPTunnel(context.Background(), dialer, &MemoryAccount{
+		Username: "u1",
+		Password: "p1",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 1 {
+		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
 	}
 }
 

@@ -22,7 +22,6 @@ func trustTunnelContextWithTransportSecurityOverrides(ctx context.Context, diale
 
 	base := provider.StreamSettings()
 	effective := base
-	changed := false
 
 	if mode != PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_AUTO {
 		override, err := trustTunnelStreamSettingsWithPostQuantum(base, mode)
@@ -30,21 +29,19 @@ func trustTunnelContextWithTransportSecurityOverrides(ctx context.Context, diale
 			return nil, false, err
 		}
 		effective = override
-		changed = true
 	}
 
 	override, compatibilityChanged, tlsHandledByStreamSettings := trustTunnelStreamSettingsWithTLSCompatibility(effective, cfg)
 	if compatibilityChanged {
 		effective = override
-		changed = true
 	}
 
-	if changed {
+	if effective != nil {
 		ctx = internet.ContextWithStreamSettingsOverride(ctx, effective)
 	}
 
 	if cfg.GetAntiDpi() {
-		if cfg.GetTransport() != TransportProtocol_HTTP2 {
+		if cfg.GetTransport() == TransportProtocol_HTTP3 {
 			return nil, false, errors.New("trusttunnel antiDpi is supported only for http2 over TLS or REALITY: current transport is not compatible").AtWarning()
 		}
 		if !trustTunnelAntiDPICompatibleSecurity(effective) {

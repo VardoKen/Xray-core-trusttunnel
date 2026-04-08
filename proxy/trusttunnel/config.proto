@@ -18,6 +18,7 @@ message Account {
 enum TransportProtocol {
   HTTP2 = 0;
   HTTP3 = 1;
+  AUTO = 2;
 }
 
 enum PostQuantumGroupSetting {

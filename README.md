@@ -11,6 +11,7 @@ The goal of the fork is straightforward: keep TrustTunnel usable as a maintained
 - HTTP/2 over TLS
 - HTTP/2 over REALITY
 - HTTP/3 over TLS
+- `transport: "auto"` with HTTP/3-first selection and HTTP/2 fallback
 - TCP tunneling
 - UDP multiplexing via `_udp2`
 - ICMP tunneling via `_icmp`
@@ -31,7 +32,7 @@ The configuration guide includes:
 ## Unsupported combinations
 
 - `HTTP/3 over REALITY` is unsupported because the current REALITY runtime in Xray is built around the TCP stream layer, while TrustTunnel H3 uses QUIC.
-- `antiDpi=true` is supported only for `HTTP/2 over TLS` and `HTTP/2 over REALITY`. It remains unsupported for all `HTTP/3` paths because the current implementation only splits the first TCP-based ClientHello write.
+- `antiDpi=true` is supported on `HTTP/2 over TLS` and `HTTP/2 over REALITY`. With `transport: "auto"`, it bypasses HTTP/3 and goes directly to the HTTP/2 path. It remains unsupported for explicit `HTTP/3` because the current implementation only splits the first TCP-based ClientHello write.
 - UDP domain targets are not documented as a supported product path. The validated UDP path uses IP targets.
 
 ## Documentation

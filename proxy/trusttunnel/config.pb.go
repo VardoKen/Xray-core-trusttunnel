@@ -27,6 +27,7 @@ type TransportProtocol int32
 const (
 	TransportProtocol_HTTP2 TransportProtocol = 0
 	TransportProtocol_HTTP3 TransportProtocol = 1
+	TransportProtocol_AUTO  TransportProtocol = 2
 )
 
 // Enum value maps for TransportProtocol.
@@ -34,10 +35,12 @@ var (
 	TransportProtocol_name = map[int32]string{
 		0: "HTTP2",
 		1: "HTTP3",
+		2: "AUTO",
 	}
 	TransportProtocol_value = map[string]int32{
 		"HTTP2": 0,
 		"HTTP3": 1,
+		"AUTO":  2,
 	}
 )
 
@@ -619,10 +622,11 @@ const file_proxy_trusttunnel_config_proto_rawDesc = "" +
 	"\x1cclient_listener_timeout_secs\x18\r \x01(\rR\x19clientListenerTimeoutSecs\x12Q\n" +
 	"%connection_establishment_timeout_secs\x18\x0e \x01(\rR\"connectionEstablishmentTimeoutSecs\x12?\n" +
 	"\x1ctcp_connections_timeout_secs\x18\x0f \x01(\rR\x19tcpConnectionsTimeoutSecs\x12?\n" +
-	"\x1cudp_connections_timeout_secs\x18\x10 \x01(\rR\x19udpConnectionsTimeoutSecs*)\n" +
+	"\x1cudp_connections_timeout_secs\x18\x10 \x01(\rR\x19udpConnectionsTimeoutSecs*3\n" +
 	"\x11TransportProtocol\x12\t\n" +
 	"\x05HTTP2\x10\x00\x12\t\n" +
-	"\x05HTTP3\x10\x01*\x8f\x01\n" +
+	"\x05HTTP3\x10\x01\x12\b\n" +
+	"\x04AUTO\x10\x02*\x8f\x01\n" +
 	"\x17PostQuantumGroupSetting\x12#\n" +
 	"\x1fPOST_QUANTUM_GROUP_SETTING_AUTO\x10\x00\x12'\n" +
 	"#POST_QUANTUM_GROUP_SETTING_DISABLED\x10\x01\x12&\n" +

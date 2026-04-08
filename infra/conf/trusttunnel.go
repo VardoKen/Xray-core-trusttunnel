@@ -54,6 +54,8 @@ func parseTrustTunnelTransport(v string) (trusttunnel.TransportProtocol, error) 
 	switch strings.ToLower(v) {
 	case "", "http2":
 		return trusttunnel.TransportProtocol_HTTP2, nil
+	case "auto":
+		return trusttunnel.TransportProtocol_AUTO, nil
 	case "http3", "quic", "http3/quic":
 		return trusttunnel.TransportProtocol_HTTP3, nil
 	default:
