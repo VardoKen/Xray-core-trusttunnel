@@ -3,6 +3,7 @@ package trusttunnel
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
 	"io"
 	"net"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/xtls/xray-core/common/buf"
 	xnet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/protocol"
+	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/common/session"
 	"github.com/xtls/xray-core/transport"
 	"github.com/xtls/xray-core/transport/internet"
@@ -57,6 +59,12 @@ type fakeTrustTunnelDialerWithStreamSettings struct {
 	err            error
 }
 
+type fakeTrustTunnelServerSequenceDialer struct {
+	streamSettings *internet.MemoryStreamConfig
+	callOrder      []string
+	errs           map[string]error
+}
+
 func withTrustTunnelHTTP3Connector(t *testing.T, fn func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error)) {
 	t.Helper()
 	original := trustTunnelConnectHTTP3Func
@@ -83,6 +91,26 @@ func (*fakeTrustTunnelDialerWithStreamSettings) SetOutboundGateway(ctx context.C
 }
 
 func (d *fakeTrustTunnelDialerWithStreamSettings) StreamSettings() *internet.MemoryStreamConfig {
+	return d.streamSettings
+}
+
+func (d *fakeTrustTunnelServerSequenceDialer) Dial(ctx context.Context, destination xnet.Destination) (stat.Connection, error) {
+	addr := destination.NetAddr()
+	d.callOrder = append(d.callOrder, addr)
+	if err, ok := d.errs[addr]; ok {
+		return nil, err
+	}
+	return nil, io.EOF
+}
+
+func (*fakeTrustTunnelServerSequenceDialer) DestIpAddress() net.IP {
+	return nil
+}
+
+func (*fakeTrustTunnelServerSequenceDialer) SetOutboundGateway(ctx context.Context, ob *session.Outbound) {
+}
+
+func (d *fakeTrustTunnelServerSequenceDialer) StreamSettings() *internet.MemoryStreamConfig {
 	return d.streamSettings
 }
 
@@ -123,6 +151,123 @@ func TestClientProcessRejectsHTTP3Reality(t *testing.T) {
 	}
 	if dialer.dialCalls != 0 {
 		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
+	}
+}
+
+func TestNewClientUsesConfiguredServerList(t *testing.T) {
+	servers, err := trustTunnelServersFromConfig(&ClientConfig{
+		Server: &protocol.ServerEndpoint{
+			Address: xnet.NewIPOrDomain(xnet.ParseAddress("127.0.0.1")),
+			Port:    9443,
+			User: &protocol.User{
+				Account: serial.ToTypedMessage(&Account{
+					Username: "u1",
+					Password: "p1",
+				}),
+			},
+		},
+		Servers: []*protocol.ServerEndpoint{
+			{
+				Address: xnet.NewIPOrDomain(xnet.ParseAddress("127.0.0.1")),
+				Port:    9443,
+				User: &protocol.User{
+					Account: serial.ToTypedMessage(&Account{
+						Username: "u1",
+						Password: "p1",
+					}),
+				},
+			},
+			{
+				Address: xnet.NewIPOrDomain(xnet.ParseAddress("127.0.0.2")),
+				Port:    9444,
+				User: &protocol.User{
+					Account: serial.ToTypedMessage(&Account{
+						Username: "u1",
+						Password: "p1",
+					}),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("trustTunnelServersFromConfig() failed: %v", err)
+	}
+
+	if len(servers) != 2 {
+		t.Fatalf("len(servers) = %d, want 2", len(servers))
+	}
+	if got := servers[1].Destination.NetAddr(); got != "127.0.0.2:9444" {
+		t.Fatalf("servers[1] = %q, want %q", got, "127.0.0.2:9444")
+	}
+}
+
+func TestClientProcessFallsBackToNextConfiguredServer(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+		servers: []*protocol.ServerSpec{
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+				&protocol.MemoryUser{
+					Account: &MemoryAccount{
+						Username: "u1",
+						Password: "p1",
+					},
+				},
+			),
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.2"), xnet.Port(9444)),
+				&protocol.MemoryUser{
+					Account: &MemoryAccount{
+						Username: "u1",
+						Password: "p1",
+					},
+				},
+			),
+		},
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelServerSequenceDialer{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				ServerName: "vpn.example.com",
+			},
+		},
+		errs: map[string]error{
+			"127.0.0.1:9443": stderrors.New("first endpoint down"),
+			"127.0.0.2:9444": io.EOF,
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"127.0.0.1:9443", "127.0.0.2:9444"}
+	if len(dialer.callOrder) != len(want) {
+		t.Fatalf("callOrder = %v, want %v", dialer.callOrder, want)
+	}
+	for i := range want {
+		if dialer.callOrder[i] != want[i] {
+			t.Fatalf("callOrder[%d] = %q, want %q", i, dialer.callOrder[i], want[i])
+		}
 	}
 }
 
@@ -1046,10 +1191,7 @@ func TestConnectUDPTunnelFallsBackToHTTP2WhenHTTP3FailsTransport(t *testing.T) {
 		},
 	}
 
-	_, err := client.connectUDPTunnel(context.Background(), dialer, &MemoryAccount{
-		Username: "u1",
-		Password: "p1",
-	})
+	_, err := client.connectUDPTunnel(context.Background(), dialer)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1090,10 +1232,7 @@ func TestConnectICMPTunnelFallsBackToHTTP2WhenHTTP3FailsTransport(t *testing.T) 
 		},
 	}
 
-	_, err := client.connectICMPTunnel(context.Background(), dialer, &MemoryAccount{
-		Username: "u1",
-		Password: "p1",
-	})
+	_, err := client.connectICMPTunnel(context.Background(), dialer)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

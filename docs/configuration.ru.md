@@ -23,6 +23,11 @@ TrustTunnel доступен и как:
 - `transport: "http3"`
 - `transport: "auto"`
 
+Подтверждённое поведение выбора server endpoint:
+
+- упорядоченные списки `servers[]` с последовательным fallback по endpoint
+- legacy-форма `address` + `port` для single-endpoint конфига
+
 Подтверждённые payload-path:
 
 - TCP CONNECT
@@ -234,7 +239,35 @@ Tracked example:
 - TCP over REALITY
 - UDP mux over TLS
 
-### 4.5. UDP outbound
+### 4.5. Несколько outbound server endpoint
+
+Используй `servers`, когда нужен не один, а несколько TrustTunnel endpoint:
+
+```json
+"servers": [
+  { "address": "tt-a.example.com", "port": 9443 },
+  { "address": "tt-b.example.com", "port": 9443 }
+]
+```
+
+Правила:
+
+- клиент пробует endpoint в том порядке, в котором они перечислены
+- если endpoint ломается до установления tunnel, клиент переходит к следующему endpoint
+- если tunnel уже установлен, runtime-ошибка на нём не вызывает скрытого переключения на другой endpoint
+- `servers` нельзя смешивать с shorthand-полями `address` и `port` в одном outbound-конфиге
+- shorthand `address` + `port` остаётся валидным и трактуется как single-endpoint конфиг
+
+Рекомендуемое применение:
+
+- `address` + `port` для самого короткого single-endpoint конфига
+- `servers[]` для явного failover между несколькими TrustTunnel-серверами
+
+Tracked example:
+
+- [../testing/trusttunnel/client_h2_servers_fallback.json](../testing/trusttunnel/client_h2_servers_fallback.json)
+
+### 4.6. UDP outbound
 
 Нужно задать:
 
@@ -331,8 +364,9 @@ Tracked rule example:
 
 | Поле | Тип | Обязательно | Назначение | Примечание |
 | --- | --- | --- | --- | --- |
-| `address` | string | Да | Адрес TrustTunnel-сервера | IP или домен |
-| `port` | integer | Да | Порт TrustTunnel-сервера | В примерах обычно `9443` |
+| `address` | string | Да, если не задан `servers` | Адрес TrustTunnel-сервера | IP или домен; shorthand для single-endpoint конфига |
+| `port` | integer | Да, если не задан `servers` | Порт TrustTunnel-сервера | В примерах обычно `9443` |
+| `servers` | array | Да, если не заданы `address` и `port` | Упорядоченный список TrustTunnel endpoint | Последовательный fallback в указанном порядке; не смешивать с `address` и `port` |
 | `username` | string | Да | Имя пользователя для TrustTunnel auth | Должно совпадать с сервером |
 | `password` | string | Да | Пароль для TrustTunnel auth | Должен совпадать с сервером |
 | `hostname` | string | Да | Логическое имя хоста TrustTunnel | Для REALITY должно совпадать с `realitySettings.serverName` |

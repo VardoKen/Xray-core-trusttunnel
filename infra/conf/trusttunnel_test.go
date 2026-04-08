@@ -160,6 +160,64 @@ func TestTrustTunnelClientConfigBuildSupportsAutoTransport(t *testing.T) {
 	}
 }
 
+func TestTrustTunnelClientConfigBuildSupportsMultipleServers(t *testing.T) {
+	config, err := (&TrustTunnelClientConfig{
+		Servers: []*TrustTunnelEndpointConfig{
+			{
+				Address: &Address{Address: net.ParseAddress("127.0.0.1")},
+				Port:    9443,
+			},
+			{
+				Address: &Address{Address: net.ParseAddress("127.0.0.2")},
+				Port:    9444,
+			},
+		},
+		Username:  "u1",
+		Password:  "p1",
+		Hostname:  "www.google.com",
+		Transport: "http2",
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+
+	built := config.(*trusttunnel.ClientConfig)
+	if built.GetServer() == nil {
+		t.Fatal("server = nil, want first endpoint")
+	}
+	if len(built.GetServers()) != 2 {
+		t.Fatalf("len(servers) = %d, want 2", len(built.GetServers()))
+	}
+	if built.GetServers()[0].GetPort() != 9443 {
+		t.Fatalf("servers[0].port = %d, want 9443", built.GetServers()[0].GetPort())
+	}
+	if built.GetServers()[1].GetPort() != 9444 {
+		t.Fatalf("servers[1].port = %d, want 9444", built.GetServers()[1].GetPort())
+	}
+	if built.GetServer().GetPort() != built.GetServers()[0].GetPort() {
+		t.Fatalf("legacy server port = %d, want first servers[] port %d", built.GetServer().GetPort(), built.GetServers()[0].GetPort())
+	}
+}
+
+func TestTrustTunnelClientConfigBuildRejectsAddressAndServersTogether(t *testing.T) {
+	_, err := (&TrustTunnelClientConfig{
+		Address: &Address{Address: net.ParseAddress("127.0.0.1")},
+		Port:    9443,
+		Servers: []*TrustTunnelEndpointConfig{
+			{
+				Address: &Address{Address: net.ParseAddress("127.0.0.2")},
+				Port:    9444,
+			},
+		},
+		Username: "u1",
+		Password: "p1",
+		Hostname: "www.google.com",
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), `use either "address"/"port" or "servers", not both`) {
+		t.Fatalf("Build() error = %v, want mixed address/servers guard", err)
+	}
+}
+
 func TestConfigBuildRejectsTrustTunnelHTTP3RealityOutbound(t *testing.T) {
 	raw := json.RawMessage(`{
 		"address": "127.0.0.1",

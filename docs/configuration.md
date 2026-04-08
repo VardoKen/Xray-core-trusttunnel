@@ -23,6 +23,11 @@ Validated transport selection modes:
 - `transport: "http3"`
 - `transport: "auto"`
 
+Validated outbound endpoint-selection behavior:
+
+- ordered `servers[]` lists with sequential endpoint fallback
+- legacy `address` + `port` shorthand for single-endpoint configs
+
 Validated payload paths:
 
 - TCP CONNECT
@@ -234,7 +239,35 @@ This mode is validated for:
 - TCP over REALITY
 - UDP mux over TLS
 
-### 4.5. UDP outbound
+### 4.5. Multiple outbound server endpoints
+
+Use `servers` when you want more than one TrustTunnel server endpoint:
+
+```json
+"servers": [
+  { "address": "tt-a.example.com", "port": 9443 },
+  { "address": "tt-b.example.com", "port": 9443 }
+]
+```
+
+Rules:
+
+- the client tries endpoints in the listed order
+- if one endpoint fails before the tunnel is established, the client moves to the next endpoint
+- once a tunnel is established, runtime errors on that tunnel do not trigger a hidden switch to another endpoint
+- do not combine `servers` with the shorthand `address` and `port` in the same outbound config
+- the shorthand `address` + `port` remains valid and is treated as a single-endpoint config
+
+Recommended use:
+
+- use `address` + `port` for the shortest single-endpoint config
+- use `servers[]` for explicit failover across multiple TrustTunnel servers
+
+Tracked example:
+
+- [../testing/trusttunnel/client_h2_servers_fallback.json](../testing/trusttunnel/client_h2_servers_fallback.json)
+
+### 4.6. UDP outbound
 
 Set:
 
@@ -331,8 +364,9 @@ Tracked rule example:
 
 | Field | Type | Required | Meaning | Notes |
 | --- | --- | --- | --- | --- |
-| `address` | string | Yes | TrustTunnel server address | IP or domain |
-| `port` | integer | Yes | TrustTunnel server port | Usually `9443` in examples |
+| `address` | string | Yes, if `servers` is omitted | TrustTunnel server address | IP or domain; shorthand for single-endpoint configs |
+| `port` | integer | Yes, if `servers` is omitted | TrustTunnel server port | Usually `9443` in examples |
+| `servers` | array | Yes, if `address` and `port` are omitted | Ordered TrustTunnel endpoint list | Sequential fallback in listed order; do not combine with `address` and `port` |
 | `username` | string | Yes | Username for TrustTunnel auth | Must match server user |
 | `password` | string | Yes | Password for TrustTunnel auth | Must match server user |
 | `hostname` | string | Yes | Logical TrustTunnel host name | For REALITY, match `realitySettings.serverName` |

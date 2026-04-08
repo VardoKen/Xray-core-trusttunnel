@@ -65,6 +65,9 @@ func parseTrustTunnelTransport(v string) (trusttunnel.TransportProtocol, error) 
 
 func (c *TrustTunnelClientConfig) Build() (proto.Message, error) {
 	if c.Address != nil {
+		if len(c.Servers) > 0 {
+			return nil, errors.New(`TrustTunnel settings: use either "address"/"port" or "servers", not both`)
+		}
 		c.Servers = []*TrustTunnelEndpointConfig{
 			{
 				Address: c.Address,
@@ -73,16 +76,8 @@ func (c *TrustTunnelClientConfig) Build() (proto.Message, error) {
 		}
 	}
 
-	if len(c.Servers) != 1 {
-		return nil, errors.New(`TrustTunnel settings: "servers" should have one and only one member`)
-	}
-
-	rec := c.Servers[0]
-	if rec.Address == nil {
-		return nil, errors.New("TrustTunnel server address is not set")
-	}
-	if rec.Port == 0 {
-		return nil, errors.New("Invalid TrustTunnel port")
+	if len(c.Servers) == 0 {
+		return nil, errors.New(`TrustTunnel settings: "servers" must contain at least one member`)
 	}
 	if c.Username == "" {
 		return nil, errors.New("TrustTunnel username is not specified")
@@ -117,7 +112,18 @@ func (c *TrustTunnelClientConfig) Build() (proto.Message, error) {
 		ClientRandom:     c.ClientRandom,
 		AntiDpi:          c.AntiDpi,
 		EnableUdp:        c.UDP,
-		Server: &protocol.ServerEndpoint{
+		Servers:          make([]*protocol.ServerEndpoint, 0, len(c.Servers)),
+	}
+
+	for _, rec := range c.Servers {
+		if rec == nil || rec.Address == nil {
+			return nil, errors.New("TrustTunnel server address is not set")
+		}
+		if rec.Port == 0 {
+			return nil, errors.New("Invalid TrustTunnel port")
+		}
+
+		endpoint := &protocol.ServerEndpoint{
 			Address: rec.Address.Build(),
 			Port:    uint32(rec.Port),
 			User: &protocol.User{
@@ -128,7 +134,12 @@ func (c *TrustTunnelClientConfig) Build() (proto.Message, error) {
 					Password: c.Password,
 				}),
 			},
-		},
+		}
+
+		if config.Server == nil {
+			config.Server = endpoint
+		}
+		config.Servers = append(config.Servers, endpoint)
 	}
 
 	if c.PostQuantumGroup != nil {

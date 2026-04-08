@@ -52,6 +52,7 @@ message ClientConfig {
   bool anti_dpi = 8;
   bool enable_udp = 9;
   PostQuantumGroupSetting post_quantum_group_enabled = 10;
+  repeated xray.common.protocol.ServerEndpoint servers = 11;
 }
 
 message ServerConfig {

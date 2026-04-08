@@ -22,12 +22,12 @@ const (
 	trustTunnelLegacyUDPPseudoHost = "_udp2:0"
 )
 
-func (c *Client) processUDP(ctx context.Context, link *transport.Link, dialer internet.Dialer, account *MemoryAccount, fallbackDest xnet.Destination) error {
+func (c *Client) processUDP(ctx context.Context, link *transport.Link, dialer internet.Dialer, fallbackDest xnet.Destination) error {
 	if !c.config.GetEnableUdp() {
 		return errors.New("trusttunnel udp is disabled in client config")
 	}
 
-	tunnelConn, err := c.connectUDPTunnel(ctx, dialer, account)
+	tunnelConn, err := c.connectUDPTunnel(ctx, dialer)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (c *Client) processUDP(ctx context.Context, link *transport.Link, dialer in
 	return nil
 }
 
-func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer, account *MemoryAccount) (io.ReadWriteCloser, error) {
+func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer) (io.ReadWriteCloser, error) {
 	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
 	ctx, tlsHandledByStreamSettings, err := trustTunnelContextWithTransportSecurityOverrides(ctx, dialer, c.config)
 	if err != nil {
@@ -132,74 +132,130 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer, a
 	if err != nil {
 		return nil, err
 	}
-	if attemptHTTP3 {
-		serverAddr := c.server.Destination.NetAddr()
-		if serverAddr == "" {
-			return nil, errors.New("invalid trusttunnel server address")
-		}
-
-		http3Ctx, cancelHTTP3 := trustTunnelContextWithHTTP3FallbackTimeout(ctx, c.config)
-		tunnelConn, err := trustTunnelConnectHTTP3Func(http3Ctx, serverAddr, trustTunnelUDPPseudoHost, account, c.config)
-		cancelHTTP3()
-		if err != nil {
-			if !trustTunnelTransportAllowsHTTP2Fallback(c.config) || !trustTunnelHTTP3FallbackEligible(err) {
-				return nil, errors.New("failed to establish trusttunnel HTTP/3 UDP CONNECT").Base(err).AtWarning()
-			}
-			errors.LogWarning(ctx, "trusttunnel HTTP/3 UDP CONNECT failed; falling back to HTTP/2 path: ", err)
-		} else {
-			return tunnelConn, nil
-		}
-	} else if c.config.GetTransport() == TransportProtocol_AUTO && skipHTTP3Reason != "" {
+	if !attemptHTTP3 && c.config.GetTransport() == TransportProtocol_AUTO && skipHTTP3Reason != "" {
 		errors.LogInfo(ctx, "trusttunnel transport=auto bypasses HTTP/3 UDP path: ", skipHTTP3Reason)
 	}
 
-	rawConn, err := dialer.Dial(ctx, c.server.Destination)
-	if err != nil {
-		return nil, errors.New("failed to dial trusttunnel server").Base(err).AtWarning()
-	}
-	conn := rawConn.(stat.Connection)
-
-	req, err := buildConnectRequest(trustTunnelUDPPseudoHost, account)
-	if err != nil {
-		_ = conn.Close()
-		return nil, errors.New("failed to create UDP CONNECT request").Base(err)
+	servers := c.serverSpecs()
+	if len(servers) == 0 {
+		return nil, errors.New("no target trusttunnel server found")
 	}
 
-	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
-		_ = conn.Close()
-		return nil, errors.New("failed to set deadline").Base(err).AtWarning()
-	}
-
-	securityState, err := trustTunnelClientSecurityState(ctx, conn)
-	if err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-
-	if !securityState.UsesReality && !tlsHandledByStreamSettings {
-		if err := verifyTrustTunnelTLS(securityState.PeerCertificates, c.config); err != nil {
-			_ = conn.Close()
-			return nil, errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
+	var lastErr error
+	for idx, server := range servers {
+		account, err := trustTunnelAccountFromServer(server)
+		if err != nil {
+			return nil, err
 		}
+
+		if attemptHTTP3 {
+			serverAddr := server.Destination.NetAddr()
+			if serverAddr == "" {
+				return nil, errors.New("invalid trusttunnel server address")
+			}
+
+			http3Ctx, cancelHTTP3 := trustTunnelContextWithHTTP3FallbackTimeout(ctx, c.config)
+			tunnelConn, err := trustTunnelConnectHTTP3Func(http3Ctx, serverAddr, trustTunnelUDPPseudoHost, account, c.config)
+			cancelHTTP3()
+			if err != nil {
+				if !trustTunnelTransportAllowsHTTP2Fallback(c.config) || !trustTunnelHTTP3FallbackEligible(err) {
+					lastErr = errors.New("failed to establish trusttunnel HTTP/3 UDP CONNECT").Base(err).AtWarning()
+					if idx+1 < len(servers) {
+						errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(servers), " failed; trying next UDP endpoint: ", lastErr)
+						continue
+					}
+					break
+				}
+				errors.LogWarning(ctx, "trusttunnel HTTP/3 UDP CONNECT failed; falling back to HTTP/2 path: ", err)
+			} else {
+				return tunnelConn, nil
+			}
+		}
+
+		rawConn, err := dialer.Dial(ctx, server.Destination)
+		if err != nil {
+			lastErr = errors.New("failed to dial trusttunnel server").Base(err).AtWarning()
+			if idx+1 < len(servers) {
+				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(servers), " failed; trying next UDP endpoint: ", lastErr)
+				continue
+			}
+			break
+		}
+		conn := rawConn.(stat.Connection)
+
+		req, err := buildConnectRequest(trustTunnelUDPPseudoHost, account)
+		if err != nil {
+			_ = conn.Close()
+			return nil, errors.New("failed to create UDP CONNECT request").Base(err)
+		}
+
+		if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			_ = conn.Close()
+			return nil, errors.New("failed to set deadline").Base(err).AtWarning()
+		}
+
+		securityState, err := trustTunnelClientSecurityState(ctx, conn)
+		if err != nil {
+			_ = conn.Close()
+			lastErr = err
+			if idx+1 < len(servers) {
+				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(servers), " failed; trying next UDP endpoint: ", lastErr)
+				continue
+			}
+			break
+		}
+
+		if !securityState.UsesReality && !tlsHandledByStreamSettings {
+			if err := verifyTrustTunnelTLS(securityState.PeerCertificates, c.config); err != nil {
+				_ = conn.Close()
+				lastErr = errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
+				if idx+1 < len(servers) {
+					errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(servers), " failed; trying next UDP endpoint: ", lastErr)
+					continue
+				}
+				break
+			}
+		}
+
+		if !trustTunnelShouldUseHTTP2(securityState) {
+			_ = conn.Close()
+			lastErr = errors.New("trusttunnel udp over http2 requires negotiated ALPN h2, got ", securityState.NegotiatedProtocol)
+			if idx+1 < len(servers) {
+				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(servers), " failed; trying next UDP endpoint: ", lastErr)
+				continue
+			}
+			break
+		}
+
+		tunnelConn, err := connectHTTP2(conn, req)
+		if err != nil {
+			_ = conn.Close()
+			lastErr = errors.New("failed to establish trusttunnel UDP CONNECT").Base(err).AtWarning()
+			if idx+1 < len(servers) {
+				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(servers), " failed; trying next UDP endpoint: ", lastErr)
+				continue
+			}
+			break
+		}
+
+		if err := conn.SetDeadline(time.Time{}); err != nil {
+			_ = tunnelConn.Close()
+			lastErr = errors.New("failed to clear deadline").Base(err).AtWarning()
+			if idx+1 < len(servers) {
+				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(servers), " failed; trying next UDP endpoint: ", lastErr)
+				continue
+			}
+			break
+		}
+
+		return tunnelConn, nil
 	}
 
-	if !trustTunnelShouldUseHTTP2(securityState) {
-		_ = conn.Close()
-		return nil, errors.New("trusttunnel udp over http2 requires negotiated ALPN h2, got ", securityState.NegotiatedProtocol)
+	if lastErr != nil {
+		return nil, lastErr
 	}
 
-	tunnelConn, err := connectHTTP2(conn, req)
-	if err != nil {
-		_ = conn.Close()
-		return nil, errors.New("failed to establish trusttunnel UDP CONNECT").Base(err).AtWarning()
-	}
-
-	if err := conn.SetDeadline(time.Time{}); err != nil {
-		_ = tunnelConn.Close()
-		return nil, errors.New("failed to clear deadline").Base(err).AtWarning()
-	}
-
-	return tunnelConn, nil
+	return nil, errors.New("no target trusttunnel server found")
 }
 
 func trustTunnelUDPSourceFromContext(ctx context.Context) *stdnet.UDPAddr {

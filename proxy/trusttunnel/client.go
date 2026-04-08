@@ -33,7 +33,56 @@ func init() {
 type Client struct {
 	config        *ClientConfig
 	server        *protocol.ServerSpec
+	servers       []*protocol.ServerSpec
 	policyManager policy.Manager
+}
+
+func trustTunnelServersFromConfig(config *ClientConfig) ([]*protocol.ServerSpec, error) {
+	endpoints := config.GetServers()
+	if len(endpoints) == 0 {
+		if config.GetServer() == nil {
+			return nil, errors.New("no target trusttunnel server found")
+		}
+		endpoints = []*protocol.ServerEndpoint{config.GetServer()}
+	}
+
+	servers := make([]*protocol.ServerSpec, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		if endpoint == nil {
+			return nil, errors.New("trusttunnel server entry is nil")
+		}
+
+		server, err := protocol.NewServerSpecFromPB(endpoint)
+		if err != nil {
+			return nil, errors.New("failed to get trusttunnel server spec").Base(err)
+		}
+		servers = append(servers, server)
+	}
+
+	return servers, nil
+}
+
+func (c *Client) serverSpecs() []*protocol.ServerSpec {
+	if len(c.servers) > 0 {
+		return c.servers
+	}
+	if c.server != nil {
+		return []*protocol.ServerSpec{c.server}
+	}
+	return nil
+}
+
+func trustTunnelAccountFromServer(server *protocol.ServerSpec) (*MemoryAccount, error) {
+	if server == nil || server.User == nil {
+		return nil, errors.New("trusttunnel user account is not valid")
+	}
+
+	account, ok := server.User.Account.(*MemoryAccount)
+	if !ok {
+		return nil, errors.New("trusttunnel user account is not valid")
+	}
+
+	return account, nil
 }
 
 func (c *Client) validateOutboundTarget(target xnet.Destination) error {
@@ -50,20 +99,17 @@ func (c *Client) validateOutboundTarget(target xnet.Destination) error {
 }
 
 func NewClient(ctx context.Context, config *ClientConfig) (*Client, error) {
-	if config.Server == nil {
-		return nil, errors.New("no target trusttunnel server found")
-	}
-
-	server, err := protocol.NewServerSpecFromPB(config.Server)
+	servers, err := trustTunnelServersFromConfig(config)
 	if err != nil {
-		return nil, errors.New("failed to get trusttunnel server spec").Base(err)
+		return nil, err
 	}
 
 	v := core.MustFromContext(ctx)
 
 	return &Client{
 		config:        config,
-		server:        server,
+		server:        servers[0],
+		servers:       servers,
 		policyManager: v.GetFeature(policy.ManagerType()).(policy.Manager),
 	}, nil
 }
@@ -257,52 +303,15 @@ func verifyTrustTunnelTLS(peerCerts []*x509.Certificate, cfg *ClientConfig) erro
 	return nil
 }
 
-func (c *Client) Process(ctx context.Context, link *transport.Link, dialer internet.Dialer) error {
-	outbounds := session.OutboundsFromContext(ctx)
-	ob := outbounds[len(outbounds)-1]
-	if !ob.Target.IsValid() {
-		return errors.New("target not specified")
-	}
-	ob.Name = "trusttunnel"
-
-	user := c.server.User
-	account, ok := user.Account.(*MemoryAccount)
-	if !ok {
-		return errors.New("trusttunnel user account is not valid")
-	}
-
-	if err := c.validateOutboundTarget(ob.Target); err != nil {
-		return err
-	}
-
-	if ob.Target.Network == xnet.Network_ICMP {
-		return c.processICMP(ctx, link, dialer, account, ob.Target)
-	}
-
-	host := ob.Target.NetAddr()
-	if host == "" {
-		return errors.New("invalid target address")
-	}
-
-	if ob.Target.Network == xnet.Network_UDP {
-		return c.processUDP(ctx, link, dialer, account, ob.Target)
-	}
-
-	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
-	updatedCtx, tlsHandledByStreamSettings, err := trustTunnelContextWithTransportSecurityOverrides(ctx, dialer, c.config)
-	if err != nil {
-		return err
-	}
-	ctx = updatedCtx
-
+func (c *Client) connectStreamTunnel(ctx context.Context, dialer internet.Dialer, server *protocol.ServerSpec, account *MemoryAccount, host string, tlsHandledByStreamSettings bool) (io.ReadWriteCloser, error) {
 	attemptHTTP3, skipHTTP3Reason, err := trustTunnelHTTP3AttemptPolicy(c.config, dialer)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if attemptHTTP3 {
-		serverAddr := c.server.Destination.NetAddr()
+		serverAddr := server.Destination.NetAddr()
 		if serverAddr == "" {
-			return errors.New("invalid trusttunnel server address")
+			return nil, errors.New("invalid trusttunnel server address")
 		}
 
 		http3Ctx, cancelHTTP3 := trustTunnelContextWithHTTP3FallbackTimeout(ctx, c.config)
@@ -310,49 +319,47 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		cancelHTTP3()
 		if err != nil {
 			if !trustTunnelTransportAllowsHTTP2Fallback(c.config) || !trustTunnelHTTP3FallbackEligible(err) {
-				return errors.New("failed to establish trusttunnel HTTP/3 CONNECT").Base(err).AtWarning()
+				return nil, errors.New("failed to establish trusttunnel HTTP/3 CONNECT").Base(err).AtWarning()
 			}
 			errors.LogWarning(ctx, "trusttunnel HTTP/3 CONNECT failed; falling back to HTTP/2 path: ", err)
 		} else {
-			defer tunnelConn.Close()
-			return runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
+			return tunnelConn, nil
 		}
 	} else if c.config.GetTransport() == TransportProtocol_AUTO && skipHTTP3Reason != "" {
 		errors.LogInfo(ctx, "trusttunnel transport=auto bypasses HTTP/3: ", skipHTTP3Reason)
 	}
 
-	rawConn, err := dialer.Dial(ctx, c.server.Destination)
+	rawConn, err := dialer.Dial(ctx, server.Destination)
 	if err != nil {
-		return errors.New("failed to dial trusttunnel server").Base(err).AtWarning()
+		return nil, errors.New("failed to dial trusttunnel server").Base(err).AtWarning()
 	}
 	conn := rawConn.(stat.Connection)
 
 	req, err := buildConnectRequest(host, account)
 	if err != nil {
 		_ = conn.Close()
-		return errors.New("failed to create CONNECT request").Base(err)
+		return nil, errors.New("failed to create CONNECT request").Base(err)
 	}
 
 	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		_ = conn.Close()
-		return errors.New("failed to set deadline").Base(err).AtWarning()
+		return nil, errors.New("failed to set deadline").Base(err).AtWarning()
 	}
 
 	securityState, err := trustTunnelClientSecurityState(ctx, conn)
 	if err != nil {
 		_ = conn.Close()
-		return err
+		return nil, err
 	}
 
 	if !securityState.UsesReality && !tlsHandledByStreamSettings {
 		if err := verifyTrustTunnelTLS(securityState.PeerCertificates, c.config); err != nil {
 			_ = conn.Close()
-			return errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
+			return nil, errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
 		}
 	}
 
 	var tunnelConn io.ReadWriteCloser
-
 	switch {
 	case trustTunnelShouldUseHTTP2(securityState):
 		if securityState.UsesReality && securityState.NegotiatedProtocol == "" {
@@ -366,12 +373,77 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 
 	if err != nil {
 		_ = conn.Close()
-		return errors.New("failed to establish trusttunnel CONNECT").Base(err).AtWarning()
+		return nil, errors.New("failed to establish trusttunnel CONNECT").Base(err).AtWarning()
 	}
-	defer tunnelConn.Close()
 
 	if err := conn.SetDeadline(time.Time{}); err != nil {
-		return errors.New("failed to clear deadline").Base(err).AtWarning()
+		_ = tunnelConn.Close()
+		return nil, errors.New("failed to clear deadline").Base(err).AtWarning()
 	}
-	return runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
+
+	return tunnelConn, nil
+}
+
+func (c *Client) Process(ctx context.Context, link *transport.Link, dialer internet.Dialer) error {
+	outbounds := session.OutboundsFromContext(ctx)
+	ob := outbounds[len(outbounds)-1]
+	if !ob.Target.IsValid() {
+		return errors.New("target not specified")
+	}
+	ob.Name = "trusttunnel"
+
+	servers := c.serverSpecs()
+	if len(servers) == 0 {
+		return errors.New("no target trusttunnel server found")
+	}
+
+	if err := c.validateOutboundTarget(ob.Target); err != nil {
+		return err
+	}
+
+	if ob.Target.Network == xnet.Network_ICMP {
+		return c.processICMP(ctx, link, dialer, ob.Target)
+	}
+
+	host := ob.Target.NetAddr()
+	if host == "" {
+		return errors.New("invalid target address")
+	}
+
+	if ob.Target.Network == xnet.Network_UDP {
+		return c.processUDP(ctx, link, dialer, ob.Target)
+	}
+
+	ctx = xtlstls.ContextWithClientHelloRandomSpec(ctx, c.config.GetClientRandom())
+	updatedCtx, tlsHandledByStreamSettings, err := trustTunnelContextWithTransportSecurityOverrides(ctx, dialer, c.config)
+	if err != nil {
+		return err
+	}
+	ctx = updatedCtx
+
+	var lastErr error
+	for idx, server := range servers {
+		account, err := trustTunnelAccountFromServer(server)
+		if err != nil {
+			return err
+		}
+
+		tunnelConn, err := c.connectStreamTunnel(ctx, dialer, server, account, host, tlsHandledByStreamSettings)
+		if err != nil {
+			lastErr = err
+			if idx+1 < len(servers) {
+				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(servers), " failed; trying next endpoint: ", err)
+				continue
+			}
+			break
+		}
+		defer tunnelConn.Close()
+		return runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
+	}
+
+	if lastErr != nil {
+		return lastErr
+	}
+
+	return errors.New("no target trusttunnel server found")
 }
