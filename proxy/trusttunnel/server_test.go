@@ -271,6 +271,52 @@ func TestServeHTTP2CheckIgnoresConnectionLimit(t *testing.T) {
 	}
 }
 
+func TestCountedH3ResponseWriterRejectPathWritesRegularHTTPResponse(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	raw := &bytes.Buffer{}
+	writer := &countedH3ResponseWriter{
+		base:   recorder,
+		writer: raw,
+	}
+
+	writeH2Response(writer, http.StatusTooManyRequests, "connection limit exceeded\n", nil)
+
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusTooManyRequests)
+	}
+	if got := recorder.Body.String(); got != "connection limit exceeded\n" {
+		t.Fatalf("body = %q, want %q", got, "connection limit exceeded\n")
+	}
+	if raw.Len() != 0 {
+		t.Fatalf("raw writer length = %d, want 0 for non-tunnel response", raw.Len())
+	}
+}
+
+func TestCountedH3ResponseWriterTunnelModeWritesToRawStream(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	raw := &bytes.Buffer{}
+	writer := &countedH3ResponseWriter{
+		base:   recorder,
+		writer: raw,
+	}
+
+	writer.WriteHeader(http.StatusOK)
+	writer.enableRawTunnelWrites()
+	if _, err := io.WriteString(writer, "payload"); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if recorder.Body.Len() != 0 {
+		t.Fatalf("regular body length = %d, want 0 after raw tunnel switch", recorder.Body.Len())
+	}
+	if got := raw.String(); got != "payload" {
+		t.Fatalf("raw payload = %q, want %q", got, "payload")
+	}
+}
+
 func TestServeHTTP2ConnectDispatchFailureAbortsHandlerAndClosesRequestBody(t *testing.T) {
 	server := newTestTrustTunnelServer(t, &ServerConfig{})
 	dispatcher := &testDispatcher{
