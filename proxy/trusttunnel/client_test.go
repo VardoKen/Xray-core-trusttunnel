@@ -322,6 +322,80 @@ func TestClientServerAttemptsPreferLastSuccessfulEndpoint(t *testing.T) {
 	}
 }
 
+func TestClientServerAttemptsMoveCoolingDownEndpointToBack(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	client := &Client{
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{Username: "u1", Password: "p1"},
+			},
+		),
+		servers: []*protocol.ServerSpec{
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.2"), xnet.Port(9444)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+		},
+	}
+
+	client.noteServerFailureUntil(0, now.Add(time.Second))
+	attempts := client.serverAttemptsAt(now)
+	if got := attempts[0].server.Destination.NetAddr(); got != "127.0.0.2:9444" {
+		t.Fatalf("attempts[0] during cooldown = %q, want %q", got, "127.0.0.2:9444")
+	}
+	if got := attempts[1].server.Destination.NetAddr(); got != "127.0.0.1:9443" {
+		t.Fatalf("attempts[1] during cooldown = %q, want %q", got, "127.0.0.1:9443")
+	}
+
+	attempts = client.serverAttemptsAt(now.Add(2 * time.Second))
+	if got := attempts[0].server.Destination.NetAddr(); got != "127.0.0.1:9443" {
+		t.Fatalf("attempts[0] after cooldown = %q, want %q", got, "127.0.0.1:9443")
+	}
+}
+
+func TestClientServerAttemptsCoolingDownPreferredEndpointTemporarilyUsesNextServer(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	client := &Client{
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{Username: "u1", Password: "p1"},
+			},
+		),
+		servers: []*protocol.ServerSpec{
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.2"), xnet.Port(9444)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+		},
+	}
+
+	client.noteServerSuccess(1)
+	client.noteServerFailureUntil(1, now.Add(time.Second))
+
+	attempts := client.serverAttemptsAt(now)
+	if got := attempts[0].server.Destination.NetAddr(); got != "127.0.0.1:9443" {
+		t.Fatalf("attempts[0] with preferred cooling down = %q, want %q", got, "127.0.0.1:9443")
+	}
+	if got := attempts[1].server.Destination.NetAddr(); got != "127.0.0.2:9444" {
+		t.Fatalf("attempts[1] with preferred cooling down = %q, want %q", got, "127.0.0.2:9444")
+	}
+
+	attempts = client.serverAttemptsAt(now.Add(2 * time.Second))
+	if got := attempts[0].server.Destination.NetAddr(); got != "127.0.0.2:9444" {
+		t.Fatalf("attempts[0] after preferred cooldown expires = %q, want %q", got, "127.0.0.2:9444")
+	}
+}
+
 func TestClientProcessFallsBackToHTTP2WhenHTTP3FailsTransport(t *testing.T) {
 	withTrustTunnelHTTP3Connector(t, func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error) {
 		return nil, trustTunnelWrapHTTP3ConnectError(io.EOF, true)

@@ -161,6 +161,7 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer) (
 			if err != nil {
 				if !trustTunnelTransportAllowsHTTP2Fallback(c.config) || !trustTunnelHTTP3FallbackEligible(err) {
 					lastErr = errors.New("failed to establish trusttunnel HTTP/3 UDP CONNECT").Base(err).AtWarning()
+					c.noteServerFailure(attempt.index)
 					if idx+1 < len(attempts) {
 						errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next UDP endpoint: ", lastErr)
 						continue
@@ -177,6 +178,7 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer) (
 		rawConn, err := dialer.Dial(ctx, server.Destination)
 		if err != nil {
 			lastErr = errors.New("failed to dial trusttunnel server").Base(err).AtWarning()
+			c.noteServerFailure(attempt.index)
 			if idx+1 < len(attempts) {
 				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next UDP endpoint: ", lastErr)
 				continue
@@ -200,6 +202,7 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer) (
 		if err != nil {
 			_ = conn.Close()
 			lastErr = err
+			c.noteServerFailure(attempt.index)
 			if idx+1 < len(attempts) {
 				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next UDP endpoint: ", lastErr)
 				continue
@@ -211,6 +214,7 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer) (
 			if err := verifyTrustTunnelTLS(securityState.PeerCertificates, c.config); err != nil {
 				_ = conn.Close()
 				lastErr = errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
+				c.noteServerFailure(attempt.index)
 				if idx+1 < len(attempts) {
 					errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next UDP endpoint: ", lastErr)
 					continue
@@ -222,6 +226,7 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer) (
 		if !trustTunnelShouldUseHTTP2(securityState) {
 			_ = conn.Close()
 			lastErr = errors.New("trusttunnel udp over http2 requires negotiated ALPN h2, got ", securityState.NegotiatedProtocol)
+			c.noteServerFailure(attempt.index)
 			if idx+1 < len(attempts) {
 				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next UDP endpoint: ", lastErr)
 				continue
@@ -233,6 +238,7 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer) (
 		if err != nil {
 			_ = conn.Close()
 			lastErr = errors.New("failed to establish trusttunnel UDP CONNECT").Base(err).AtWarning()
+			c.noteServerFailure(attempt.index)
 			if idx+1 < len(attempts) {
 				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next UDP endpoint: ", lastErr)
 				continue
@@ -243,6 +249,7 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer) (
 		if err := conn.SetDeadline(time.Time{}); err != nil {
 			_ = tunnelConn.Close()
 			lastErr = errors.New("failed to clear deadline").Base(err).AtWarning()
+			c.noteServerFailure(attempt.index)
 			if idx+1 < len(attempts) {
 				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next UDP endpoint: ", lastErr)
 				continue

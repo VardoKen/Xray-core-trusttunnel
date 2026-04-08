@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,12 +38,15 @@ type Client struct {
 	servers              []*protocol.ServerSpec
 	policyManager        policy.Manager
 	preferredServerIndex atomic.Uint32
+	serverRetryAfter     sync.Map
 }
 
 type trustTunnelServerAttempt struct {
 	index  int
 	server *protocol.ServerSpec
 }
+
+const trustTunnelFailedServerCooldown = 5 * time.Second
 
 func trustTunnelServersFromConfig(config *ClientConfig) ([]*protocol.ServerSpec, error) {
 	endpoints := config.GetServers()
@@ -80,6 +84,10 @@ func (c *Client) serverSpecs() []*protocol.ServerSpec {
 }
 
 func (c *Client) serverAttempts() []trustTunnelServerAttempt {
+	return c.serverAttemptsAt(time.Now())
+}
+
+func (c *Client) serverAttemptsAt(now time.Time) []trustTunnelServerAttempt {
 	servers := c.serverSpecs()
 	if len(servers) == 0 {
 		return nil
@@ -110,7 +118,36 @@ func (c *Client) serverAttempts() []trustTunnelServerAttempt {
 			server: server,
 		})
 	}
-	return attempts
+
+	ready := make([]trustTunnelServerAttempt, 0, len(attempts))
+	coolingDown := make([]trustTunnelServerAttempt, 0, len(attempts))
+	for _, attempt := range attempts {
+		if c.serverInFailureCooldown(attempt.index, now) {
+			coolingDown = append(coolingDown, attempt)
+			continue
+		}
+		ready = append(ready, attempt)
+	}
+	if len(ready) == 0 {
+		return coolingDown
+	}
+	return append(ready, coolingDown...)
+}
+
+func (c *Client) serverInFailureCooldown(index int, now time.Time) bool {
+	if index < 0 {
+		return false
+	}
+	value, ok := c.serverRetryAfter.Load(index)
+	if !ok {
+		return false
+	}
+	untilUnixNano, ok := value.(int64)
+	if !ok || untilUnixNano <= now.UnixNano() {
+		c.serverRetryAfter.Delete(index)
+		return false
+	}
+	return true
 }
 
 func (c *Client) noteServerSuccess(index int) {
@@ -118,6 +155,18 @@ func (c *Client) noteServerSuccess(index int) {
 		return
 	}
 	c.preferredServerIndex.Store(uint32(index))
+	c.serverRetryAfter.Delete(index)
+}
+
+func (c *Client) noteServerFailure(index int) {
+	c.noteServerFailureUntil(index, time.Now().Add(trustTunnelFailedServerCooldown))
+}
+
+func (c *Client) noteServerFailureUntil(index int, until time.Time) {
+	if index < 0 || index >= len(c.serverSpecs()) {
+		return
+	}
+	c.serverRetryAfter.Store(index, until.UnixNano())
 }
 
 func trustTunnelAccountFromServer(server *protocol.ServerSpec) (*MemoryAccount, error) {
@@ -479,6 +528,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 
 		tunnelConn, err := c.connectStreamTunnel(ctx, dialer, server, account, host, tlsHandledByStreamSettings)
 		if err != nil {
+			c.noteServerFailure(attempt.index)
 			lastErr = err
 			if idx+1 < len(attempts) {
 				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next endpoint: ", err)
