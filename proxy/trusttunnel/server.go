@@ -122,6 +122,7 @@ type countedReadCloser struct {
 type countedH3ResponseWriter struct {
 	base   http.ResponseWriter
 	writer io.Writer
+	raw    bool
 }
 
 func (w *countedH3ResponseWriter) Header() http.Header {
@@ -133,6 +134,16 @@ func (w *countedH3ResponseWriter) WriteHeader(statusCode int) {
 }
 
 func (w *countedH3ResponseWriter) Write(p []byte) (int, error) {
+	if !w.raw {
+		n, err := w.base.Write(p)
+		if err == nil {
+			if fl, ok := w.base.(http.Flusher); ok {
+				fl.Flush()
+			}
+		}
+		return n, err
+	}
+
 	n, err := w.writer.Write(p)
 	if err == nil {
 		if fl, ok := w.base.(http.Flusher); ok {
@@ -145,6 +156,12 @@ func (w *countedH3ResponseWriter) Write(p []byte) (int, error) {
 func (w *countedH3ResponseWriter) Flush() {
 	if fl, ok := w.base.(http.Flusher); ok {
 		fl.Flush()
+	}
+}
+
+func (w *countedH3ResponseWriter) enableRawTunnelWrites() {
+	if w != nil {
+		w.raw = true
 	}
 }
 
@@ -863,6 +880,9 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 	w.WriteHeader(http.StatusOK)
 	if fl, ok := w.(http.Flusher); ok {
 		fl.Flush()
+	}
+	if h3w, ok := w.(*countedH3ResponseWriter); ok {
+		h3w.enableRawTunnelWrites()
 	}
 
 	var flusher http.Flusher

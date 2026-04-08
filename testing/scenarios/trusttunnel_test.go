@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apernet/quic-go"
+	"github.com/apernet/quic-go/http3"
 	"github.com/xtls/xray-core/app/commander"
 	"github.com/xtls/xray-core/app/log"
 	"github.com/xtls/xray-core/app/proxyman"
@@ -108,12 +110,19 @@ func trustTunnelTestInboundConfig(port net.Port, users ...*protocol.User) *core.
 }
 
 func trustTunnelTestInboundConfigWithStream(port net.Port, stream *internet.StreamConfig, users ...*protocol.User) *core.InboundHandlerConfig {
+	return trustTunnelTestInboundConfigWithStreamAndTransports(port, stream, []trusttunnel.TransportProtocol{trusttunnel.TransportProtocol_HTTP2}, users...)
+}
+
+func trustTunnelTestInboundConfigWithStreamAndTransports(port net.Port, stream *internet.StreamConfig, transports []trusttunnel.TransportProtocol, users ...*protocol.User) *core.InboundHandlerConfig {
+	if len(transports) == 0 {
+		transports = []trusttunnel.TransportProtocol{trusttunnel.TransportProtocol_HTTP2}
+	}
 	return &core.InboundHandlerConfig{
 		Tag:              "tt",
 		ReceiverSettings: serial.ToTypedMessage(trustTunnelTestReceiverConfig(port, stream)),
 		ProxySettings: serial.ToTypedMessage(&trusttunnel.ServerConfig{
 			Users:      users,
-			Transports: []trusttunnel.TransportProtocol{trusttunnel.TransportProtocol_HTTP2},
+			Transports: transports,
 		}),
 	}
 }
@@ -133,6 +142,11 @@ type trustTunnelScenarioH2Tunnel struct {
 	respBody io.ReadCloser
 }
 
+type trustTunnelScenarioH3Tunnel struct {
+	conn   *quic.Conn
+	stream *http3.RequestStream
+}
+
 func (t *trustTunnelScenarioH2Tunnel) Read(p []byte) (int, error) {
 	return t.respBody.Read(p)
 }
@@ -150,6 +164,18 @@ func (t *trustTunnelScenarioH2Tunnel) Close() error {
 	}
 	if t.rawConn != nil {
 		return t.rawConn.Close()
+	}
+	return nil
+}
+
+func (t *trustTunnelScenarioH3Tunnel) Close() error {
+	if t.stream != nil {
+		t.stream.CancelRead(quic.StreamErrorCode(http3.ErrCodeNoError))
+		t.stream.CancelWrite(quic.StreamErrorCode(http3.ErrCodeNoError))
+		_ = t.stream.Close()
+	}
+	if t.conn != nil {
+		return t.conn.CloseWithError(0, "")
 	}
 	return nil
 }
@@ -207,6 +233,96 @@ func trustTunnelScenarioOpenH2Tunnel(serverPort net.Port, target string, usernam
 		reqBody:  pw,
 		respBody: resp.Body,
 	}, resp.StatusCode, nil
+}
+
+func trustTunnelScenarioOpenH3Tunnel(serverPort net.Port, target string, username string, password string) (*trustTunnelScenarioH3Tunnel, int, error) {
+	serverAddr := fmt.Sprintf("127.0.0.1:%d", serverPort)
+	tlsCfg := &gotls.Config{
+		ServerName:         "localhost",
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"h3"},
+	}
+	transport := &http3.Transport{
+		TLSClientConfig: tlsCfg,
+		QUICConfig:      &quic.Config{},
+	}
+	conn, err := quic.DialAddr(context.Background(), serverAddr, tlsCfg, transport.QUICConfig)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	clientConn := transport.NewClientConn(conn)
+	stream, err := clientConn.OpenRequestStream(context.Background())
+	if err != nil {
+		_ = conn.CloseWithError(0, "")
+		return nil, 0, err
+	}
+
+	req, err := http.NewRequest(http.MethodConnect, "https://"+serverAddr, nil)
+	if err != nil {
+		stream.CancelRead(quic.StreamErrorCode(http3.ErrCodeRequestCanceled))
+		stream.CancelWrite(quic.StreamErrorCode(http3.ErrCodeRequestCanceled))
+		_ = conn.CloseWithError(0, "")
+		return nil, 0, err
+	}
+	req.Host = target
+	req.Header.Set("Host", target)
+	req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
+
+	if err := stream.SendRequestHeader(req); err != nil {
+		stream.CancelRead(quic.StreamErrorCode(http3.ErrCodeRequestCanceled))
+		stream.CancelWrite(quic.StreamErrorCode(http3.ErrCodeRequestCanceled))
+		_ = conn.CloseWithError(0, "")
+		return nil, 0, err
+	}
+
+	resp, err := stream.ReadResponse()
+	if err != nil {
+		_ = conn.CloseWithError(0, "")
+		return nil, 0, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		_ = conn.CloseWithError(0, "")
+		return nil, resp.StatusCode, fmt.Errorf("status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	return &trustTunnelScenarioH3Tunnel{
+		conn:   conn,
+		stream: stream,
+	}, resp.StatusCode, nil
+}
+
+func trustTunnelScenarioH3ConnectStatus(serverPort net.Port, target string, username string, password string) (int, error) {
+	serverAddr := fmt.Sprintf("127.0.0.1:%d", serverPort)
+	tlsCfg := &gotls.Config{
+		ServerName:         "localhost",
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"h3"},
+	}
+	transport := &http3.Transport{
+		TLSClientConfig: tlsCfg,
+		QUICConfig:      &quic.Config{},
+	}
+	defer transport.Close()
+
+	req, err := http.NewRequest(http.MethodConnect, "https://"+serverAddr, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Host = target
+	req.Header.Set("Host", target)
+	req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
+
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	return resp.StatusCode, nil
 }
 
 func TestTrustTunnelCommanderAddRemoveUser(t *testing.T) {
@@ -474,6 +590,117 @@ func TestTrustTunnelInboundConnectionLimitHTTP2(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("third tunnel after release failed: %v", lastErr)
+}
+
+func TestTrustTunnelInboundConnectionLimitHTTP3(t *testing.T) {
+	targetListener, err := stdnet.Listen("tcp", "127.0.0.1:0")
+	common.Must(err)
+	defer targetListener.Close()
+
+	targetAccepts := make(chan stdnet.Conn, 8)
+	targetDone := make(chan struct{})
+	go func() {
+		defer close(targetDone)
+		for {
+			conn, err := targetListener.Accept()
+			if err != nil {
+				return
+			}
+			targetAccepts <- conn
+		}
+	}()
+	defer func() {
+		_ = targetListener.Close()
+		for {
+			select {
+			case conn := <-targetAccepts:
+				if conn != nil {
+					_ = conn.Close()
+				}
+			default:
+				select {
+				case <-targetDone:
+					return
+				default:
+					return
+				}
+			}
+		}
+	}()
+
+	serverCert, _ := cert.MustGenerate(nil, cert.CommonName("localhost"))
+	serverPort := tcp.PickPort()
+
+	serverConfig := &core.Config{
+		Inbound: []*core.InboundHandlerConfig{
+			trustTunnelTestInboundConfigWithStreamAndTransports(
+				serverPort,
+				trustTunnelTestTLSStreamConfig(&ttls.Config{
+					Certificate: []*ttls.Certificate{ttls.ParseCertificate(serverCert)},
+					NextProtocol: []string{"h3"},
+				}),
+				[]trusttunnel.TransportProtocol{trusttunnel.TransportProtocol_HTTP3},
+				trustTunnelTestServerUserWithLimits("tt@example.com", "tt-user", "tt-pass", 0, 1),
+			),
+		},
+		Outbound: []*core.OutboundHandlerConfig{
+			{ProxySettings: serial.ToTypedMessage(&freedom.Config{})},
+		},
+	}
+
+	servers, err := InitializeServerConfigs(serverConfig)
+	common.Must(err)
+	defer CloseAllServers(servers)
+
+	targetAddr := targetListener.Addr().String()
+	tunnel1, status, err := trustTunnelScenarioOpenH3Tunnel(serverPort, targetAddr, "tt-user", "tt-pass")
+	if err != nil {
+		t.Fatalf("failed to open first H3 tunnel: status=%d err=%v", status, err)
+	}
+	defer tunnel1.Close()
+
+	var upstreamConns []stdnet.Conn
+	waitAccepts := func(want int, timeout time.Duration) error {
+		deadline := time.NewTimer(timeout)
+		defer deadline.Stop()
+		for len(upstreamConns) < want {
+			select {
+			case conn := <-targetAccepts:
+				upstreamConns = append(upstreamConns, conn)
+			case <-deadline.C:
+				return fmt.Errorf("accepted=%d want=%d", len(upstreamConns), want)
+			}
+		}
+		return nil
+	}
+
+	if err := waitAccepts(1, 5*time.Second); err != nil {
+		t.Fatalf("first H3 tunnel did not open upstream target connection: %v", err)
+	}
+
+	_, _ = trustTunnelScenarioH3ConnectStatus(serverPort, targetAddr, "tt-user", "tt-pass")
+	time.Sleep(300 * time.Millisecond)
+	if len(upstreamConns) != 1 {
+		t.Fatalf("second H3 tunnel unexpectedly opened extra upstream connections: got %d, want 1", len(upstreamConns))
+	}
+
+	tunnel1.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		tunnel3, status, err := trustTunnelScenarioOpenH3Tunnel(serverPort, targetAddr, "tt-user", "tt-pass")
+		if err == nil {
+			defer tunnel3.Close()
+			if waitErr := waitAccepts(2, 2*time.Second); waitErr != nil {
+				t.Fatalf("third H3 tunnel opened but upstream target connection count did not increase: %v", waitErr)
+			}
+			_ = tunnel3.Close()
+			return
+		}
+		lastErr = fmt.Errorf("status=%d err=%w", status, err)
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("third H3 tunnel after release failed: %v", lastErr)
 }
 
 func TestTrustTunnelOutboundAutoFallsBackToHTTP2TLS(t *testing.T) {
