@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-09
-Коммит состояния: `e749988e`
+Коммит состояния: `71ff8d71`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -80,12 +80,31 @@
 - `$env:GOFLAGS='-buildvcs=false'; go test ./testing/scenarios -run 'TestTrustTunnel' -count=1 -timeout 90m -v`
 - `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main`
 
+Подтверждено remote-live sequence на 2026-04-09:
+- preflight code state: `71ff8d71`;
+- lab repo: `/opt/lab/xray-tt/src/xray-core-trusttunnel`;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-current-live`;
+- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-current-endpoint-policy`;
+- lab client config: `/opt/lab/xray-tt/configs/endpoint_policy_client_h2_tls.json`;
+- remote endpoint configs:
+  - `/opt/trusttunnel-dev/configs/endpoint_policy_h2_tls_a.json` (`:9443`);
+  - `/opt/trusttunnel-dev/configs/endpoint_policy_h2_tls_b.json` (`:9444`);
+  - `/opt/trusttunnel-dev/configs/endpoint_policy_h2_tls_c.json` (`:9445`);
+- authoritative lab bundle: `/opt/lab/xray-tt/logs/endpoint-policy-live-20260409-005720`;
+- authoritative remote bundle: `/opt/trusttunnel-dev/logs/endpoint-policy-live-20260409-005720`.
+
 Что именно подтверждено:
 - ordered `servers[]` реально используется runtime-слоем как список endpoint, а не схлопывается до одного адреса;
 - `TestTrustTunnelOutboundFallsBackToNextConfiguredServerTLS` в `testing/scenarios` подтверждает фактический fallback на следующий endpoint в live local scenario;
 - `TestClientServerAttemptsPreferLastSuccessfulEndpoint` подтверждает preference последнего успешно established endpoint на следующих соединениях;
 - `TestClientServerAttemptsMoveCoolingDownEndpointToBack` и `TestClientServerAttemptsCoolingDownPreferredEndpointTemporarilyUsesNextServer` подтверждают короткий cooldown после pre-establishment fail и возврат endpoint в нормальный порядок после истечения cooldown;
 - `TestConnectUDPTunnelPrefersLastSuccessfulServer` подтверждает, что runtime preference применяется не только к stream path, но и к UDP tunnel establish.
+- remote-live sequence на одном long-lived client-process подтверждает то же поведение на реальном traffic path lab -> remote -> internet:
+  - `step1_only_a_success`: при живом только endpoint `A:9443` соединение проходит через `A`;
+  - `step2_fallback_to_b`: при мёртвом `A:9443` и живых `B:9444`/`C:9445` client log пишет `trusttunnel server 1/3 failed; trying next endpoint`, а трафик уходит через `B`;
+  - `step3_cooldown_skips_a_uses_c`: сразу после fail `A` остаётся в cooldown, при мёртвом preferred `B` и живых `A`/`C` client снова пишет `trusttunnel server 1/3 failed; trying next endpoint`, но successful CONNECT приходит уже на `C`, а не на `A`;
+  - `step4_cooldown_expired_returns_to_a`: после ожидания больше `5s` cooldown истекает, при мёртвом preferred `C` и живых `A`/`B` successful CONNECT снова приходит на `A`, а не на `B`;
+  - во всех четырёх шагах downstream probe через lab-side HTTP proxy даёт внешний IP `37.252.0.130`, то есть выбор endpoint подтверждён не synthetic dial-check, а реальным интернет-трафиком.
 
 ## 2. Подтверждённые runtime-проверки
 

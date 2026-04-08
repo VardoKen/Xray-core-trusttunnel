@@ -124,11 +124,14 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 ### 3.5. Multi-endpoint outbound policy
 
-Уже реализовано локальным runtime-слоем:
+Уже реализовано и подтверждено remote-live sequence:
 - ordered outbound `servers[]` без схлопывания до одного endpoint;
 - единый fallback до establish для stream / UDP / ICMP path;
 - preference последнего успешно established endpoint;
 - короткий cooldown после pre-establishment fail, чтобы следующий connect временно не бился в тот же проблемный endpoint первым.
+
+Что уже подтверждено дополнительно:
+- sequence `/opt/lab/xray-tt/logs/endpoint-policy-live-20260409-005720` на трёх remote endpoint показывает не только fallback `A -> B`, но и runtime-переупорядочивание `B -> C` при ещё не истекшем cooldown у `A`, а затем возврат `C -> A` после истечения cooldown.
 
 Что остаётся дальше:
 - решить, насколько глубоко форк должен повторять original client endpoint policy;
