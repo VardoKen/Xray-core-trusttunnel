@@ -271,6 +271,57 @@ func TestClientProcessFallsBackToNextConfiguredServer(t *testing.T) {
 	}
 }
 
+func TestClientServerAttemptsPreferLastSuccessfulEndpoint(t *testing.T) {
+	client := &Client{
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+		servers: []*protocol.ServerSpec{
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+				&protocol.MemoryUser{
+					Account: &MemoryAccount{
+						Username: "u1",
+						Password: "p1",
+					},
+				},
+			),
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.2"), xnet.Port(9444)),
+				&protocol.MemoryUser{
+					Account: &MemoryAccount{
+						Username: "u1",
+						Password: "p1",
+					},
+				},
+			),
+		},
+	}
+
+	attempts := client.serverAttempts()
+	if len(attempts) != 2 {
+		t.Fatalf("len(attempts) = %d, want 2", len(attempts))
+	}
+	if got := attempts[0].server.Destination.NetAddr(); got != "127.0.0.1:9443" {
+		t.Fatalf("attempts[0] = %q, want %q", got, "127.0.0.1:9443")
+	}
+
+	client.noteServerSuccess(1)
+	attempts = client.serverAttempts()
+	if got := attempts[0].server.Destination.NetAddr(); got != "127.0.0.2:9444" {
+		t.Fatalf("attempts[0] after success = %q, want %q", got, "127.0.0.2:9444")
+	}
+	if got := attempts[1].server.Destination.NetAddr(); got != "127.0.0.1:9443" {
+		t.Fatalf("attempts[1] after success = %q, want %q", got, "127.0.0.1:9443")
+	}
+}
+
 func TestClientProcessFallsBackToHTTP2WhenHTTP3FailsTransport(t *testing.T) {
 	withTrustTunnelHTTP3Connector(t, func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error) {
 		return nil, trustTunnelWrapHTTP3ConnectError(io.EOF, true)
@@ -1200,6 +1251,101 @@ func TestConnectUDPTunnelFallsBackToHTTP2WhenHTTP3FailsTransport(t *testing.T) {
 	}
 	if dialer.dialCalls != 1 {
 		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
+	}
+}
+
+func TestConnectUDPTunnelPrefersLastSuccessfulServer(t *testing.T) {
+	http3Calls := make([]string, 0, 3)
+	withTrustTunnelHTTP3Connector(t, func(_ context.Context, serverAddr string, _ string, _ *MemoryAccount, _ *ClientConfig) (io.ReadWriteCloser, error) {
+		http3Calls = append(http3Calls, serverAddr)
+		switch len(http3Calls) {
+		case 1:
+			return nil, trustTunnelWrapHTTP3ConnectError(io.EOF, true)
+		case 2, 3:
+			return newFakeTrustTunnelStreamConn(nil), nil
+		default:
+			return nil, io.EOF
+		}
+	})
+
+	client := &Client{
+		config: &ClientConfig{
+			Transport: TransportProtocol_HTTP3,
+			EnableUdp: true,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+		servers: []*protocol.ServerSpec{
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+				&protocol.MemoryUser{
+					Account: &MemoryAccount{
+						Username: "u1",
+						Password: "p1",
+					},
+				},
+			),
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.2"), xnet.Port(9444)),
+				&protocol.MemoryUser{
+					Account: &MemoryAccount{
+						Username: "u1",
+						Password: "p1",
+					},
+				},
+			),
+		},
+	}
+
+	dialer := &fakeTrustTunnelServerSequenceDialer{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				ServerName: "vpn.example.com",
+			},
+		},
+		errs: map[string]error{
+			"127.0.0.1:9443": io.EOF,
+		},
+	}
+
+	tunnelConn, err := client.connectUDPTunnel(context.Background(), dialer)
+	if err != nil {
+		t.Fatalf("first connectUDPTunnel() failed: %v", err)
+	}
+	_ = tunnelConn.Close()
+
+	tunnelConn, err = client.connectUDPTunnel(context.Background(), dialer)
+	if err != nil {
+		t.Fatalf("second connectUDPTunnel() failed: %v", err)
+	}
+	_ = tunnelConn.Close()
+
+	wantHTTP3 := []string{"127.0.0.1:9443", "127.0.0.2:9444", "127.0.0.2:9444"}
+	if len(http3Calls) != len(wantHTTP3) {
+		t.Fatalf("http3Calls = %v, want %v", http3Calls, wantHTTP3)
+	}
+	for i := range wantHTTP3 {
+		if http3Calls[i] != wantHTTP3[i] {
+			t.Fatalf("http3Calls[%d] = %q, want %q", i, http3Calls[i], wantHTTP3[i])
+		}
+	}
+
+	wantDialOrder := []string{"127.0.0.1:9443"}
+	if len(dialer.callOrder) != len(wantDialOrder) {
+		t.Fatalf("dialer.callOrder = %v, want %v", dialer.callOrder, wantDialOrder)
+	}
+	for i := range wantDialOrder {
+		if dialer.callOrder[i] != wantDialOrder[i] {
+			t.Fatalf("dialer.callOrder[%d] = %q, want %q", i, dialer.callOrder[i], wantDialOrder[i])
+		}
 	}
 }
 

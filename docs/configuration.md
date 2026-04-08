@@ -25,7 +25,7 @@ Validated transport selection modes:
 
 Validated outbound endpoint-selection behavior:
 
-- ordered `servers[]` lists with sequential endpoint fallback
+- ordered `servers[]` lists with sequential endpoint fallback and last-successful endpoint preference
 - legacy `address` + `port` shorthand for single-endpoint configs
 
 Validated payload paths:
@@ -253,6 +253,7 @@ Use `servers` when you want more than one TrustTunnel server endpoint:
 Rules:
 
 - the client tries endpoints in the listed order
+- after one endpoint succeeds, subsequent connections try that last successful endpoint first
 - if one endpoint fails before the tunnel is established, the client moves to the next endpoint
 - once a tunnel is established, runtime errors on that tunnel do not trigger a hidden switch to another endpoint
 - do not combine `servers` with the shorthand `address` and `port` in the same outbound config

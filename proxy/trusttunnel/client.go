@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/xtls/xray-core/common"
@@ -31,10 +32,16 @@ func init() {
 }
 
 type Client struct {
-	config        *ClientConfig
-	server        *protocol.ServerSpec
-	servers       []*protocol.ServerSpec
-	policyManager policy.Manager
+	config               *ClientConfig
+	server               *protocol.ServerSpec
+	servers              []*protocol.ServerSpec
+	policyManager        policy.Manager
+	preferredServerIndex atomic.Uint32
+}
+
+type trustTunnelServerAttempt struct {
+	index  int
+	server *protocol.ServerSpec
 }
 
 func trustTunnelServersFromConfig(config *ClientConfig) ([]*protocol.ServerSpec, error) {
@@ -70,6 +77,47 @@ func (c *Client) serverSpecs() []*protocol.ServerSpec {
 		return []*protocol.ServerSpec{c.server}
 	}
 	return nil
+}
+
+func (c *Client) serverAttempts() []trustTunnelServerAttempt {
+	servers := c.serverSpecs()
+	if len(servers) == 0 {
+		return nil
+	}
+	if len(servers) == 1 {
+		return []trustTunnelServerAttempt{{
+			index:  0,
+			server: servers[0],
+		}}
+	}
+
+	preferred := int(c.preferredServerIndex.Load())
+	if preferred < 0 || preferred >= len(servers) {
+		preferred = 0
+	}
+
+	attempts := make([]trustTunnelServerAttempt, 0, len(servers))
+	attempts = append(attempts, trustTunnelServerAttempt{
+		index:  preferred,
+		server: servers[preferred],
+	})
+	for idx, server := range servers {
+		if idx == preferred {
+			continue
+		}
+		attempts = append(attempts, trustTunnelServerAttempt{
+			index:  idx,
+			server: server,
+		})
+	}
+	return attempts
+}
+
+func (c *Client) noteServerSuccess(index int) {
+	if index < 0 || index >= len(c.serverSpecs()) {
+		return
+	}
+	c.preferredServerIndex.Store(uint32(index))
 }
 
 func trustTunnelAccountFromServer(server *protocol.ServerSpec) (*MemoryAccount, error) {
@@ -392,8 +440,8 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	}
 	ob.Name = "trusttunnel"
 
-	servers := c.serverSpecs()
-	if len(servers) == 0 {
+	attempts := c.serverAttempts()
+	if len(attempts) == 0 {
 		return errors.New("no target trusttunnel server found")
 	}
 
@@ -422,7 +470,8 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	ctx = updatedCtx
 
 	var lastErr error
-	for idx, server := range servers {
+	for idx, attempt := range attempts {
+		server := attempt.server
 		account, err := trustTunnelAccountFromServer(server)
 		if err != nil {
 			return err
@@ -431,12 +480,13 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		tunnelConn, err := c.connectStreamTunnel(ctx, dialer, server, account, host, tlsHandledByStreamSettings)
 		if err != nil {
 			lastErr = err
-			if idx+1 < len(servers) {
-				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(servers), " failed; trying next endpoint: ", err)
+			if idx+1 < len(attempts) {
+				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next endpoint: ", err)
 				continue
 			}
 			break
 		}
+		c.noteServerSuccess(attempt.index)
 		defer tunnelConn.Close()
 		return runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
 	}
