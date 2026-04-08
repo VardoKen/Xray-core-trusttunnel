@@ -34,6 +34,9 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 	}
 
 	if config := tls.ConfigFromStreamSettings(streamSettings); config != nil {
+		if tls.AntiDPIEnabledFromContext(ctx) {
+			conn = tls.WrapConnWithAntiDPI(conn)
+		}
 		mitmServerName := session.MitmServerNameFromContext(ctx)
 		mitmAlpn11 := session.MitmAlpn11FromContext(ctx)
 		var tlsConfig *gotls.Config

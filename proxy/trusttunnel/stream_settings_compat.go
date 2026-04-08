@@ -42,6 +42,16 @@ func trustTunnelContextWithTransportSecurityOverrides(ctx context.Context, diale
 		ctx = internet.ContextWithStreamSettingsOverride(ctx, effective)
 	}
 
+	if cfg.GetAntiDpi() {
+		if cfg.GetTransport() != TransportProtocol_HTTP2 {
+			return nil, false, errors.New("trusttunnel antiDpi is supported only for http2 over TLS: current transport is not compatible").AtWarning()
+		}
+		if xtlstls.ConfigFromStreamSettings(effective) == nil {
+			return nil, false, errors.New("trusttunnel antiDpi is supported only for http2 over TLS: current outbound streamSettings have no TLS security").AtWarning()
+		}
+		ctx = xtlstls.ContextWithAntiDPI(ctx)
+	}
+
 	return ctx, tlsHandledByStreamSettings, nil
 }
 

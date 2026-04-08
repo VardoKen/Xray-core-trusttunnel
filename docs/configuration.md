@@ -39,14 +39,14 @@ In practice, start from a recommended example unless you explicitly need the sma
 
 | Combination | Status | Notes |
 | --- | --- | --- |
-| HTTP/2 over TLS | Supported | Main certificate-based H2 path |
+| HTTP/2 over TLS | Supported | Main certificate-based H2 path; supports optional `antiDpi=true` |
 | HTTP/2 over REALITY | Supported | Uses `streamSettings.security = "reality"` |
 | HTTP/3 over TLS | Supported | H3 path over QUIC |
 | HTTP/3 over REALITY | Unsupported | Current REALITY runtime is TCP-stream based |
 
 Additional limits:
 
-- `antiDpi=true` is unsupported.
+- `antiDpi=true` is supported only for `HTTP/2 over TLS`.
 - UDP domain targets are not documented as a supported product path. Use IP targets for UDP.
 - With `hasIpv6=false`, domain targets require `targetStrategy: "useipv4"` or `"forceipv4"`.
 
@@ -83,10 +83,24 @@ Recommended addition:
 "clientRandom": "deadbeef"
 ```
 
+Optional anti-DPI addition for `HTTP/2 over TLS` only:
+
+```json
+"antiDpi": true
+```
+
+Rules:
+
+- it requires `streamSettings.security = "tls"`
+- it is rejected for `HTTP/2 over REALITY`
+- it is rejected for `HTTP/3`
+- the current runtime implements it by splitting the first TLS ClientHello write on the TCP/TLS path
+
 Tracked examples:
 
 - minimal: [../testing/trusttunnel/client_h2.json](../testing/trusttunnel/client_h2.json)
 - recommended: [../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json](../testing/trusttunnel/our_client_to_our_server_h2_clientrandom_allow.json)
+- anti-DPI: [../testing/trusttunnel/client_h2_antidpi.json](../testing/trusttunnel/client_h2_antidpi.json)
 
 ### 4.2. Minimal HTTP/2 over REALITY outbound
 
@@ -285,7 +299,7 @@ Tracked rule example:
 | `clientRandom` | string | No, but strongly recommended | Shapes ClientHello random for `client_random` rules | Set it explicitly unless you have a reason not to |
 | `hasIpv6` | boolean | No | Controls IPv6 target allowance | `false` blocks literal IPv6 and requires IPv4-only target strategy for domain targets |
 | `postQuantumGroupEnabled` | boolean | No | Enables the post-quantum group profile where supported | Runtime-active for H2 TLS, H2 REALITY, and H3 TLS |
-| `antiDpi` | boolean | No | Compatibility field only | Explicitly rejected |
+| `antiDpi` | boolean | No | Enables split-ClientHello anti-DPI behavior | Supported only for `HTTP/2 over TLS`; rejected for REALITY, `http3`, or missing TLS `streamSettings` |
 
 ## 7. Inbound quick start
 
@@ -411,7 +425,7 @@ That means:
 The validator rejects these combinations before runtime:
 
 - `http3 + reality`
-- `antiDpi=true`
+- `antiDpi=true` outside `HTTP/2 over TLS`
 - H2 `postQuantumGroupEnabled=true` without TLS or REALITY `streamSettings`
 - `hostname` conflicting with generic `tlsSettings.serverName`
 - `skipVerification=true` combined with explicit generic verify settings
@@ -443,7 +457,7 @@ Windows note:
 ## 11. Unsupported or guarded combinations
 
 - `HTTP/3 over REALITY` is unsupported because the current REALITY runtime is TCP-stream based.
-- `antiDpi=true` is unsupported because there is no transport/runtime implementation behind it.
+- `antiDpi=true` is guarded to `HTTP/2 over TLS` only, because the current implementation only splits the first TLS ClientHello on the TCP/TLS path.
 - UDP domain targets are not a documented product path.
 - `settings.hosts[]` is not a standalone generic host-routing layer.
 - `settings.transports[]` is not a standalone generic transport-routing layer.

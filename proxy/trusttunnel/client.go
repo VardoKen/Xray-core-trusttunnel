@@ -37,10 +37,6 @@ type Client struct {
 }
 
 func (c *Client) validateOutboundTarget(target xnet.Destination) error {
-	if c.config.GetAntiDpi() {
-		return errors.New("trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime").AtWarning()
-	}
-
 	if !c.config.GetHasIpv6() && target.Address != nil {
 		switch {
 		case target.Address.Family().IsIPv6():
@@ -293,6 +289,9 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	}
 
 	if c.config.GetTransport() == TransportProtocol_HTTP3 {
+		if c.config.GetAntiDpi() {
+			return errors.New("trusttunnel antiDpi is supported only for http2 over TLS: http3 has no compatible QUIC anti-DPI runtime").AtWarning()
+		}
 		if trustTunnelHTTP3RealityUnsupported(dialer) {
 			return errors.New("trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only").AtWarning()
 		}

@@ -117,7 +117,52 @@ func TestClientProcessRejectsHTTP3Reality(t *testing.T) {
 	}
 }
 
-func TestClientProcessRejectsAntiDpi(t *testing.T) {
+func TestClientProcessAppliesAntiDpiOnHTTP2TLS(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			AntiDpi: true,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType: "tls",
+			SecuritySettings: &internettls.Config{
+				ServerName: "vpn.example.com",
+			},
+		},
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to dial trusttunnel server") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 1 {
+		t.Fatalf("dialCalls = %d, want 1", dialer.dialCalls)
+	}
+	if !internettls.AntiDPIEnabledFromContext(dialer.lastCtx) {
+		t.Fatal("antiDpi context flag = false, want true")
+	}
+}
+
+func TestClientProcessRejectsAntiDpiWithoutTLSSecurityStreamSettings(t *testing.T) {
 	client := &Client{
 		config: &ClientConfig{
 			AntiDpi: true,
@@ -144,7 +189,43 @@ func TestClientProcessRejectsAntiDpi(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "antiDpi is unsupported") {
+	if !strings.Contains(err.Error(), "antiDpi is supported only for http2 over TLS") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 0 {
+		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
+	}
+}
+
+func TestClientProcessRejectsAntiDpiOnHTTP3(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			Transport: TransportProtocol_HTTP3,
+			AntiDpi:   true,
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "antiDpi is supported only for http2 over TLS") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if dialer.dialCalls != 0 {

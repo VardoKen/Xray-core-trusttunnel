@@ -31,7 +31,7 @@ English version: [README.md](README.md)
 ## Неподдержанные комбинации
 
 - `HTTP/3 over REALITY` не поддерживается, потому что текущий REALITY runtime в Xray построен вокруг TCP stream layer, а TrustTunnel H3 работает поверх QUIC.
-- `antiDpi=true` не поддерживается, потому что поле есть в config surface, но для него нет реализованного transport/runtime-поведения.
+- `antiDpi=true` поддерживается только для `HTTP/2 over TLS`. Для `HTTP/2 over REALITY` и всех `HTTP/3` path это поле остаётся неподдержанным, потому что текущая реализация умеет только split первого TLS ClientHello на TCP/TLS path.
 - UDP domain targets не описываются как поддержанный product path. Подтверждённый UDP path использует IP-назначения.
 
 ## Документация

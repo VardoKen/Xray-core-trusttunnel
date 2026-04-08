@@ -65,7 +65,12 @@ func validateTrustTunnelOutboundConfig(outbound OutboundDetourConfig) error {
 	}
 
 	if settings.AntiDpi {
-		return errors.New("trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime").AtWarning()
+		if transport != trusttunnel.TransportProtocol_HTTP2 {
+			return errors.New("trusttunnel antiDpi is supported only for http2 over TLS: http3 has no compatible QUIC anti-DPI runtime").AtWarning()
+		}
+		if outbound.StreamSetting == nil || !strings.EqualFold(outbound.StreamSetting.Security, "tls") {
+			return errors.New("trusttunnel antiDpi is supported only for http2 over TLS: current outbound streamSettings have no TLS security").AtWarning()
+		}
 	}
 
 	if trustTunnelSecurityIsReality(outbound.StreamSetting) && transport == trusttunnel.TransportProtocol_HTTP3 {
