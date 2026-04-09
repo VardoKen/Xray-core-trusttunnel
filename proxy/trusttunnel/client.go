@@ -518,32 +518,17 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	}
 	ctx = updatedCtx
 
-	var lastErr error
-	for idx, attempt := range attempts {
+	tunnelConn, err := c.connectWithEndpointPolicy(ctx, attempts, "endpoint", func(runCtx context.Context, attempt trustTunnelServerAttempt) (io.ReadWriteCloser, error) {
 		server := attempt.server
 		account, err := trustTunnelAccountFromServer(server)
 		if err != nil {
-			return err
+			return nil, err
 		}
-
-		tunnelConn, err := c.connectStreamTunnel(ctx, dialer, server, account, host, tlsHandledByStreamSettings)
-		if err != nil {
-			c.noteServerFailure(attempt.index)
-			lastErr = err
-			if idx+1 < len(attempts) {
-				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next endpoint: ", err)
-				continue
-			}
-			break
-		}
-		c.noteServerSuccess(attempt.index)
-		defer tunnelConn.Close()
-		return runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
+		return c.connectStreamTunnel(runCtx, dialer, server, account, host, tlsHandledByStreamSettings)
+	})
+	if err != nil {
+		return err
 	}
-
-	if lastErr != nil {
-		return lastErr
-	}
-
-	return errors.New("no target trusttunnel server found")
+	defer tunnelConn.Close()
+	return runTrustTunnelStreamTunnel(ctx, link, tunnelConn)
 }

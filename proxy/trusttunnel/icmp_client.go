@@ -525,8 +525,7 @@ func (c *Client) connectICMPTunnel(ctx context.Context, dialer internet.Dialer) 
 		return nil, errors.New("no target trusttunnel server found")
 	}
 
-	var lastErr error
-	for idx, attempt := range attempts {
+	return c.connectWithEndpointPolicy(ctx, attempts, "ICMP endpoint", func(runCtx context.Context, attempt trustTunnelServerAttempt) (io.ReadWriteCloser, error) {
 		server := attempt.server
 		account, err := trustTunnelAccountFromServer(server)
 		if err != nil {
@@ -539,35 +538,22 @@ func (c *Client) connectICMPTunnel(ctx context.Context, dialer internet.Dialer) 
 				return nil, errors.New("invalid trusttunnel server address")
 			}
 
-			http3Ctx, cancelHTTP3 := trustTunnelContextWithHTTP3FallbackTimeout(ctx, c.config)
+			http3Ctx, cancelHTTP3 := trustTunnelContextWithHTTP3FallbackTimeout(runCtx, c.config)
 			tunnelConn, err := trustTunnelConnectHTTP3Func(http3Ctx, serverAddr, trustTunnelICMPPseudoHost, account, c.config)
 			cancelHTTP3()
 			if err != nil {
 				if !trustTunnelTransportAllowsHTTP2Fallback(c.config) || !trustTunnelHTTP3FallbackEligible(err) {
-					lastErr = errors.New("failed to establish trusttunnel HTTP/3 ICMP CONNECT").Base(err).AtWarning()
-					c.noteServerFailure(attempt.index)
-					if idx+1 < len(attempts) {
-						errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next ICMP endpoint: ", lastErr)
-						continue
-					}
-					break
+					return nil, errors.New("failed to establish trusttunnel HTTP/3 ICMP CONNECT").Base(err).AtWarning()
 				}
-				errors.LogWarning(ctx, "trusttunnel HTTP/3 ICMP CONNECT failed; falling back to HTTP/2 path: ", err)
+				errors.LogWarning(runCtx, "trusttunnel HTTP/3 ICMP CONNECT failed; falling back to HTTP/2 path: ", err)
 			} else {
-				c.noteServerSuccess(attempt.index)
 				return tunnelConn, nil
 			}
 		}
 
-		rawConn, err := dialer.Dial(ctx, server.Destination)
+		rawConn, err := dialer.Dial(runCtx, server.Destination)
 		if err != nil {
-			lastErr = errors.New("failed to dial trusttunnel server").Base(err).AtWarning()
-			c.noteServerFailure(attempt.index)
-			if idx+1 < len(attempts) {
-				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next ICMP endpoint: ", lastErr)
-				continue
-			}
-			break
+			return nil, errors.New("failed to dial trusttunnel server").Base(err).AtWarning()
 		}
 		conn := rawConn.(stat.Connection)
 
@@ -582,72 +568,35 @@ func (c *Client) connectICMPTunnel(ctx context.Context, dialer internet.Dialer) 
 			return nil, errors.New("failed to set deadline").Base(err).AtWarning()
 		}
 
-		securityState, err := trustTunnelClientSecurityState(ctx, conn)
+		securityState, err := trustTunnelClientSecurityState(runCtx, conn)
 		if err != nil {
 			_ = conn.Close()
-			lastErr = err
-			c.noteServerFailure(attempt.index)
-			if idx+1 < len(attempts) {
-				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next ICMP endpoint: ", lastErr)
-				continue
-			}
-			break
+			return nil, err
 		}
 
 		if !securityState.UsesReality && !tlsHandledByStreamSettings {
 			if err := verifyTrustTunnelTLS(securityState.PeerCertificates, c.config); err != nil {
 				_ = conn.Close()
-				lastErr = errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
-				c.noteServerFailure(attempt.index)
-				if idx+1 < len(attempts) {
-					errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next ICMP endpoint: ", lastErr)
-					continue
-				}
-				break
+				return nil, errors.New("trusttunnel TLS verification failed").Base(err).AtWarning()
 			}
 		}
 
 		if !trustTunnelShouldUseHTTP2(securityState) {
 			_ = conn.Close()
-			lastErr = errors.New("trusttunnel icmp over http2 requires negotiated ALPN h2, got ", securityState.NegotiatedProtocol)
-			c.noteServerFailure(attempt.index)
-			if idx+1 < len(attempts) {
-				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next ICMP endpoint: ", lastErr)
-				continue
-			}
-			break
+			return nil, errors.New("trusttunnel icmp over http2 requires negotiated ALPN h2, got ", securityState.NegotiatedProtocol)
 		}
 
 		tunnelConn, err := connectHTTP2(conn, req)
 		if err != nil {
 			_ = conn.Close()
-			lastErr = errors.New("failed to establish trusttunnel ICMP CONNECT").Base(err).AtWarning()
-			c.noteServerFailure(attempt.index)
-			if idx+1 < len(attempts) {
-				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next ICMP endpoint: ", lastErr)
-				continue
-			}
-			break
+			return nil, errors.New("failed to establish trusttunnel ICMP CONNECT").Base(err).AtWarning()
 		}
 
 		if err := conn.SetDeadline(time.Time{}); err != nil {
 			_ = tunnelConn.Close()
-			lastErr = errors.New("failed to clear deadline").Base(err).AtWarning()
-			c.noteServerFailure(attempt.index)
-			if idx+1 < len(attempts) {
-				errors.LogWarning(ctx, "trusttunnel server ", idx+1, "/", len(attempts), " failed; trying next ICMP endpoint: ", lastErr)
-				continue
-			}
-			break
+			return nil, errors.New("failed to clear deadline").Base(err).AtWarning()
 		}
 
-		c.noteServerSuccess(attempt.index)
 		return tunnelConn, nil
-	}
-
-	if lastErr != nil {
-		return nil, lastErr
-	}
-
-	return nil, errors.New("no target trusttunnel server found")
+	})
 }

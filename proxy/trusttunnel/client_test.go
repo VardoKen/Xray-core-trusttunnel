@@ -65,6 +65,12 @@ type fakeTrustTunnelServerSequenceDialer struct {
 	errs           map[string]error
 }
 
+type nopReadWriteCloser struct{}
+
+func (nopReadWriteCloser) Read([]byte) (int, error)  { return 0, io.EOF }
+func (nopReadWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
+func (nopReadWriteCloser) Close() error { return nil }
+
 func withTrustTunnelHTTP3Connector(t *testing.T, fn func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error)) {
 	t.Helper()
 	original := trustTunnelConnectHTTP3Func
@@ -393,6 +399,177 @@ func TestClientServerAttemptsCoolingDownPreferredEndpointTemporarilyUsesNextServ
 	attempts = client.serverAttemptsAt(now.Add(2 * time.Second))
 	if got := attempts[0].server.Destination.NetAddr(); got != "127.0.0.2:9444" {
 		t.Fatalf("attempts[0] after preferred cooldown expires = %q, want %q", got, "127.0.0.2:9444")
+	}
+}
+
+func TestClientConnectWithEndpointPolicyUsesDelayedRaceWinner(t *testing.T) {
+	originalDelay := trustTunnelEndpointRaceDelay
+	trustTunnelEndpointRaceDelay = 10 * time.Millisecond
+	t.Cleanup(func() {
+		trustTunnelEndpointRaceDelay = originalDelay
+	})
+
+	client := &Client{
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+		),
+		servers: []*protocol.ServerSpec{
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.2"), xnet.Port(9444)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+		},
+	}
+
+	attempts := client.serverAttempts()
+	var callOrder []string
+	start := time.Now()
+	conn, err := client.connectWithEndpointPolicy(context.Background(), attempts, "endpoint", func(ctx context.Context, attempt trustTunnelServerAttempt) (io.ReadWriteCloser, error) {
+		callOrder = append(callOrder, attempt.server.Destination.NetAddr())
+		if attempt.index == 0 {
+			select {
+			case <-time.After(100 * time.Millisecond):
+				return nopReadWriteCloser{}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return nopReadWriteCloser{}, nil
+	})
+	if err != nil {
+		t.Fatalf("connectWithEndpointPolicy() error = %v", err)
+	}
+	if conn == nil {
+		t.Fatal("connectWithEndpointPolicy() returned nil conn")
+	}
+	if elapsed := time.Since(start); elapsed >= 80*time.Millisecond {
+		t.Fatalf("delayed race took too long: %v", elapsed)
+	}
+	want := []string{"127.0.0.1:9443", "127.0.0.2:9444"}
+	if len(callOrder) != len(want) {
+		t.Fatalf("callOrder = %v, want %v", callOrder, want)
+	}
+	for i := range want {
+		if callOrder[i] != want[i] {
+			t.Fatalf("callOrder[%d] = %q, want %q", i, callOrder[i], want[i])
+		}
+	}
+	attempts = client.serverAttempts()
+	if got := attempts[0].server.Destination.NetAddr(); got != "127.0.0.2:9444" {
+		t.Fatalf("preferred endpoint after race = %q, want %q", got, "127.0.0.2:9444")
+	}
+}
+
+func TestClientConnectWithEndpointPolicyStartsSecondaryImmediatelyOnPrimaryFailure(t *testing.T) {
+	originalDelay := trustTunnelEndpointRaceDelay
+	trustTunnelEndpointRaceDelay = 100 * time.Millisecond
+	t.Cleanup(func() {
+		trustTunnelEndpointRaceDelay = originalDelay
+	})
+
+	client := &Client{
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+		),
+		servers: []*protocol.ServerSpec{
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.2"), xnet.Port(9444)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+		},
+	}
+
+	attempts := client.serverAttempts()
+	var callOrder []string
+	start := time.Now()
+	conn, err := client.connectWithEndpointPolicy(context.Background(), attempts, "endpoint", func(ctx context.Context, attempt trustTunnelServerAttempt) (io.ReadWriteCloser, error) {
+		callOrder = append(callOrder, attempt.server.Destination.NetAddr())
+		if attempt.index == 0 {
+			return nil, stderrors.New("primary failed immediately")
+		}
+		return nopReadWriteCloser{}, nil
+	})
+	if err != nil {
+		t.Fatalf("connectWithEndpointPolicy() error = %v", err)
+	}
+	if conn == nil {
+		t.Fatal("connectWithEndpointPolicy() returned nil conn")
+	}
+	if elapsed := time.Since(start); elapsed >= 80*time.Millisecond {
+		t.Fatalf("secondary was not started immediately after primary failure: %v", elapsed)
+	}
+	want := []string{"127.0.0.1:9443", "127.0.0.2:9444"}
+	if len(callOrder) != len(want) {
+		t.Fatalf("callOrder = %v, want %v", callOrder, want)
+	}
+}
+
+func TestClientConnectWithEndpointPolicyFallsBackAfterRacedPairFails(t *testing.T) {
+	originalDelay := trustTunnelEndpointRaceDelay
+	trustTunnelEndpointRaceDelay = 10 * time.Millisecond
+	t.Cleanup(func() {
+		trustTunnelEndpointRaceDelay = originalDelay
+	})
+
+	client := &Client{
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+		),
+		servers: []*protocol.ServerSpec{
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.2"), xnet.Port(9444)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.3"), xnet.Port(9445)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+		},
+	}
+
+	attempts := client.serverAttempts()
+	var callOrder []string
+	conn, err := client.connectWithEndpointPolicy(context.Background(), attempts, "endpoint", func(ctx context.Context, attempt trustTunnelServerAttempt) (io.ReadWriteCloser, error) {
+		callOrder = append(callOrder, attempt.server.Destination.NetAddr())
+		if attempt.index < 2 {
+			select {
+			case <-time.After(15 * time.Millisecond):
+				return nil, stderrors.New("raced pair failed")
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		return nopReadWriteCloser{}, nil
+	})
+	if err != nil {
+		t.Fatalf("connectWithEndpointPolicy() error = %v", err)
+	}
+	if conn == nil {
+		t.Fatal("connectWithEndpointPolicy() returned nil conn")
+	}
+	want := []string{"127.0.0.1:9443", "127.0.0.2:9444", "127.0.0.3:9445"}
+	if len(callOrder) != len(want) {
+		t.Fatalf("callOrder = %v, want %v", callOrder, want)
+	}
+	for i := range want {
+		if callOrder[i] != want[i] {
+			t.Fatalf("callOrder[%d] = %q, want %q", i, callOrder[i], want[i])
+		}
 	}
 }
 
