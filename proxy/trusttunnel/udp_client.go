@@ -214,6 +214,13 @@ func (c *Client) connectUDPTunnel(ctx context.Context, dialer internet.Dialer) (
 		}
 
 		return tunnelConn, nil
+	}, func(runCtx context.Context, attempt trustTunnelServerAttempt) error {
+		server := attempt.server
+		account, err := trustTunnelAccountFromServer(server)
+		if err != nil {
+			return err
+		}
+		return c.probeStreamEndpointHealth(runCtx, dialer, server, account, tlsHandledByStreamSettings)
 	})
 }
 

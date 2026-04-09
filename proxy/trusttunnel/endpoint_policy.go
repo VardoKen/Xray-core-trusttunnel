@@ -24,6 +24,7 @@ func (c *Client) connectWithEndpointPolicy(
 	attempts []trustTunnelServerAttempt,
 	attemptLabel string,
 	connect trustTunnelEndpointConnectFunc,
+	probe trustTunnelEndpointProbeFunc,
 ) (io.ReadWriteCloser, error) {
 	if len(attempts) == 0 {
 		return nil, errors.New("no target trusttunnel server found")
@@ -36,8 +37,9 @@ func (c *Client) connectWithEndpointPolicy(
 
 	now := time.Now()
 	if c.shouldRaceEndpointAttempts(attempts, now) {
-		tunnelConn, err := c.connectWithDelayedEndpointRace(ctx, attempts[0], attempts[1], len(attempts), attemptLabel, connect)
+		tunnelConn, _, err := c.connectWithDelayedEndpointRace(ctx, attempts[0], attempts[1], len(attempts), attemptLabel, connect)
 		if err == nil {
+			c.maybeStartCoolingEndpointProbes(ctx, attempts, attemptLabel, probe)
 			return tunnelConn, nil
 		}
 		lastErr = err
@@ -58,6 +60,7 @@ func (c *Client) connectWithEndpointPolicy(
 		}
 
 		c.noteServerSuccess(attempt.index)
+		c.maybeStartCoolingEndpointProbes(ctx, attempts, attemptLabel, probe)
 		return tunnelConn, nil
 	}
 
@@ -90,7 +93,7 @@ func (c *Client) connectWithDelayedEndpointRace(
 	totalAttempts int,
 	attemptLabel string,
 	connect trustTunnelEndpointConnectFunc,
-) (io.ReadWriteCloser, error) {
+) (io.ReadWriteCloser, trustTunnelServerAttempt, error) {
 	resultCh := make(chan trustTunnelEndpointConnectResult, 2)
 
 	primaryCtx, cancelPrimary := context.WithCancel(ctx)
@@ -125,7 +128,7 @@ func (c *Client) connectWithDelayedEndpointRace(
 	for inFlight > 0 {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, trustTunnelServerAttempt{}, ctx.Err()
 		case <-timer.C:
 			if secondaryStarted {
 				continue
@@ -146,7 +149,7 @@ func (c *Client) connectWithDelayedEndpointRace(
 				} else {
 					cancelPrimary()
 				}
-				return result.conn, nil
+				return result.conn, result.attempt, nil
 			}
 
 			c.noteServerFailure(result.attempt.index)
@@ -168,5 +171,5 @@ func (c *Client) connectWithDelayedEndpointRace(
 		}
 	}
 
-	return nil, lastErr
+	return nil, trustTunnelServerAttempt{}, lastErr
 }

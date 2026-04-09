@@ -440,7 +440,7 @@ func TestClientConnectWithEndpointPolicyUsesDelayedRaceWinner(t *testing.T) {
 			}
 		}
 		return nopReadWriteCloser{}, nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("connectWithEndpointPolicy() error = %v", err)
 	}
@@ -498,7 +498,7 @@ func TestClientConnectWithEndpointPolicyStartsSecondaryImmediatelyOnPrimaryFailu
 			return nil, stderrors.New("primary failed immediately")
 		}
 		return nopReadWriteCloser{}, nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("connectWithEndpointPolicy() error = %v", err)
 	}
@@ -555,7 +555,7 @@ func TestClientConnectWithEndpointPolicyFallsBackAfterRacedPairFails(t *testing.
 			}
 		}
 		return nopReadWriteCloser{}, nil
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("connectWithEndpointPolicy() error = %v", err)
 	}
@@ -570,6 +570,64 @@ func TestClientConnectWithEndpointPolicyFallsBackAfterRacedPairFails(t *testing.
 		if callOrder[i] != want[i] {
 			t.Fatalf("callOrder[%d] = %q, want %q", i, callOrder[i], want[i])
 		}
+	}
+}
+
+func TestClientConnectWithEndpointPolicyRestoresCoolingEndpointViaActiveProbe(t *testing.T) {
+	originalInterval := trustTunnelEndpointActiveProbeInterval
+	originalTimeout := trustTunnelEndpointActiveProbeTimeout
+	trustTunnelEndpointActiveProbeInterval = 10 * time.Millisecond
+	trustTunnelEndpointActiveProbeTimeout = 20 * time.Millisecond
+	t.Cleanup(func() {
+		trustTunnelEndpointActiveProbeInterval = originalInterval
+		trustTunnelEndpointActiveProbeTimeout = originalTimeout
+	})
+
+	client := &Client{
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+			&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+		),
+		servers: []*protocol.ServerSpec{
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(9443)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+			protocol.NewServerSpec(
+				xnet.TCPDestination(xnet.ParseAddress("127.0.0.2"), xnet.Port(9444)),
+				&protocol.MemoryUser{Account: &MemoryAccount{Username: "u1", Password: "p1"}},
+			),
+		},
+	}
+
+	attempts := client.serverAttempts()
+	conn, err := client.connectWithEndpointPolicy(context.Background(), attempts, "endpoint", func(ctx context.Context, attempt trustTunnelServerAttempt) (io.ReadWriteCloser, error) {
+		if attempt.index == 0 {
+			return nil, stderrors.New("primary failed")
+		}
+		return nopReadWriteCloser{}, nil
+	}, func(ctx context.Context, attempt trustTunnelServerAttempt) error {
+		if attempt.index != 0 {
+			t.Fatalf("probe called for unexpected endpoint %d", attempt.index)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("connectWithEndpointPolicy() error = %v", err)
+	}
+	if conn == nil {
+		t.Fatal("connectWithEndpointPolicy() returned nil conn")
+	}
+
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for {
+		if got := client.serverAttempts()[0].server.Destination.NetAddr(); got == "127.0.0.1:9443" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("active probe did not restore preferred endpoint, attempts=%v", client.serverAttempts())
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

@@ -39,6 +39,7 @@ type Client struct {
 	policyManager        policy.Manager
 	preferredServerIndex atomic.Uint32
 	serverRetryAfter     sync.Map
+	serverProbeInFlight  sync.Map
 }
 
 type trustTunnelServerAttempt struct {
@@ -525,6 +526,13 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 			return nil, err
 		}
 		return c.connectStreamTunnel(runCtx, dialer, server, account, host, tlsHandledByStreamSettings)
+	}, func(runCtx context.Context, attempt trustTunnelServerAttempt) error {
+		server := attempt.server
+		account, err := trustTunnelAccountFromServer(server)
+		if err != nil {
+			return err
+		}
+		return c.probeStreamEndpointHealth(runCtx, dialer, server, account, tlsHandledByStreamSettings)
 	})
 	if err != nil {
 		return err
