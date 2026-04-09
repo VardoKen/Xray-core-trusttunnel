@@ -129,20 +129,22 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - единый fallback до establish для stream / UDP / ICMP path;
 - delayed racing между первыми двумя ready endpoint с `1s` задержкой старта secondary endpoint и немедленным стартом secondary при раннем fail primary;
 - preference последнего успешно established endpoint;
-- короткий cooldown после pre-establishment fail, чтобы следующий connect временно не бился в тот же проблемный endpoint первым.
+- короткий cooldown после pre-establishment fail, чтобы следующий connect временно не бился в тот же проблемный endpoint первым;
+- active probing cooling endpoint через реальный TrustTunnel `_check`, чтобы runtime мог вернуть восстановившийся endpoint в preferred-порядок раньше полного cooldown.
 
 Что уже подтверждено дополнительно:
 - sequence `/opt/lab/xray-tt/logs/endpoint-policy-live-20260409-005720` на трёх remote endpoint показывает не только fallback `A -> B`, но и runtime-переупорядочивание `B -> C` при ещё не истекшем cooldown у `A`, а затем возврат `C -> A` после истечения cooldown.
 - sequence `/opt/lab/xray-tt/logs/endpoint-race-live-20260409-044656` подтверждает hanging-primary delayed race для stream и UDP path: первый endpoint принимает TCP и зависает, клиент стартует второй endpoint ровно через `1s`, а end-to-end latency остаётся около `1.3s` для stream и `1.15s` для UDP вместо полного connect-timeout первичного endpoint.
+- sequence `/opt/lab/xray-tt/logs/endpoint-active-probe-live-20260409-051636` подтверждает, что после fallback `A -> B` восстановившийся `A` возвращается в preferred-порядок не по голому истечению `5s`, а через background `_check` probe: client log фиксирует `trusttunnel active probe restored endpoint 1/2`, remote `a.log` фиксирует `trusttunnel H2 health-check accepted`, а следующий real-traffic CONNECT возвращается на `A` уже через `903ms`.
 
 Что остаётся дальше:
 - решить, насколько глубоко форк должен повторять original client endpoint policy;
-- ближайший следующий выбор архитектуры — добавлять ли active probing и более глубокую endpoint-health модель поверх уже реализованного delayed racing;
+- ближайший следующий выбор архитектуры — нужен ли ещё один уровень endpoint-health модели поверх уже готовых fallback / delayed race / cooldown / active probe, например runtime-расширение одного server-entry на несколько resolved адресов или более близкое к original relay/address-selection поведение;
 - не смешивать этот блок с уже закрытыми H2/H3 transport gaps, `_icmp`, REALITY, validator или generic Xray integration.
 
 ## 5. Порядок выполнения
 
-1. добить следующий этап multi-endpoint outbound policy: определить, нужен ли original-style active probing и более глубокая endpoint-health модель поверх уже готовых `servers[]` fallback, delayed race и cooldown
+1. добить следующий этап multi-endpoint outbound policy: определить, нужен ли ещё один original-style endpoint-health слой поверх уже готовых `servers[]` fallback, delayed race, cooldown и active probing
 2. держать `streamSettings`-нормализацию синхронной с upstream generic TLS / REALITY / outbound plumbing
 3. держать compatibility matrix и validator синхронными с новыми integration-комбинациями
 4. добирать dedicated inbound / generic TLS coverage только при появлении новых product-level требований

@@ -25,7 +25,7 @@ TrustTunnel доступен и как:
 
 Подтверждённое поведение выбора server endpoint:
 
-- упорядоченные списки `servers[]` с delayed race между первыми двумя ready endpoint, последовательным fallback после неуспешной raced-пары и предпочтением последнего успешного endpoint
+- упорядоченные списки `servers[]` с delayed race между первыми двумя ready endpoint, последовательным fallback после неуспешной raced-пары, предпочтением последнего успешного endpoint, коротким cooldown после pre-establishment fail и active recovery probing охлаждённых endpoint через `_check`
 - legacy-форма `address` + `port` для single-endpoint конфига
 
 Подтверждённые payload-path:
@@ -258,6 +258,7 @@ Tracked example:
 - после неуспеха raced-пары клиент продолжает обычный последовательный fallback по оставшимся endpoint
 - после успешного подключения последующие соединения сначала пробуют последний успешный endpoint
 - pre-establishment fail дополнительно уводит такой endpoint в короткий cooldown, чтобы следующее соединение не билось в него первым
+- пока endpoint находится в cooldown, клиент может активно проверять его через TrustTunnel `_check`; если probe проходит, endpoint возвращается в preferred-порядок раньше полного истечения cooldown
 - если tunnel уже установлен, runtime-ошибка на нём не вызывает скрытого переключения на другой endpoint
 - `servers` нельзя смешивать с shorthand-полями `address` и `port` в одном outbound-конфиге
 - shorthand `address` + `port` остаётся валидным и трактуется как single-endpoint конфиг
@@ -370,7 +371,7 @@ Tracked rule example:
 | --- | --- | --- | --- | --- |
 | `address` | string | Да, если не задан `servers` | Адрес TrustTunnel-сервера | IP или домен; shorthand для single-endpoint конфига |
 | `port` | integer | Да, если не задан `servers` | Порт TrustTunnel-сервера | В примерах обычно `9443` |
-| `servers` | array | Да, если не заданы `address` и `port` | Упорядоченный список TrustTunnel endpoint | Delayed race между первыми двумя ready endpoint, последовательный fallback после неуспешной raced-пары, предпочтение последнего успешного endpoint и короткий cooldown после pre-establishment fail; не смешивать с `address` и `port` |
+| `servers` | array | Да, если не заданы `address` и `port` | Упорядоченный список TrustTunnel endpoint | Delayed race между первыми двумя ready endpoint, последовательный fallback после неуспешной raced-пары, предпочтение последнего успешного endpoint, короткий cooldown после pre-establishment fail и active recovery probing охлаждённых endpoint через `_check`; не смешивать с `address` и `port` |
 | `username` | string | Да | Имя пользователя для TrustTunnel auth | Должно совпадать с сервером |
 | `password` | string | Да | Пароль для TrustTunnel auth | Должен совпадать с сервером |
 | `hostname` | string | Да | Логическое имя хоста TrustTunnel | Для REALITY должно совпадать с `realitySettings.serverName` |

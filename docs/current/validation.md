@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-09
-Коммит состояния: `7376ab64`
+Коммит состояния: `f89d65a4`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -72,7 +72,7 @@
 Практическая граница:
 - `metadataOnly` не образует отдельный positive TLS SNI routing-path для TrustTunnel: current `app/dispatcher` в режиме `metadataOnly=true` возвращает только metadata sniffers и не выполняет TLS content sniffing; отсутствие TLS-SNI override в этом режиме не считать отдельным TrustTunnel bug.
 
-### 1.2. Multi-endpoint outbound fallback / preference / cooldown / delayed race
+### 1.2. Multi-endpoint outbound fallback / preference / cooldown / delayed race / active probe
 
 Подтверждено локально на 2026-04-09:
 - `go test ./proxy/trusttunnel -run 'Test(ClientServerAttemptsPreferLastSuccessfulEndpoint|ClientServerAttemptsMoveCoolingDownEndpointToBack|ClientServerAttemptsCoolingDownPreferredEndpointTemporarilyUsesNextServer|ConnectUDPTunnelPrefersLastSuccessfulServer|ClientProcessFallsBackToNextConfiguredServer)$' -count=1`
@@ -101,6 +101,7 @@
 - `TestClientServerAttemptsMoveCoolingDownEndpointToBack` и `TestClientServerAttemptsCoolingDownPreferredEndpointTemporarilyUsesNextServer` подтверждают короткий cooldown после pre-establishment fail и возврат endpoint в нормальный порядок после истечения cooldown;
 - `TestConnectUDPTunnelPrefersLastSuccessfulServer` подтверждает, что runtime preference применяется не только к stream path, но и к UDP tunnel establish;
 - `TestClientConnectWithEndpointPolicyUsesDelayedRaceWinner`, `TestClientConnectWithEndpointPolicyStartsSecondaryImmediatelyOnPrimaryFailure` и `TestClientConnectWithEndpointPolicyFallsBackAfterRacedPairFails` подтверждают delayed race между первыми двумя ready endpoint, немедленный старт secondary endpoint при раннем fail primary и корректный возврат к последовательному fallback после неуспеха raced-пары.
+- `TestClientConnectWithEndpointPolicyRestoresCoolingEndpointViaActiveProbe` подтверждает, что cooling endpoint может быть восстановлен раньше полного cooldown через background probe и снова стать preferred.
 - remote-live sequence на одном long-lived client-process подтверждает то же поведение на реальном traffic path lab -> remote -> internet:
   - `step1_only_a_success`: при живом только endpoint `A:9443` соединение проходит через `A`;
   - `step2_fallback_to_b`: при мёртвом `A:9443` и живых `B:9444`/`C:9445` client log пишет `trusttunnel server 1/3 failed; trying next endpoint`, а трафик уходит через `B`;
@@ -127,6 +128,25 @@
 - `stream_prefer_b_after_race`: после победы `B` следующий stream CONNECT на том же client-process сразу идёт в `B` без нового delayed-race marker'а, `A` остаётся без `trusttunnel H2 CONNECT accepted`, а latency опускается до `0.330642s`;
 - `udp_hanging_primary_race_to_b`: тот же hanging-primary сценарий подтверждён на shared UDP helper path: client log пишет `trusttunnel delayed endpoint race started next UDP endpoint after 1s`, remote `b.log` фиксирует `trusttunnel H2 UDP mux accepted`, DNS probe возвращает `104.16.132.229` и `104.16.133.229`, а end-to-end latency остаётся `1.155s`;
 - practically significant verdict: delayed race подтверждён не synthetic dial-check, а реальным stream internet traffic и реальным UDP DNS traffic между Linux lab и remote host.
+
+Подтверждено отдельным remote-live active-probe sequence на 2026-04-09:
+- preflight code state: `f89d65a4`;
+- lab repo: `/opt/lab/xray-tt/src/xray-core-trusttunnel`;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-current-live`;
+- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-current-live`;
+- lab client config: `/opt/lab/xray-tt/configs/endpoint_active_probe_client_h2_tls.json`;
+- remote endpoint configs:
+  - `/opt/trusttunnel-dev/configs/endpoint_policy_h2_tls_a.json` (`:9443`);
+  - `/opt/trusttunnel-dev/configs/endpoint_policy_h2_tls_b.json` (`:9444`);
+- authoritative lab bundle: `/opt/lab/xray-tt/logs/endpoint-active-probe-live-20260409-051636`;
+- authoritative remote bundle: `/opt/trusttunnel-dev/logs/endpoint-active-probe-live-20260409-051636`.
+
+Что именно подтверждено active-probe sequence:
+- `step1_fallback_to_b`: при мёртвом endpoint `A:9443` и живом `B:9444` реальный downstream probe проходит через `B`, а client log содержит `trusttunnel server 1/2 failed before delayed race timeout; trying next endpoint immediately`;
+- `active_probe_healthcheck`: после возврата `A` client не ждёт полного cooldown, а сам запускает `_check` probe в cooling endpoint; remote `a.log` фиксирует `trusttunnel H2 health-check accepted`, а client log фиксирует `trusttunnel active probe restored endpoint 1/2 in 59.008813ms`;
+- `step2_return_to_a`: следующий real-traffic CONNECT до `tcp:api.ipify.org:443` уже идёт через `A`, а remote `a.log` фиксирует `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`;
+- `step2_not_still_on_b`: remote `b.log` фиксирует только первый CONNECT и не получает новый successful CONNECT для второго шага;
+- `returned_before_full_cooldown`: bundle `timing.env` показывает `STEP2_DELAY_MS=903`, то есть возврат на `A` произошёл меньше чем через секунду после step1 и существенно раньше полного `5s` cooldown.
 
 ### 1.3. Client-Side antiDPI runtime
 

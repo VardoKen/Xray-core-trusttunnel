@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-09
-Коммит состояния: `7376ab64`
+Коммит состояния: `f89d65a4`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -234,7 +234,7 @@
 - если на Windows используется authority-verify через custom CA в `streamSettings.tlsSettings`, нужно добавлять `disableSystemRoot = true`, иначе воспроизводимый verify path может уйти в системный cert pool вместо custom-CA surface
 - если используется REALITY-wrapper, пустой negotiated ALPN внутри TrustTunnel layer больше не должен трактоваться как причина падения в HTTP/1.1 fallback; авторитетным остаётся `settings.transport = "http2"`
 - `antiDpi=true` допустим только на `HTTP/2 over TLS` и `HTTP/2 over REALITY`; explicit `http3` validator/runtime режут, а `transport="auto"` при этом ведёт трафик сразу в HTTP/2 path
-- если задан `servers[]`, client runtime использует ordered fallback, delayed race между первыми двумя ready endpoint, preference последнего успешно established endpoint и короткий cooldown после pre-establishment fail
+- если задан `servers[]`, client runtime использует ordered fallback, delayed race между первыми двумя ready endpoint, preference последнего успешно established endpoint, короткий cooldown после pre-establishment fail и active probing охлаждённых endpoint через `_check`, чтобы возвращать восстановившийся endpoint раньше полного cooldown
 - если нужен deterministic allow/deny через server-side rules, `settings.clientRandom` должен совпадать с `client_random` rule-spec
 
 ### 3.3. Минимальные правила для H3 outbound

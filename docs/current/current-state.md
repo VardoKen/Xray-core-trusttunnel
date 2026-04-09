@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-09
-Коммит состояния: `7376ab64`
+Коммит состояния: `f89d65a4`
 Ветка: `feat/trusttunnel-integration`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -41,7 +41,7 @@ TrustTunnel в текущем дереве подтверждённо наход
 - common outbound integration с механизмами Xray подтверждена scenario-тестами: `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4`;
 - common inbound integration подтверждена для `sniffing + routeOnly` и generic inbound TLS `rejectUnknownSni`; `metadataOnly` для TLS SNI не считается TrustTunnel-bug surface и остаётся обычной семантикой общего dispatcher path;
 - dynamic user management на TrustTunnel inbound подтверждён через `HandlerService` `AddUser` / `RemoveUser` и `GetInboundUsersCount`;
-- outbound `servers[]` больше не является декларативным списком: client runtime поддерживает ordered multi-endpoint fallback, delayed race между первыми двумя ready endpoint, preference последнего успешно established endpoint и короткий cooldown после pre-establishment fail; этот endpoint-policy подтверждён unit/scenario тестами и двумя remote-live sequence между lab и реальными remote endpoint;
+- outbound `servers[]` больше не является декларативным списком: client runtime поддерживает ordered multi-endpoint fallback, delayed race между первыми двумя ready endpoint, preference последнего успешно established endpoint, короткий cooldown после pre-establishment fail и active probing охлаждённых endpoint через реальный TrustTunnel `_check`; этот endpoint-policy подтверждён unit/scenario тестами и тремя remote-live sequence между lab и реальными remote endpoint;
 - H3 TCP/TLS current-head path снова держит live tunnel traffic после `CONNECT 200`: client и server используют raw HTTP/3 stream вместо zero-length response-body модели;
 - current-head live matrix lab → remote server → internet на `4bfd8ac9` повторно проходит по H2 TLS, H2 REALITY и H3 TLS с functional `15/15` через bundle `full-live-20260407-153034`; для затронутого non-H3 TLS path дополнительный representative load smoke `h2_tls_auto_load_tcp` проходит через bundle `full-live-20260407-153909-h2_tls_auto_load_tcp` с ~`61.97 Mbit/s`, lab/client CPU avg/max `9.14 / 21` и remote/server `23.23 / 47`; авторитетным полным load verdict по матрице всё ещё остаётся clean rerun `full-live-20260407-140912`, где fastest TCP case — `h2_reality_pq_off_load_tcp` ~`373.45 Mbit/s` при lab/client CPU avg/max `45.62 / 99` и remote/server `64.38 / 112`, тогда как H3 paths остаются заметно дороже по lab/client CPU;
 - server-side inbound/outbound/user traffic counters и `onlineMap` sanity-check;
@@ -171,7 +171,8 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 - stream / UDP / ICMP path используют один и тот же ordered fallback по endpoint до установления tunnel;
 - после успешного establish последующие соединения предпочитают последний успешно established endpoint, а не каждый раз начинают заново с первого адреса списка;
 - pre-establishment fail больше не приводит к немедленному повторному удару в тот же endpoint на следующем соединении: проблемный endpoint уходит в короткий cooldown и временно переставляется в конец порядка попыток;
-- remote-live sequence `/opt/lab/xray-tt/logs/endpoint-policy-live-20260409-005720` / `/opt/trusttunnel-dev/logs/endpoint-policy-live-20260409-005720` подтверждает это поведение на одном long-lived client-process через четыре последовательных real-traffic шага: `A -> fallback to B -> cooldown skips A and uses C -> cooldown expiry returns to A`;
+- remote-live sequence `/opt/lab/xray-tt/logs/endpoint-policy-live-20260409-005720` / `/opt/trusttunnel-dev/logs/endpoint-policy-live-20260409-005720` подтверждает ordered fallback, last-success preference и cooldown на одном long-lived client-process через четыре последовательных real-traffic шага: `A -> fallback to B -> cooldown skips A and uses C -> cooldown expiry returns to A`;
+- отдельный remote-live sequence `/opt/lab/xray-tt/logs/endpoint-active-probe-live-20260409-051636` / `/opt/trusttunnel-dev/logs/endpoint-active-probe-live-20260409-051636` подтверждает active recovery probing: после fallback `A -> B` и последующего восстановления `A` client сам делает `_check` probe в cooling endpoint, логирует `trusttunnel active probe restored endpoint 1/2`, а следующий real-traffic CONNECT возвращается на `A` уже через `903ms`, то есть заметно раньше полного `5s` cooldown;
 - это поведение не является скрытой live-session migration: после установления tunnel runtime-ошибка уже работающей сессии не переключает её на другой endpoint автоматически.
 
 ## 3. Что считается текущей истиной
@@ -199,8 +200,8 @@ Client-side parity surface для поддержанных H2/H3 + TLS и H2 + R
 H3 + REALITY на текущем этапе больше не считается обычным parity-gap: R&D завершён stop-factor verdict'ом. Любая будущая реализация потребует нового QUIC-capable REALITY transport в Xray core, а не локального патча в TrustTunnel.
 
 Ближайший открытый блок после фиксации multi-endpoint policy:
-- довести outbound transport resilience до более близкой к original client модели поверх уже готовых `transport=auto`, `servers[]` fallback, delayed race и endpoint cooldown;
-- следующая практическая цель — решать, нужен ли active probing и более глубокая endpoint-health модель поверх уже реализованного delayed racing, а не возвращаться к уже закрытым H2/H3/REALITY/ICMP gaps.
+- довести outbound transport resilience до более близкой к original client модели поверх уже готовых `transport=auto`, `servers[]` fallback, delayed race, endpoint cooldown и active probing;
+- следующая практическая цель — решать, нужен ли ещё один уровень endpoint model поверх уже работающего active probe, например runtime-расширение одного server-entry на несколько resolved адресов или более близкое к original relay/address-selection поведение, а не возвращаться к уже закрытым H2/H3/REALITY/ICMP gaps.
 
 ## 5. Антирегрессионное правило
 

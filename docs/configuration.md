@@ -25,7 +25,7 @@ Validated transport selection modes:
 
 Validated outbound endpoint-selection behavior:
 
-- ordered `servers[]` lists with delayed race between the first two ready endpoints, sequential fallback after unsuccessful raced attempts, and last-successful endpoint preference
+- ordered `servers[]` lists with delayed race between the first two ready endpoints, sequential fallback after unsuccessful raced attempts, last-successful endpoint preference, short cooldown after pre-establishment failure, and active recovery probing of cooling endpoints via `_check`
 - legacy `address` + `port` shorthand for single-endpoint configs
 
 Validated payload paths:
@@ -258,6 +258,7 @@ Rules:
 - after an unsuccessful raced pair, the client continues with sequential fallback through the remaining endpoints
 - after one endpoint succeeds, subsequent connections try that last successful endpoint first
 - a pre-establishment failure also puts that endpoint into a short cooldown window before it is tried first again
+- while an endpoint is in that cooldown window, the client can actively probe it with TrustTunnel `_check`; if the probe succeeds, that endpoint returns to preferred order before the full cooldown expires
 - once a tunnel is established, runtime errors on that tunnel do not trigger a hidden switch to another endpoint
 - do not combine `servers` with the shorthand `address` and `port` in the same outbound config
 - the shorthand `address` + `port` remains valid and is treated as a single-endpoint config
@@ -370,7 +371,7 @@ Tracked rule example:
 | --- | --- | --- | --- | --- |
 | `address` | string | Yes, if `servers` is omitted | TrustTunnel server address | IP or domain; shorthand for single-endpoint configs |
 | `port` | integer | Yes, if `servers` is omitted | TrustTunnel server port | Usually `9443` in examples |
-| `servers` | array | Yes, if `address` and `port` are omitted | Ordered TrustTunnel endpoint list | Delayed race between the first two ready endpoints, sequential fallback after unsuccessful raced attempts, last-successful endpoint preference, and a short pre-establishment failure cooldown; do not combine with `address` and `port` |
+| `servers` | array | Yes, if `address` and `port` are omitted | Ordered TrustTunnel endpoint list | Delayed race between the first two ready endpoints, sequential fallback after unsuccessful raced attempts, last-successful endpoint preference, a short pre-establishment failure cooldown, and active recovery probing of cooling endpoints via `_check`; do not combine with `address` and `port` |
 | `username` | string | Yes | Username for TrustTunnel auth | Must match server user |
 | `password` | string | Yes | Password for TrustTunnel auth | Must match server user |
 | `hostname` | string | Yes | Logical TrustTunnel host name | For REALITY, match `realitySettings.serverName` |
