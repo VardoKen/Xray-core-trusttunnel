@@ -25,7 +25,7 @@ TrustTunnel доступен и как:
 
 Подтверждённое поведение выбора server endpoint:
 
-- упорядоченные списки `servers[]` с delayed race между первыми двумя ready endpoint, последовательным fallback после неуспешной raced-пары, предпочтением последнего успешного endpoint, коротким cooldown после pre-establishment fail и active recovery probing охлаждённых endpoint через `_check`
+- упорядоченные списки `servers[]` и доменные server-address с runtime-разворачиванием в resolved IP endpoint, delayed race между первыми двумя ready endpoint, последовательным fallback после неуспешной raced-пары, предпочтением последнего успешного endpoint, коротким cooldown после pre-establishment fail и active recovery probing охлаждённых endpoint через `_check`
 - legacy-форма `address` + `port` для single-endpoint конфига
 
 Подтверждённые payload-path:
@@ -259,6 +259,7 @@ Tracked example:
 - после успешного подключения последующие соединения сначала пробуют последний успешный endpoint
 - pre-establishment fail дополнительно уводит такой endpoint в короткий cooldown, чтобы следующее соединение не билось в него первым
 - пока endpoint находится в cooldown, клиент может активно проверять его через TrustTunnel `_check`; если probe проходит, endpoint возвращается в preferred-порядок раньше полного истечения cooldown
+- если `address` или `servers[].address` задан доменом, client init разворачивает его во все resolved IP и дальше трактует каждый IP как отдельный runtime endpoint того же порядка
 - если tunnel уже установлен, runtime-ошибка на нём не вызывает скрытого переключения на другой endpoint
 - `servers` нельзя смешивать с shorthand-полями `address` и `port` в одном outbound-конфиге
 - shorthand `address` + `port` остаётся валидным и трактуется как single-endpoint конфиг
@@ -271,6 +272,7 @@ Tracked example:
 Tracked example:
 
 - [../testing/trusttunnel/client_h2_servers_fallback.json](../testing/trusttunnel/client_h2_servers_fallback.json)
+- [../testing/trusttunnel/client_h2_resolved_domain.json](../testing/trusttunnel/client_h2_resolved_domain.json)
 
 ### 4.6. UDP outbound
 

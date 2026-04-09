@@ -25,7 +25,7 @@ Validated transport selection modes:
 
 Validated outbound endpoint-selection behavior:
 
-- ordered `servers[]` lists with delayed race between the first two ready endpoints, sequential fallback after unsuccessful raced attempts, last-successful endpoint preference, short cooldown after pre-establishment failure, and active recovery probing of cooling endpoints via `_check`
+- ordered `servers[]` lists and domain-valued server addresses with runtime expansion into resolved IP endpoints, delayed race between the first two ready endpoints, sequential fallback after unsuccessful raced attempts, last-successful endpoint preference, short cooldown after pre-establishment failure, and active recovery probing of cooling endpoints via `_check`
 - legacy `address` + `port` shorthand for single-endpoint configs
 
 Validated payload paths:
@@ -259,6 +259,7 @@ Rules:
 - after one endpoint succeeds, subsequent connections try that last successful endpoint first
 - a pre-establishment failure also puts that endpoint into a short cooldown window before it is tried first again
 - while an endpoint is in that cooldown window, the client can actively probe it with TrustTunnel `_check`; if the probe succeeds, that endpoint returns to preferred order before the full cooldown expires
+- if `address` or `servers[].address` is a domain, the client resolves it at startup and each returned IP becomes its own runtime endpoint in the same ordered policy
 - once a tunnel is established, runtime errors on that tunnel do not trigger a hidden switch to another endpoint
 - do not combine `servers` with the shorthand `address` and `port` in the same outbound config
 - the shorthand `address` + `port` remains valid and is treated as a single-endpoint config
@@ -271,6 +272,7 @@ Recommended use:
 Tracked example:
 
 - [../testing/trusttunnel/client_h2_servers_fallback.json](../testing/trusttunnel/client_h2_servers_fallback.json)
+- [../testing/trusttunnel/client_h2_resolved_domain.json](../testing/trusttunnel/client_h2_resolved_domain.json)
 
 ### 4.6. UDP outbound
 

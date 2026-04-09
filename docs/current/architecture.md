@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-09
-Коммит состояния: `f89d65a4`
+Коммит состояния: `507ff073`
 Ветка: `feat/trusttunnel-integration`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -154,6 +154,7 @@
 - `transport="auto"` с H3-first выбором и H3→H2 fallback на transport-level ошибках
 - H2 CONNECT / `_udp2` / `_icmp` поверх общего Xray `streamSettings.security = "reality"` без ложного HTTP/1.1 fallback при пустом negotiated ALPN у REALITY-wrapper
 - ordered `servers[]` fallback, delayed race между первыми двумя ready endpoint, preference последнего успешно established endpoint, короткий cooldown после pre-establishment fail и active probing охлаждённых endpoint через реальный `_check`
+- один domain-valued `address` / `servers[].address` на client init разворачивается в несколько resolved IP, и каждый из них становится отдельным runtime endpoint в том же policy order
 - per-request `streamSettings` override через общий outbound layer Xray
 - TrustTunnel-local `verifyTrustTunnelTLS()` только как fallback для path без authoritative generic `tlsSettings`; non-HTTP3 generic TLS path больше не строит второй verify-layer поверх transport TLS
 - совместимость H2/TLS outbound с generic Xray `streamSettings.tlsSettings` по `ServerName`, authority-verify через custom CA, `VerifyPeerCertByName`, `PinnedPeerCertSha256` и `Fingerprint`

@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-09
-Коммит состояния: `f89d65a4`
+Коммит состояния: `507ff073`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -102,6 +102,7 @@
 - `TestConnectUDPTunnelPrefersLastSuccessfulServer` подтверждает, что runtime preference применяется не только к stream path, но и к UDP tunnel establish;
 - `TestClientConnectWithEndpointPolicyUsesDelayedRaceWinner`, `TestClientConnectWithEndpointPolicyStartsSecondaryImmediatelyOnPrimaryFailure` и `TestClientConnectWithEndpointPolicyFallsBackAfterRacedPairFails` подтверждают delayed race между первыми двумя ready endpoint, немедленный старт secondary endpoint при раннем fail primary и корректный возврат к последовательному fallback после неуспеха raced-пары.
 - `TestClientConnectWithEndpointPolicyRestoresCoolingEndpointViaActiveProbe` подтверждает, что cooling endpoint может быть восстановлен раньше полного cooldown через background probe и снова стать preferred.
+- `TestTrustTunnelServersFromConfigExpandsResolvedDomainEndpoint`, `TestTrustTunnelServersFromConfigSkipsUnresolvedDomainWhenOthersExist` и `TestTrustTunnelServersFromConfigFailsWhenNoResolvedServersRemain` подтверждают, что один доменный server-entry на client init разворачивается в несколько runtime endpoint, а не остаётся одним opaque dial target.
 - remote-live sequence на одном long-lived client-process подтверждает то же поведение на реальном traffic path lab -> remote -> internet:
   - `step1_only_a_success`: при живом только endpoint `A:9443` соединение проходит через `A`;
   - `step2_fallback_to_b`: при мёртвом `A:9443` и живых `B:9444`/`C:9445` client log пишет `trusttunnel server 1/3 failed; trying next endpoint`, а трафик уходит через `B`;
@@ -147,6 +148,21 @@
 - `step2_return_to_a`: следующий real-traffic CONNECT до `tcp:api.ipify.org:443` уже идёт через `A`, а remote `a.log` фиксирует `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`;
 - `step2_not_still_on_b`: remote `b.log` фиксирует только первый CONNECT и не получает новый successful CONNECT для второго шага;
 - `returned_before_full_cooldown`: bundle `timing.env` показывает `STEP2_DELAY_MS=903`, то есть возврат на `A` произошёл меньше чем через секунду после step1 и существенно раньше полного `5s` cooldown.
+
+Подтверждено отдельным remote-live resolved-address sequence на 2026-04-09:
+- preflight code state: `507ff073`;
+- lab repo: `/opt/lab/xray-tt/src/xray-core-trusttunnel`;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-current-live`;
+- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-current-live`;
+- lab client config: `/opt/lab/xray-tt/configs/endpoint_resolve_client_h2_tls.json`;
+- remote config: `/opt/trusttunnel-dev/configs/server_h2_tls_udp_remote.json`;
+- authoritative lab bundle: `/opt/lab/xray-tt/logs/endpoint-resolve-live-20260409-053846`;
+- authoritative remote bundle: `/opt/trusttunnel-dev/logs/endpoint-resolve-live-20260409-053846`.
+
+Что именно подтверждено resolved-address sequence:
+- single configured `settings.address = "ttmulti.lab"` не остаётся одним opaque dial target: lab `/etc/hosts` задаёт `ttmulti.lab -> 127.0.0.2, 37.252.0.130`, а client log фиксирует `trusttunnel server 1/2 failed before delayed race timeout; trying next endpoint immediately`, то есть один configured entry превратился в два runtime endpoint;
+- первый resolved адрес `127.0.0.2:9443` действительно отбрасывается как failed endpoint, а downstream probe через SOCKS `127.0.0.1:18093` всё равно даёт `{"ip":"37.252.0.130"}`;
+- remote bundle `tcpdump.txt` фиксирует трафик на `37.252.0.130:9443`, то есть fallback идёт именно на второй resolved remote IP, а не на synthetic local bypass.
 
 ### 1.3. Client-Side antiDPI runtime
 
