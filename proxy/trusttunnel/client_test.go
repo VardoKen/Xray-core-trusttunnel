@@ -120,6 +120,15 @@ func (d *fakeTrustTunnelServerSequenceDialer) StreamSettings() *internet.MemoryS
 	return d.streamSettings
 }
 
+func withTrustTunnelLookupIPAddrs(t *testing.T, fn func(context.Context, string) ([]net.IPAddr, error)) {
+	t.Helper()
+	original := trustTunnelLookupIPAddrs
+	trustTunnelLookupIPAddrs = fn
+	t.Cleanup(func() {
+		trustTunnelLookupIPAddrs = original
+	})
+}
+
 func TestClientProcessRejectsHTTP3Reality(t *testing.T) {
 	client := &Client{
 		config: &ClientConfig{
@@ -161,7 +170,7 @@ func TestClientProcessRejectsHTTP3Reality(t *testing.T) {
 }
 
 func TestNewClientUsesConfiguredServerList(t *testing.T) {
-	servers, err := trustTunnelServersFromConfig(&ClientConfig{
+	servers, err := trustTunnelServersFromConfig(context.Background(), &ClientConfig{
 		Server: &protocol.ServerEndpoint{
 			Address: xnet.NewIPOrDomain(xnet.ParseAddress("127.0.0.1")),
 			Port:    9443,
@@ -204,6 +213,118 @@ func TestNewClientUsesConfiguredServerList(t *testing.T) {
 	}
 	if got := servers[1].Destination.NetAddr(); got != "127.0.0.2:9444" {
 		t.Fatalf("servers[1] = %q, want %q", got, "127.0.0.2:9444")
+	}
+}
+
+func TestTrustTunnelServersFromConfigExpandsResolvedDomainEndpoint(t *testing.T) {
+	withTrustTunnelLookupIPAddrs(t, func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		if host != "edge.example.com" {
+			t.Fatalf("unexpected host: %q", host)
+		}
+		return []net.IPAddr{
+			{IP: net.ParseIP("127.0.0.1")},
+			{IP: net.ParseIP("127.0.0.2")},
+		}, nil
+	})
+
+	servers, err := trustTunnelServersFromConfig(context.Background(), &ClientConfig{
+		Servers: []*protocol.ServerEndpoint{
+			{
+				Address: xnet.NewIPOrDomain(xnet.DomainAddress("edge.example.com")),
+				Port:    9443,
+				User: &protocol.User{
+					Account: serial.ToTypedMessage(&Account{
+						Username: "u1",
+						Password: "p1",
+					}),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("trustTunnelServersFromConfig() failed: %v", err)
+	}
+
+	if got, want := len(servers), 2; got != want {
+		t.Fatalf("len(servers) = %d, want %d", got, want)
+	}
+	if got := servers[0].Destination.NetAddr(); got != "127.0.0.1:9443" {
+		t.Fatalf("servers[0] = %q, want %q", got, "127.0.0.1:9443")
+	}
+	if got := servers[1].Destination.NetAddr(); got != "127.0.0.2:9443" {
+		t.Fatalf("servers[1] = %q, want %q", got, "127.0.0.2:9443")
+	}
+}
+
+func TestTrustTunnelServersFromConfigSkipsUnresolvedDomainWhenOthersExist(t *testing.T) {
+	withTrustTunnelLookupIPAddrs(t, func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		if host == "bad.example.com" {
+			return nil, stderrors.New("lookup failed")
+		}
+		t.Fatalf("unexpected host: %q", host)
+		return nil, nil
+	})
+
+	servers, err := trustTunnelServersFromConfig(context.Background(), &ClientConfig{
+		Servers: []*protocol.ServerEndpoint{
+			{
+				Address: xnet.NewIPOrDomain(xnet.DomainAddress("bad.example.com")),
+				Port:    9443,
+				User: &protocol.User{
+					Account: serial.ToTypedMessage(&Account{
+						Username: "u1",
+						Password: "p1",
+					}),
+				},
+			},
+			{
+				Address: xnet.NewIPOrDomain(xnet.ParseAddress("127.0.0.2")),
+				Port:    9444,
+				User: &protocol.User{
+					Account: serial.ToTypedMessage(&Account{
+						Username: "u1",
+						Password: "p1",
+					}),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("trustTunnelServersFromConfig() failed: %v", err)
+	}
+
+	if got, want := len(servers), 1; got != want {
+		t.Fatalf("len(servers) = %d, want %d", got, want)
+	}
+	if got := servers[0].Destination.NetAddr(); got != "127.0.0.2:9444" {
+		t.Fatalf("servers[0] = %q, want %q", got, "127.0.0.2:9444")
+	}
+}
+
+func TestTrustTunnelServersFromConfigFailsWhenNoResolvedServersRemain(t *testing.T) {
+	withTrustTunnelLookupIPAddrs(t, func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		return nil, stderrors.New("lookup failed")
+	})
+
+	_, err := trustTunnelServersFromConfig(context.Background(), &ClientConfig{
+		Servers: []*protocol.ServerEndpoint{
+			{
+				Address: xnet.NewIPOrDomain(xnet.DomainAddress("bad.example.com")),
+				Port:    9443,
+				User: &protocol.User{
+					Account: serial.ToTypedMessage(&Account{
+						Username: "u1",
+						Password: "p1",
+					}),
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to resolve any trusttunnel server addresses") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/x509"
 	"io"
+	stdnet "net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -49,7 +50,12 @@ type trustTunnelServerAttempt struct {
 
 const trustTunnelFailedServerCooldown = 5 * time.Second
 
-func trustTunnelServersFromConfig(config *ClientConfig) ([]*protocol.ServerSpec, error) {
+var (
+	trustTunnelLookupIPAddrs          = stdnet.DefaultResolver.LookupIPAddr
+	trustTunnelEndpointResolveTimeout = 3 * time.Second
+)
+
+func trustTunnelServersFromConfig(ctx context.Context, config *ClientConfig) ([]*protocol.ServerSpec, error) {
 	endpoints := config.GetServers()
 	if len(endpoints) == 0 {
 		if config.GetServer() == nil {
@@ -64,11 +70,63 @@ func trustTunnelServersFromConfig(config *ClientConfig) ([]*protocol.ServerSpec,
 			return nil, errors.New("trusttunnel server entry is nil")
 		}
 
-		server, err := protocol.NewServerSpecFromPB(endpoint)
+		resolvedServers, err := trustTunnelServersFromEndpoint(ctx, endpoint)
 		if err != nil {
-			return nil, errors.New("failed to get trusttunnel server spec").Base(err)
+			errors.LogWarningInner(ctx, err, "failed to resolve trusttunnel server endpoint: ", endpoint.GetAddress())
+			continue
 		}
-		servers = append(servers, server)
+		servers = append(servers, resolvedServers...)
+	}
+
+	if len(servers) == 0 {
+		return nil, errors.New("failed to resolve any trusttunnel server addresses")
+	}
+
+	return servers, nil
+}
+
+func trustTunnelServersFromEndpoint(ctx context.Context, endpoint *protocol.ServerEndpoint) ([]*protocol.ServerSpec, error) {
+	server, err := protocol.NewServerSpecFromPB(endpoint)
+	if err != nil {
+		return nil, errors.New("failed to get trusttunnel server spec").Base(err)
+	}
+
+	address := server.Destination.Address
+	if address == nil || !address.Family().IsDomain() {
+		return []*protocol.ServerSpec{server}, nil
+	}
+
+	resolveCtx := context.WithoutCancel(ctx)
+	if trustTunnelEndpointResolveTimeout > 0 {
+		var cancel context.CancelFunc
+		resolveCtx, cancel = context.WithTimeout(resolveCtx, trustTunnelEndpointResolveTimeout)
+		defer cancel()
+	}
+
+	ipAddrs, err := trustTunnelLookupIPAddrs(resolveCtx, address.Domain())
+	if err != nil {
+		return nil, err
+	}
+	if len(ipAddrs) == 0 {
+		return nil, errors.New("resolver returned no addresses for ", address.Domain())
+	}
+
+	servers := make([]*protocol.ServerSpec, 0, len(ipAddrs))
+	for _, ipAddr := range ipAddrs {
+		if ipAddr.IP == nil {
+			continue
+		}
+		resolvedAddress := xnet.IPAddress(ipAddr.IP)
+		if resolvedAddress == nil {
+			continue
+		}
+		servers = append(servers, protocol.NewServerSpec(
+			xnet.TCPDestination(resolvedAddress, server.Destination.Port),
+			server.User,
+		))
+	}
+	if len(servers) == 0 {
+		return nil, errors.New("resolver returned no usable IP addresses for ", address.Domain())
 	}
 
 	return servers, nil
@@ -197,7 +255,7 @@ func (c *Client) validateOutboundTarget(target xnet.Destination) error {
 }
 
 func NewClient(ctx context.Context, config *ClientConfig) (*Client, error) {
-	servers, err := trustTunnelServersFromConfig(config)
+	servers, err := trustTunnelServersFromConfig(ctx, config)
 	if err != nil {
 		return nil, err
 	}
