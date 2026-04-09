@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-09
-База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path, outbound clientRandom, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, client-side `postQuantumGroupEnabled`, `hasIpv6` domain-target guard, explicit `antiDpi` reject, config-build validator, common outbound/inbound Xray integration scenarios, dynamic user management и clean-head live traffic matrix
+База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path, outbound clientRandom, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, client-side `postQuantumGroupEnabled`, `hasIpv6` domain-target guard, `antiDpi` runtime для `HTTP/2 over TLS` и `HTTP/2 over REALITY`, config-build validator, common outbound/inbound Xray integration scenarios, dynamic user management, `transport=auto` / H3→H2 fallback и clean-head live traffic matrix
 Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom, `_icmp` protocol/runtime surface, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, common outbound integration coverage, inbound `sniffing + routeOnly`, `_icmp` routing/policy/stats plumbing и dynamic user management
 Не использовать для: фиксации уже закрытых багов и исторической хронологии
 
@@ -60,7 +60,7 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 Этот блок на текущем этапе закрыт для поддержанных H2/H3 + TLS и H2 + REALITY path:
 - `post_quantum_group_enabled` wired в runtime через effective TLS/REALITY fingerprint и H3 TLS curve preferences;
 - `has_ipv6` больше не ограничен literal-IPv6 gate: domain targets требуют outbound `targetStrategy useipv4/forceipv4`, а нарушение режется marker'ом `trusttunnel hasIpv6=false requires outbound targetStrategy useipv4/forceipv4 for domain targets`;
-- `anti_dpi` перестал быть silent no-op и имеет explicit unsupported verdict, который уже покрывается live negative-case.
+- `anti_dpi` больше не является no-op: на `HTTP/2 over TLS` и `HTTP/2 over REALITY` runtime делает split первой TCP-based записи ClientHello, а explicit `http3` по-прежнему режется как unsupported.
 
 Практический вывод:
 - client-side parity fields после REALITY больше не являются ближайшим открытым блоком;
@@ -72,7 +72,7 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 Уже реализовано:
 - per-request `streamSettings` override в общем outbound layer;
-- config-build validator, который режет `http3 + reality`, `antiDpi=true` и H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`;
+- config-build validator, который режет `http3 + reality`, `antiDpi=true` вне совместимого `HTTP/2 over TLS/REALITY` path и H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`;
 - на non-HTTP3 path зафиксирована граница между compatibility fields и generic TLS surface: `streamSettings.tlsSettings` являются authoritative, а `hostname` / `skipVerification` только дополняют missing `serverName` / `allowInsecure`;
 - validator дополнительно режет non-HTTP3 `hostname` mismatch с generic `tlsSettings.serverName`, `skipVerification=true` поверх explicit generic verify surface и `skipVerification=true` вместе с `certificatePem` / `certificatePemFile`;
 - current runtime больше не строит второй TrustTunnel-local verify/router поверх generic `streamSettings.tlsSettings`.
@@ -127,20 +127,22 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 Уже реализовано и подтверждено remote-live sequence:
 - ordered outbound `servers[]` без схлопывания до одного endpoint;
 - единый fallback до establish для stream / UDP / ICMP path;
+- delayed racing между первыми двумя ready endpoint с `1s` задержкой старта secondary endpoint и немедленным стартом secondary при раннем fail primary;
 - preference последнего успешно established endpoint;
 - короткий cooldown после pre-establishment fail, чтобы следующий connect временно не бился в тот же проблемный endpoint первым.
 
 Что уже подтверждено дополнительно:
 - sequence `/opt/lab/xray-tt/logs/endpoint-policy-live-20260409-005720` на трёх remote endpoint показывает не только fallback `A -> B`, но и runtime-переупорядочивание `B -> C` при ещё не истекшем cooldown у `A`, а затем возврат `C -> A` после истечения cooldown.
+- sequence `/opt/lab/xray-tt/logs/endpoint-race-live-20260409-044656` подтверждает hanging-primary delayed race для stream и UDP path: первый endpoint принимает TCP и зависает, клиент стартует второй endpoint ровно через `1s`, а end-to-end latency остаётся около `1.3s` для stream и `1.15s` для UDP вместо полного connect-timeout первичного endpoint.
 
 Что остаётся дальше:
 - решить, насколько глубоко форк должен повторять original client endpoint policy;
-- ближайший следующий выбор архитектуры — оставаться на deterministic ordered fallback или добавлять delayed racing / active probing между transport и endpoint path;
+- ближайший следующий выбор архитектуры — добавлять ли active probing и более глубокую endpoint-health модель поверх уже реализованного delayed racing;
 - не смешивать этот блок с уже закрытыми H2/H3 transport gaps, `_icmp`, REALITY, validator или generic Xray integration.
 
 ## 5. Порядок выполнения
 
-1. добить следующий этап multi-endpoint outbound policy: определить, нужен ли original-style delayed racing / active probing поверх уже готовых `servers[]` fallback и cooldown
+1. добить следующий этап multi-endpoint outbound policy: определить, нужен ли original-style active probing и более глубокая endpoint-health модель поверх уже готовых `servers[]` fallback, delayed race и cooldown
 2. держать `streamSettings`-нормализацию синхронной с upstream generic TLS / REALITY / outbound plumbing
 3. держать compatibility matrix и validator синхронными с новыми integration-комбинациями
 4. добирать dedicated inbound / generic TLS coverage только при появлении новых product-level требований

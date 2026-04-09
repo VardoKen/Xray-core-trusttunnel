@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-09
-Коммит состояния: `71ff8d71`
+Коммит состояния: `7376ab64`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -72,10 +72,11 @@
 Практическая граница:
 - `metadataOnly` не образует отдельный positive TLS SNI routing-path для TrustTunnel: current `app/dispatcher` в режиме `metadataOnly=true` возвращает только metadata sniffers и не выполняет TLS content sniffing; отсутствие TLS-SNI override в этом режиме не считать отдельным TrustTunnel bug.
 
-### 1.2. Multi-endpoint outbound fallback / preference / cooldown
+### 1.2. Multi-endpoint outbound fallback / preference / cooldown / delayed race
 
 Подтверждено локально на 2026-04-09:
 - `go test ./proxy/trusttunnel -run 'Test(ClientServerAttemptsPreferLastSuccessfulEndpoint|ClientServerAttemptsMoveCoolingDownEndpointToBack|ClientServerAttemptsCoolingDownPreferredEndpointTemporarilyUsesNextServer|ConnectUDPTunnelPrefersLastSuccessfulServer|ClientProcessFallsBackToNextConfiguredServer)$' -count=1`
+- `go test ./proxy/trusttunnel -run 'TestClientConnectWithEndpointPolicy|TestClientServerAttempts|TestClientProcessFallsBackToNextConfiguredServer' -count=1 -v`
 - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound ./app/proxyman/outbound -count=1`
 - `$env:GOFLAGS='-buildvcs=false'; go test ./testing/scenarios -run 'TestTrustTunnel' -count=1 -timeout 90m -v`
 - `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main`
@@ -98,13 +99,54 @@
 - `TestTrustTunnelOutboundFallsBackToNextConfiguredServerTLS` в `testing/scenarios` подтверждает фактический fallback на следующий endpoint в live local scenario;
 - `TestClientServerAttemptsPreferLastSuccessfulEndpoint` подтверждает preference последнего успешно established endpoint на следующих соединениях;
 - `TestClientServerAttemptsMoveCoolingDownEndpointToBack` и `TestClientServerAttemptsCoolingDownPreferredEndpointTemporarilyUsesNextServer` подтверждают короткий cooldown после pre-establishment fail и возврат endpoint в нормальный порядок после истечения cooldown;
-- `TestConnectUDPTunnelPrefersLastSuccessfulServer` подтверждает, что runtime preference применяется не только к stream path, но и к UDP tunnel establish.
+- `TestConnectUDPTunnelPrefersLastSuccessfulServer` подтверждает, что runtime preference применяется не только к stream path, но и к UDP tunnel establish;
+- `TestClientConnectWithEndpointPolicyUsesDelayedRaceWinner`, `TestClientConnectWithEndpointPolicyStartsSecondaryImmediatelyOnPrimaryFailure` и `TestClientConnectWithEndpointPolicyFallsBackAfterRacedPairFails` подтверждают delayed race между первыми двумя ready endpoint, немедленный старт secondary endpoint при раннем fail primary и корректный возврат к последовательному fallback после неуспеха raced-пары.
 - remote-live sequence на одном long-lived client-process подтверждает то же поведение на реальном traffic path lab -> remote -> internet:
   - `step1_only_a_success`: при живом только endpoint `A:9443` соединение проходит через `A`;
   - `step2_fallback_to_b`: при мёртвом `A:9443` и живых `B:9444`/`C:9445` client log пишет `trusttunnel server 1/3 failed; trying next endpoint`, а трафик уходит через `B`;
   - `step3_cooldown_skips_a_uses_c`: сразу после fail `A` остаётся в cooldown, при мёртвом preferred `B` и живых `A`/`C` client снова пишет `trusttunnel server 1/3 failed; trying next endpoint`, но successful CONNECT приходит уже на `C`, а не на `A`;
   - `step4_cooldown_expired_returns_to_a`: после ожидания больше `5s` cooldown истекает, при мёртвом preferred `C` и живых `A`/`B` successful CONNECT снова приходит на `A`, а не на `B`;
   - во всех четырёх шагах downstream probe через lab-side HTTP proxy даёт внешний IP `37.252.0.130`, то есть выбор endpoint подтверждён не synthetic dial-check, а реальным интернет-трафиком.
+
+Подтверждено отдельным remote-live delayed-race sequence на 2026-04-09:
+- preflight code state: `7376ab64`;
+- lab repo: `/opt/lab/xray-tt/src/xray-core-trusttunnel`;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-current-live`;
+- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-current-endpoint-race`;
+- lab client configs:
+  - `/opt/lab/xray-tt/configs/endpoint_race_client_h2_tls.json`;
+  - `/opt/lab/xray-tt/configs/endpoint_race_udp_client_h2_tls.json`;
+- remote endpoint configs:
+  - `/opt/trusttunnel-dev/configs/endpoint_race_h2_tls_a.json` (`:9443`);
+  - `/opt/trusttunnel-dev/configs/endpoint_race_h2_tls_b.json` (`:9444`);
+- authoritative lab bundle: `/opt/lab/xray-tt/logs/endpoint-race-live-20260409-044656`;
+- authoritative remote bundle: `/opt/trusttunnel-dev/logs/endpoint-race-live-20260409-044656`.
+
+Что именно подтверждено delayed-race sequence:
+- `stream_hanging_primary_race_to_b`: primary endpoint `A:9443` не отвергает соединение сразу, а принимает TCP и зависает на handshake; client log пишет `trusttunnel delayed endpoint race started next endpoint after 1s`, второй endpoint `B:9444` принимает `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`, remote `a_hang.log` фиксирует `accepted`, downstream probe даёт `{"ip":"37.252.0.130"}`, а end-to-end latency остаётся `1.317677s`, то есть path завершается через delayed race, а не через полный connect-timeout primary endpoint;
+- `stream_prefer_b_after_race`: после победы `B` следующий stream CONNECT на том же client-process сразу идёт в `B` без нового delayed-race marker'а, `A` остаётся без `trusttunnel H2 CONNECT accepted`, а latency опускается до `0.330642s`;
+- `udp_hanging_primary_race_to_b`: тот же hanging-primary сценарий подтверждён на shared UDP helper path: client log пишет `trusttunnel delayed endpoint race started next UDP endpoint after 1s`, remote `b.log` фиксирует `trusttunnel H2 UDP mux accepted`, DNS probe возвращает `104.16.132.229` и `104.16.133.229`, а end-to-end latency остаётся `1.155s`;
+- practically significant verdict: delayed race подтверждён не synthetic dial-check, а реальным stream internet traffic и реальным UDP DNS traffic между Linux lab и remote host.
+
+### 1.3. Client-Side antiDPI runtime
+
+Подтверждено dedicated live smoke на 2026-04-09:
+- preflight code state: `7376ab64`;
+- lab binary: `/opt/lab/xray-tt/tmp/xray-tt-current-live`;
+- remote binary: `/opt/trusttunnel-dev/tmp/xray-tt-current-antidpi`;
+- lab configs:
+  - `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_tls_antidpi_true.json`;
+  - `/opt/lab/xray-tt/configs/our_client_to_remote_server_h2_reality_antidpi_true.json`;
+- remote configs:
+  - `/opt/trusttunnel-dev/configs/server_h2_tls_udp_remote.json`;
+  - `/opt/trusttunnel-dev/configs/server_h2_reality_remote.json`;
+- authoritative lab bundle: `/opt/lab/xray-tt/logs/antidpi-live-20260409-045510`;
+- authoritative remote bundle: `/opt/trusttunnel-dev/logs/antidpi-live-20260409-045510`.
+
+Что именно подтверждено:
+- H2/TLS anti-DPI path проходит через реальный traffic path lab -> remote -> internet: downstream probe через SOCKS `127.0.0.1:10844` даёт `{"ip":"37.252.0.130"}`, а remote log фиксирует `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`;
+- H2/REALITY anti-DPI path проходит через тот же реальный traffic path: downstream probe через SOCKS `127.0.0.1:10833` даёт `{"ip":"37.252.0.130"}`, client log фиксирует `trusttunnel HTTP/2 path selected with REALITY and empty negotiated ALPN; using HTTP/2 preface path`, а remote log фиксирует `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`;
+- practically significant verdict: `antiDpi=true` больше не считается explicit reject на поддержанных `HTTP/2 over TLS` и `HTTP/2 over REALITY` path; explicit `http3` остаётся отдельной unsupported combination.
 
 ## 2. Подтверждённые runtime-проверки
 
@@ -689,11 +731,11 @@ Preflight:
 - remote server log bundle фиксирует для baseline `trusttunnel H2 CONNECT accepted for tcp:1.1.1.1:443` и `proxy/freedom: connection opened to tcp:1.1.1.1:443`;
 - config с `hasIpv6=false` на `127.0.0.1:10832` сохраняет working path для explicit IPv4 literal target: `curl exit=0`, trace снова содержит `ip=37.252.0.130`, `http=http/2`, `kex=X25519MLKEM768`, а remote server log повторно фиксирует `trusttunnel H2 CONNECT accepted for tcp:1.1.1.1:443`;
 - тот же config с `hasIpv6=false` режет explicit IPv6 literal target `https://[2606:4700:4700::1111]/cdn-cgi/trace` с `curl exit=35` и client log marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`;
-- config с `antiDpi=true` на `127.0.0.1:10833` режет explicit IPv4 literal target `https://1.1.1.1/cdn-cgi/trace` с `curl exit=35` и client log marker'ом `trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime`.
+- historical first parity retest на `effe1927` ещё фиксировал explicit reject `antiDpi=true` для REALITY-path; этот verdict больше не считать актуальным после code-state `7376ab64` и dedicated live bundle `/opt/lab/xray-tt/logs/antidpi-live-20260409-045510`.
 
 Технический вывод:
 - `hasIpv6` больше не является чисто декларативным полем: current runtime реально режет явные IPv6 literal targets, не ломает explicit IPv4 literal path и на clean-HEAD matrix дополнительно режет domain targets без `targetStrategy useipv4/forceipv4`;
-- `antiDpi` больше не остаётся silent no-op: current runtime явно отклоняет его как unsupported combination.
+- `antiDpi` больше не остаётся silent no-op: historical explicit reject закрыт, а current runtime после `7376ab64` реально работает на `HTTP/2 over TLS` и `HTTP/2 over REALITY`; explicit `http3` остаётся unsupported combination.
 - `postQuantumGroupEnabled` является реальной guarded runtime-функцией на поддержанных H2/TLS, H2/REALITY и H3/TLS path.
 
 ### 2.25. Clean-HEAD full live functional/load matrix

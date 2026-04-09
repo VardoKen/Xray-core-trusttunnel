@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-09
-Коммит состояния: `71ff8d71`
+Коммит состояния: `7376ab64`
 Ветка: `feat/trusttunnel-integration`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -33,14 +33,15 @@ TrustTunnel в текущем дереве подтверждённо наход
 - H3 + REALITY больше не остаётся silent-misconfig: current runtime явно отклоняет эту комбинацию на client и server сторонах с marker `trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only`;
 - `postQuantumGroupEnabled` больше не является декларативным outbound-полем: H2/TLS, H2/REALITY и H3/TLS client-side runtime переключает effective TLS/REALITY fingerprint и curve preferences через per-request `streamSettings` override или direct H3 TLS config;
 - `hasIpv6=false` больше не ограничен literal-IP gate: client-side runtime режет явные IPv6 literal targets marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`, а domain targets требует вести через outbound `targetStrategy useipv4/forceipv4` marker'ом `trusttunnel hasIpv6=false requires outbound targetStrategy useipv4/forceipv4 for domain targets`;
-- `antiDpi=true` больше не остаётся silent no-op: current outbound runtime явно отклоняет его marker'ом `trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime`;
-- config-build validator больше не оставляет unsupported combinations как silent misconfig: current `infra/conf` stage режет `http3 + reality`, `antiDpi=true`, H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`, а на non-HTTP3 + generic `streamSettings.tlsSettings` дополнительно режет `hostname` mismatch, `skipVerification` поверх explicit generic verify surface и `skipVerification` вместе с `certificatePem/certificatePemFile`;
+- `antiDpi=true` больше не остаётся silent no-op: current outbound runtime поддерживает его на `HTTP/2 over TLS` и `HTTP/2 over REALITY` через split первой TCP-based записи ClientHello, а `transport="auto"` при этом сразу выбирает HTTP/2 path; явный `HTTP/3` по-прежнему режется как unsupported;
+- `transport="auto"` больше не остаётся декларативным transport hint: current runtime предпочитает H3 при совместимом QUIC path, уходит в H2 на transport-level H3 fail и сразу выбирает H2 для `antiDpi=true` и REALITY-path;
+- config-build validator больше не оставляет unsupported combinations как silent misconfig: current `infra/conf` stage режет `http3 + reality`, `antiDpi=true` без совместимого `HTTP/2 + TLS/REALITY` security-path, H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`, а на non-HTTP3 + generic `streamSettings.tlsSettings` дополнительно режет `hostname` mismatch, `skipVerification` поверх explicit generic verify surface и `skipVerification` вместе с `certificatePem/certificatePemFile`;
 - H2/TLS outbound подтверждает совместимость с generic Xray `streamSettings.tlsSettings` по `serverName`, authority-verify через custom CA, `VerifyPeerCertByName`, `PinnedPeerCertSha256` и `Fingerprint`; non-HTTP3 compatibility fields больше не образуют второй TrustTunnel-local verify path поверх generic TLS: `hostname` и `skipVerification` только дополняют missing `serverName` / `allowInsecure`, а на Windows custom-CA verify path по-прежнему требует `disableSystemRoot=true` как общее ограничение transport TLS, а не как TrustTunnel-specific исключение;
 - общий outbound layer Xray теперь принимает per-request `streamSettings` override и не заставляет TrustTunnel мутировать handler-level transport config;
 - common outbound integration с механизмами Xray подтверждена scenario-тестами: `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4`;
 - common inbound integration подтверждена для `sniffing + routeOnly` и generic inbound TLS `rejectUnknownSni`; `metadataOnly` для TLS SNI не считается TrustTunnel-bug surface и остаётся обычной семантикой общего dispatcher path;
 - dynamic user management на TrustTunnel inbound подтверждён через `HandlerService` `AddUser` / `RemoveUser` и `GetInboundUsersCount`;
-- outbound `servers[]` больше не является декларативным списком: client runtime поддерживает ordered multi-endpoint fallback, предпочитает последний успешно established endpoint и после pre-establishment fail уводит проблемный endpoint в короткий cooldown; этот endpoint-policy теперь подтверждён не только unit/scenario тестами, но и remote-live sequence между lab и тремя реальными remote endpoint;
+- outbound `servers[]` больше не является декларативным списком: client runtime поддерживает ordered multi-endpoint fallback, delayed race между первыми двумя ready endpoint, preference последнего успешно established endpoint и короткий cooldown после pre-establishment fail; этот endpoint-policy подтверждён unit/scenario тестами и двумя remote-live sequence между lab и реальными remote endpoint;
 - H3 TCP/TLS current-head path снова держит live tunnel traffic после `CONNECT 200`: client и server используют raw HTTP/3 stream вместо zero-length response-body модели;
 - current-head live matrix lab → remote server → internet на `4bfd8ac9` повторно проходит по H2 TLS, H2 REALITY и H3 TLS с functional `15/15` через bundle `full-live-20260407-153034`; для затронутого non-H3 TLS path дополнительный representative load smoke `h2_tls_auto_load_tcp` проходит через bundle `full-live-20260407-153909-h2_tls_auto_load_tcp` с ~`61.97 Mbit/s`, lab/client CPU avg/max `9.14 / 21` и remote/server `23.23 / 47`; авторитетным полным load verdict по матрице всё ещё остаётся clean rerun `full-live-20260407-140912`, где fastest TCP case — `h2_reality_pq_off_load_tcp` ~`373.45 Mbit/s` при lab/client CPU avg/max `45.62 / 99` и remote/server `64.38 / 112`, тогда как H3 paths остаются заметно дороже по lab/client CPU;
 - server-side inbound/outbound/user traffic counters и `onlineMap` sanity-check;
@@ -188,7 +189,7 @@ proxy/freedom: connection ends > proxy/freedom: failed to process request > H3_N
 
 ## 4. Что остаётся открытым после этой фиксации
 
-Client-side parity surface для поддержанных H2/H3 + TLS и H2 + REALITY path на текущем этапе больше не считается открытым блоком: `post_quantum_group_enabled` wired в runtime, `hasIpv6=false` получил domain-target policy guard, `antiDpi=true` зафиксирован как explicit unsupported verdict, а non-HTTP3 TLS compatibility surface доведён до текущей границы между compatibility fields и generic `streamSettings.tlsSettings`.
+Client-side parity surface для поддержанных H2/H3 + TLS и H2 + REALITY path на текущем этапе больше не считается открытым блоком: `post_quantum_group_enabled` wired в runtime, `hasIpv6=false` получил domain-target policy guard, `antiDpi=true` доведён до runtime на `HTTP/2 over TLS` и `HTTP/2 over REALITY`, а non-HTTP3 TLS compatibility surface доведён до текущей границы между compatibility fields и generic `streamSettings.tlsSettings`.
 
 Открытыми задачами текущего этапа считаются уже не runtime-gaps внутри текущего validated protocol surface, а maintenance-блоки:
 - держать non-HTTP3 compatibility boundary синхронной с upstream-изменениями generic TLS/REALITY и `streamSettings` layer Xray;
@@ -198,8 +199,8 @@ Client-side parity surface для поддержанных H2/H3 + TLS и H2 + R
 H3 + REALITY на текущем этапе больше не считается обычным parity-gap: R&D завершён stop-factor verdict'ом. Любая будущая реализация потребует нового QUIC-capable REALITY transport в Xray core, а не локального патча в TrustTunnel.
 
 Ближайший открытый блок после фиксации multi-endpoint policy:
-- довести outbound transport resilience до более близкой к original client модели поверх уже готовых `transport=auto`, `servers[]` fallback и endpoint cooldown;
-- следующая практическая цель — решать, нужен ли delayed racing / active probing между transport и endpoint path, а не возвращаться к уже закрытым H2/H3/REALITY/ICMP gaps.
+- довести outbound transport resilience до более близкой к original client модели поверх уже готовых `transport=auto`, `servers[]` fallback, delayed race и endpoint cooldown;
+- следующая практическая цель — решать, нужен ли active probing и более глубокая endpoint-health модель поверх уже реализованного delayed racing, а не возвращаться к уже закрытым H2/H3/REALITY/ICMP gaps.
 
 ## 5. Антирегрессионное правило
 

@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — эксплуатационная база
 
 Статус: current
-Дата фиксации: 2026-04-07
-Коммит состояния: `4bfd8ac9`
+Дата фиксации: 2026-04-09
+Коммит состояния: `7376ab64`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -155,7 +155,7 @@
 - non-HTTP3 + generic `streamSettings.tlsSettings` больше не оставляет `skipVerification` и `hostname` двусмысленными compatibility flags: runtime дополняет missing `allowInsecure` / `serverName`, а validator режет conflicts с explicit generic verify surface и с `certificatePem` / `certificatePemFile`;
 - generic inbound TLS setting `rejectUnknownSni` подтверждён на TrustTunnel inbound;
 - dynamic user management через `HandlerService` `AddUser` / `RemoveUser` и `GetInboundUsersCount` работает на TrustTunnel inbound;
-- config-build validator fail-fast режет `http3 + reality`, `antiDpi=true`, H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`, non-HTTP3 `hostname` mismatch, `skipVerification` поверх explicit generic verify surface и `skipVerification` вместе с `certificatePem` / `certificatePemFile`.
+- config-build validator fail-fast режет `http3 + reality`, `antiDpi=true` вне совместимого `HTTP/2 over TLS/REALITY` path, H2 `postQuantumGroupEnabled` без TLS/REALITY `streamSettings`, non-HTTP3 `hostname` mismatch, `skipVerification` поверх explicit generic verify surface и `skipVerification` вместе с `certificatePem` / `certificatePemFile`.
 
 Практическое правило:
 - эти комбинации больше не считать непроверенными common-integration surface;
@@ -176,18 +176,19 @@
 
 ### 2.15. Client-Side `hasIpv6` / `antiDpi` / `postQuantumGroupEnabled`
 
-Подтверждено live runtime-retest через lab client bundle `/opt/lab/xray-tt/logs/client-parity-20260406-171758` и remote server bundle `/opt/trusttunnel-dev/logs/client-parity-remote-20260406-141747`, затем clean-HEAD matrix-run `/opt/lab/xray-tt/logs/full-live-20260407-115351`:
+Подтверждено live runtime-retest через lab client bundle `/opt/lab/xray-tt/logs/client-parity-20260406-171758` и remote server bundle `/opt/trusttunnel-dev/logs/client-parity-remote-20260406-141747`, затем clean-HEAD matrix-run `/opt/lab/xray-tt/logs/full-live-20260407-115351` и dedicated anti-DPI live bundle `/opt/lab/xray-tt/logs/antidpi-live-20260409-045510`:
 - baseline H2/REALITY config на `127.0.0.1:10831` даёт живой explicit-IPv4 path до `https://1.1.1.1/cdn-cgi/trace` с `ip=37.252.0.130`, `http=http/2`, `kex=X25519MLKEM768`;
 - config с `hasIpv6=false` на `127.0.0.1:10832` сохраняет тот же working path для explicit IPv4 literal target;
 - тот же config режет explicit IPv6 literal target `https://[2606:4700:4700::1111]/cdn-cgi/trace` marker'ом `trusttunnel IPv6 target is disabled by hasIpv6=false`;
 - clean-HEAD matrix negative-case `h2_reality_hasipv6_domain_fail` подтверждает, что `hasIpv6=false` режет и domain targets без явного outbound `targetStrategy useipv4/forceipv4`;
 - clean-HEAD matrix allow-case `h2_reality_hasipv6_forceipv4` подтверждает, что domain target снова проходит через тот же working H2/REALITY path после явного `targetStrategy = "forceipv4"`;
-- config с `antiDpi=true` на `127.0.0.1:10833` режет даже explicit IPv4 literal target marker'ом `trusttunnel antiDpi is unsupported: current Xray transport layer has no compatible anti-DPI runtime`.
+- config `our_client_to_remote_server_h2_tls_antidpi_true.json` на `127.0.0.1:10844` подтверждает рабочий `HTTP/2 over TLS` anti-DPI path: downstream probe до `https://api.ipify.org?format=json` даёт `{"ip":"37.252.0.130"}`, а remote server log содержит `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`;
+- config `our_client_to_remote_server_h2_reality_antidpi_true.json` на `127.0.0.1:10833` подтверждает рабочий `HTTP/2 over REALITY` anti-DPI path: downstream probe до `https://api.ipify.org?format=json` даёт тот же `{"ip":"37.252.0.130"}`, client log содержит `trusttunnel HTTP/2 path selected with REALITY and empty negotiated ALPN; using HTTP/2 preface path`, а remote server log содержит `trusttunnel H2 CONNECT accepted for tcp:api.ipify.org:443`;
 - `postQuantumGroupEnabled` на текущем состоянии является рабочей guarded функцией: H2/TLS и H2/REALITY переключают effective Chrome-family TLS/REALITY fingerprint, а H3/TLS переключает `CurvePreferences`; это дополнительно подтверждено clean-HEAD matrix по кейсам `*_pq_on` и `*_pq_off`.
 
 Практическое правило:
 - `hasIpv6=false` сейчас трактовать как client-side policy gate для явных IPv6 literal targets и для domain targets без явного outbound `targetStrategy useipv4/forceipv4`;
-- `antiDpi=true` не использовать как рабочий product path: current runtime его явно отклоняет.
+- `antiDpi=true` использовать только на `HTTP/2 over TLS` или `HTTP/2 over REALITY`; `transport="auto"` при этом сразу ведёт трафик в HTTP/2 path, а explicit `http3` остаётся неподдержанным.
 - `postQuantumGroupEnabled` использовать только на поддержанных H2/TLS, H2/REALITY и H3/TLS path; `http3 + reality` остаётся отдельной unsupported combination.
 
 ## 3. Как писать рабочие outbound-конфиги
@@ -197,6 +198,7 @@
 Подтверждённо используются:
 - `address`
 - `port`
+- `servers`
 - `username`
 - `password`
 - `hostname`
@@ -209,9 +211,7 @@
 
 Подтверждены как ограниченная или guarded runtime-поверхность:
 - `hasIpv6` как client-side gate для явных IPv6 literal targets и domain targets без `targetStrategy useipv4/forceipv4`
-
-Явно unsupported:
-- `antiDpi`
+- `antiDpi` как split первой TCP-based записи ClientHello только для `HTTP/2 over TLS` и `HTTP/2 over REALITY`
 
 Подтверждённо активная runtime-функция:
 - `clientRandom` для H2 и H3 outbound
@@ -233,6 +233,8 @@
 - если на non-HTTP3 path одновременно заданы `skipVerification=true` и explicit generic verify surface (`VerifyPeerCertByName`, `PinnedPeerCertSha256`, authority-verify cert) или `certificatePem` / `certificatePemFile`, current config-build validator считает это конфликтом и режет конфиг до runtime;
 - если на Windows используется authority-verify через custom CA в `streamSettings.tlsSettings`, нужно добавлять `disableSystemRoot = true`, иначе воспроизводимый verify path может уйти в системный cert pool вместо custom-CA surface
 - если используется REALITY-wrapper, пустой negotiated ALPN внутри TrustTunnel layer больше не должен трактоваться как причина падения в HTTP/1.1 fallback; авторитетным остаётся `settings.transport = "http2"`
+- `antiDpi=true` допустим только на `HTTP/2 over TLS` и `HTTP/2 over REALITY`; explicit `http3` validator/runtime режут, а `transport="auto"` при этом ведёт трафик сразу в HTTP/2 path
+- если задан `servers[]`, client runtime использует ordered fallback, delayed race между первыми двумя ready endpoint, preference последнего успешно established endpoint и короткий cooldown после pre-establishment fail
 - если нужен deterministic allow/deny через server-side rules, `settings.clientRandom` должен совпадать с `client_random` rule-spec
 
 ### 3.3. Минимальные правила для H3 outbound
@@ -399,7 +401,7 @@
 ## 7. Практические ограничения текущего режима
 
 На текущем состоянии нельзя объявлять как завершённые функции:
-- `antiDpi` как рабочий product path;
+- `antiDpi` за пределами подтверждённого `HTTP/2 over TLS` и `HTTP/2 over REALITY` path, особенно для explicit `http3`;
 - `hasIpv6` как автоматическую domain-resolution-aware функцию без явного `targetStrategy` contract;
 - TrustTunnel + H3 + REALITY как рабочий path в текущем transport layer; текущий runtime его явно отклоняет;
 - `ipv6Available` как общий server transport selector вне `_icmp` raw-socket surface;
