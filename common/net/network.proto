@@ -12,6 +12,7 @@ enum Network {
   TCP = 2;
   UDP = 3;
   UNIX = 4;
+  ICMP = 5;
 }
 
 // NetworkList is a list of Networks.

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Destination represents a network destination including address and protocol (tcp / udp).
+// Destination represents a network destination including address and protocol (tcp / udp / icmp / unix).
 type Destination struct {
 	Address Address
 	Port    Port
@@ -19,6 +19,8 @@ func DestinationFromAddr(addr net.Addr) Destination {
 		return TCPDestination(IPAddress(addr.IP), Port(addr.Port))
 	case *net.UDPAddr:
 		return UDPDestination(IPAddress(addr.IP), Port(addr.Port))
+	case *net.IPAddr:
+		return ICMPDestination(IPAddress(addr.IP))
 	case *net.UnixAddr:
 		return UnixDestination(DomainAddress(addr.Name))
 	default:
@@ -38,6 +40,24 @@ func ParseDestination(dest string) (Destination, error) {
 	} else if strings.HasPrefix(dest, "udp:") {
 		d.Network = Network_UDP
 		dest = dest[4:]
+	} else if strings.HasPrefix(dest, "icmp:") {
+		d.Network = Network_ICMP
+		dest = dest[5:]
+		if hstr, pstr, err := SplitHostPort(dest); err == nil {
+			if len(hstr) > 0 {
+				d.Address = ParseAddress(hstr)
+			}
+			if len(pstr) > 0 {
+				port, err := PortFromString(pstr)
+				if err != nil {
+					return d, err
+				}
+				d.Port = port
+			}
+		} else if len(dest) > 0 {
+			d.Address = ParseAddress(dest)
+		}
+		return d, nil
 	} else if strings.HasPrefix(dest, "unix:") {
 		d = UnixDestination(DomainAddress(dest[5:]))
 		return d, nil
@@ -78,6 +98,14 @@ func UDPDestination(address Address, port Port) Destination {
 	}
 }
 
+// ICMPDestination creates an ICMP destination with given address.
+func ICMPDestination(address Address) Destination {
+	return Destination{
+		Network: Network_ICMP,
+		Address: address,
+	}
+}
+
 // UnixDestination creates a Unix destination with given address
 func UnixDestination(address Address) Destination {
 	return Destination{
@@ -91,6 +119,8 @@ func (d Destination) NetAddr() string {
 	addr := ""
 	if d.Network == Network_TCP || d.Network == Network_UDP {
 		addr = d.Address.String() + ":" + d.Port.String()
+	} else if d.Network == Network_ICMP {
+		addr = d.Address.String()
 	} else if d.Network == Network_UNIX {
 		addr = d.Address.String()
 	}
@@ -115,6 +145,12 @@ func (d Destination) RawNetAddr() net.Addr {
 				Port: int(d.Port),
 			}
 		}
+	case Network_ICMP:
+		if d.Address.Family().IsIP() {
+			addr = &net.IPAddr{
+				IP: d.Address.IP(),
+			}
+		}
 	case Network_UNIX:
 		if d.Address.Family().IsDomain() {
 			addr = &net.UnixAddr{
@@ -134,6 +170,8 @@ func (d Destination) String() string {
 		prefix = "tcp:"
 	case Network_UDP:
 		prefix = "udp:"
+	case Network_ICMP:
+		prefix = "icmp:"
 	case Network_UNIX:
 		prefix = "unix:"
 	}

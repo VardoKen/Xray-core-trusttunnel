@@ -34,6 +34,25 @@ func TestActivityTimerUpdate(t *testing.T) {
 	runtime.KeepAlive(timer)
 }
 
+func TestActivityTimerTracksLastActivity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	timeout := 400 * time.Millisecond
+	timer := CancelAfterInactivity(ctx, cancel, timeout)
+	start := time.Now()
+
+	time.Sleep(timeout / 2)
+	timer.Update()
+
+	<-ctx.Done()
+	elapsed := time.Since(start)
+	if elapsed > 750*time.Millisecond {
+		t.Fatalf("expected timeout to track last activity, elapsed=%v", elapsed)
+	}
+	runtime.KeepAlive(timer)
+}
+
 func TestActivityTimerNonBlocking(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	timer := CancelAfterInactivity(ctx, cancel, 0)

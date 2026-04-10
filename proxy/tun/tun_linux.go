@@ -5,7 +5,8 @@ package tun
 import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
-	"gvisor.dev/gvisor/pkg/tcpip/link/fdbased"
+	"gvisor.dev/gvisor/pkg/buffer"
+	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
@@ -23,6 +24,9 @@ var _ Tun = (*LinuxTun)(nil)
 
 // LinuxTun implements GVisorTun
 var _ GVisorTun = (*LinuxTun)(nil)
+
+// LinuxTun implements GVisorDevice
+var _ GVisorDevice = (*LinuxTun)(nil)
 
 // NewTun builds new tun interface handler (linux specific)
 func NewTun(options TunOptions) (Tun, error) {
@@ -110,11 +114,60 @@ func (t *LinuxTun) Close() error {
 	return nil
 }
 
-// newEndpoint builds new gVisor stack.LinkEndpoint from the tun interface file descriptor
+// WritePacket implements GVisorDevice method to write one packet to the tun device.
+func (t *LinuxTun) WritePacket(packet *stack.PacketBuffer) tcpip.Error {
+	view := packet.ToView()
+	defer view.Release()
+
+	if err := rawWrite(t.tunFd, view.AsSlice()); err != nil {
+		if err == unix.EAGAIN || err == unix.EWOULDBLOCK || err == unix.EINTR {
+			return &tcpip.ErrWouldBlock{}
+		}
+		return &tcpip.ErrAborted{}
+	}
+
+	return nil
+}
+
+// ReadPacket implements GVisorDevice method to read one packet from the tun device.
+// It must not block; ErrQueueEmpty tells the stack to back off and wait.
+func (t *LinuxTun) ReadPacket() (byte, *stack.PacketBuffer, error) {
+	packet := make([]byte, t.options.MTU)
+	n, err := unix.Read(t.tunFd, packet)
+	if err == unix.EAGAIN || err == unix.EWOULDBLOCK || err == unix.EINTR {
+		return 0, nil, ErrQueueEmpty
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	if n == 0 {
+		return 0, nil, ErrQueueEmpty
+	}
+
+	version := packet[0] >> 4
+	payload := buffer.MakeWithView(buffer.NewViewWithData(packet[:n]))
+	return version, stack.NewPacketBuffer(stack.PacketBufferOptions{
+		Payload:           payload,
+		IsForwardedPacket: true,
+	}), nil
+}
+
+func (t *LinuxTun) Wait() {
+	_, _ = unix.Poll([]unix.PollFd{{Fd: int32(t.tunFd), Events: unix.POLLIN}}, -1)
+}
+
+// newEndpoint builds new gVisor stack.LinkEndpoint from the tun interface file descriptor.
 func (t *LinuxTun) newEndpoint() (stack.LinkEndpoint, error) {
-	return fdbased.New(&fdbased.Options{
-		FDs:               []int{t.tunFd},
-		MTU:               t.options.MTU,
-		RXChecksumOffload: true,
-	})
+	return &LinkEndpoint{deviceMTU: t.options.MTU, device: t}, nil
+}
+
+func rawWrite(fd int, b []byte) error {
+	for len(b) > 0 {
+		n, err := unix.Write(fd, b)
+		if err != nil {
+			return err
+		}
+		b = b[n:]
+	}
+	return nil
 }

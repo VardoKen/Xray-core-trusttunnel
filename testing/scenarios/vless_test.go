@@ -1,7 +1,8 @@
 package scenarios
 
 import (
-	"encoding/base64"
+	"crypto/ecdh"
+	"crypto/rand"
 	"encoding/hex"
 	"sync"
 	"testing"
@@ -374,8 +375,10 @@ func TestVlessXtlsVisionReality(t *testing.T) {
 
 	userID := protocol.NewID(uuid.New())
 	serverPort := tcp.PickPort()
-	privateKey, _ := base64.RawURLEncoding.DecodeString("aGSYystUbf59_9_6LKRxD27rmSW_-2_nyd9YG_Gwbks")
-	publicKey, _ := base64.RawURLEncoding.DecodeString("E59WjnvZcQMu7tR7_BgyhycuEdBS-CtKxfImRCdAvFM")
+	serverKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+	common.Must(err)
+	privateKey := serverKey.Bytes()
+	publicKey := serverKey.PublicKey().Bytes()
 	shortIds := make([][]byte, 1)
 	shortIds[0] = make([]byte, 8)
 	hex.Decode(shortIds[0], []byte("0123456789abcdef"))
@@ -513,8 +516,10 @@ func TestVlessRealityFingerprints(t *testing.T) {
 
 		userID := protocol.NewID(uuid.New())
 		serverPort := tcp.PickPort()
-		privateKey, _ := base64.RawURLEncoding.DecodeString("aGSYystUbf59_9_6LKRxD27rmSW_-2_nyd9YG_Gwbks")
-		publicKey, _ := base64.RawURLEncoding.DecodeString("E59WjnvZcQMu7tR7_BgyhycuEdBS-CtKxfImRCdAvFM")
+		serverKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+		common.Must(err)
+		privateKey := serverKey.Bytes()
+		publicKey := serverKey.PublicKey().Bytes()
 		shortIds := make([][]byte, 1)
 		shortIds[0] = make([]byte, 8)
 		hex.Decode(shortIds[0], []byte("0123456789abcdef"))

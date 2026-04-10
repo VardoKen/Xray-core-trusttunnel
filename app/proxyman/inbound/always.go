@@ -146,7 +146,6 @@ func NewAlwaysOnInboundHandler(ctx context.Context, tag string, receiverConfig *
 					}
 					h.workers = append(h.workers, worker)
 				}
-
 				if net.HasNetwork(nl, net.Network_UDP) {
 					worker := &udpWorker{
 						tag:             tag,

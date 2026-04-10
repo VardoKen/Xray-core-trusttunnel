@@ -53,24 +53,81 @@ jobs:
             fi
           done
 
-      - name: Trigger Asset Update Workflow if Assets Missing
+      - name: Download Missing Assets
         if: steps.check-assets.outputs.missing == 'true'
-        uses: actions/github-script@v8
+        id: update-assets
+        uses: nick-fields/retry@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const { owner, repo } = context.repo;
-            await github.rest.actions.createWorkflowDispatch({
-              owner,
-              repo,
-              workflow_id: 'scheduled-assets-update.yml',
-              ref: context.ref
-            });
-            console.log('Triggered scheduled-assets-update.yml due to missing assets on branch:', context.ref);
+          timeout_minutes: 20
+          retry_wait_seconds: 30
+          max_attempts: 5
+          command: |
+            [ -d 'resources' ] || mkdir resources
 
-      - name: Sleep for 90 seconds if Assets Missing
-        if: steps.check-assets.outputs.missing == 'true'
-        run: sleep 90
+            LIST=('Loyalsoldier v2ray-rules-dat geoip geoip' 'Loyalsoldier v2ray-rules-dat geosite geosite')
+            for i in "${LIST[@]}"
+            do
+              INFO=($(echo $i | awk 'BEGIN{FS=" ";OFS=" "} {print $1,$2,$3,$4}'))
+              FILE_NAME="${INFO[3]}.dat"
+              if [ -s "./resources/${FILE_NAME}" ]; then
+                continue
+              fi
+              echo -e "Downloading https://raw.githubusercontent.com/${INFO[0]}/${INFO[1]}/release/${INFO[2]}.dat..."
+              HASH="$(curl --retry 5 --retry-delay 2 --retry-all-errors -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://raw.githubusercontent.com/${INFO[0]}/${INFO[1]}/release/${INFO[2]}.dat.sha256sum" | awk -F ' ' '{print $1}')"
+              curl --retry 5 --retry-delay 2 --retry-all-errors -fL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://raw.githubusercontent.com/${INFO[0]}/${INFO[1]}/release/${INFO[2]}.dat" -o "./resources/${FILE_NAME}"
+              [ "$(sha256sum "./resources/${FILE_NAME}" | awk -F ' ' '{print $1}')" == "${HASH}" ] || { echo -e "The HASH key of ${FILE_NAME} does not match cloud one."; exit 1; }
+              echo "geodat_unhit=true" >> $GITHUB_OUTPUT
+            done
+
+            missing=false
+            LIST=('amd64' 'x86' 'arm64')
+            for ARCHITECTURE in "${LIST[@]}"
+            do
+              if [ ! -s "./resources/wintun/bin/${ARCHITECTURE}/wintun.dll" ]; then
+                missing=true
+              fi
+            done
+            if [ ! -s "./resources/wintun/LICENSE.txt" ]; then
+              missing=true
+            fi
+            if [[ "$missing" == true ]]; then
+              FILENAME=wintun.zip
+              DOWNLOAD_FILE=wintun-0.14.1.zip
+              echo -e "Downloading https://www.wintun.net/builds/${DOWNLOAD_FILE}..."
+              curl --retry 5 --retry-delay 2 --retry-all-errors -fL "https://www.wintun.net/builds/${DOWNLOAD_FILE}" -o "${FILENAME}"
+              unzip -u "${FILENAME}" -d resources/
+              rm -f "${FILENAME}"
+              echo "wintun_unhit=true" >> $GITHUB_OUTPUT
+            fi
+
+            [ -s "./resources/geoip.dat" ] || { echo "geoip.dat is still missing"; exit 1; }
+            [ -s "./resources/geosite.dat" ] || { echo "geosite.dat is still missing"; exit 1; }
+            [ -s "./resources/wintun/LICENSE.txt" ] || { echo "wintun license is still missing"; exit 1; }
+            for ARCHITECTURE in amd64 x86 arm64
+            do
+              [ -s "./resources/wintun/bin/${ARCHITECTURE}/wintun.dll" ] || { echo "wintun.dll for ${ARCHITECTURE} is still missing"; exit 1; }
+            done
+
+      - name: Save Geodat Cache
+        uses: actions/cache/save@v5
+        if: steps.update-assets.outputs.geodat_unhit == 'true'
+        with:
+          path: resources
+          key: xray-geodat-${{ github.sha }}-${{ github.run_number }}
+
+      - name: Save Wintun Cache
+        uses: actions/cache/save@v5
+        if: steps.update-assets.outputs.wintun_unhit == 'true'
+        with:
+          path: resources
+          key: xray-wintun-${{ github.sha }}-${{ github.run_number }}
+
+      - name: Upload Assets Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: resources
+          if-no-files-found: error
 
   build:
     needs: check-assets
@@ -231,6 +288,12 @@ jobs:
         with:
           path: resources
           key: xray-wintun-
+
+      - name: Download Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: .
 
       - name: Add additional assets into package
         run: |

@@ -1,0 +1,54 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "tun-in",
+      "protocol": "tun",
+      "settings": {
+        "name": "xraytunh3",
+        "MTU": 1500
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-out",
+      "protocol": "trusttunnel",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": 9443,
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.example.com",
+        "transport": "http3",
+        "hasIpv6": true,
+        "skipVerification": true,
+        "clientRandom": "",
+        "antiDpi": false,
+        "udp": false
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.example.com",
+          "allowInsecure": true,
+          "alpn": ["h3"]
+        }
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["tun-in"],
+        "outboundTag": "tt-out"
+      }
+    ]
+  }
+}

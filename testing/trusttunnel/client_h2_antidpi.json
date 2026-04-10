@@ -1,0 +1,42 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "socks-in-h2-antidpi",
+      "listen": "127.0.0.1",
+      "port": 10810,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-out-h2-antidpi",
+      "protocol": "trusttunnel",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": 9443,
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.example.com",
+        "transport": "http2",
+        "skipVerification": false,
+        "certificatePemFile": "/path/to/server.crt",
+        "antiDpi": true,
+        "udp": false
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.example.com",
+          "allowInsecure": false,
+          "alpn": ["h2"]
+        }
+      }
+    }
+  ]
+}

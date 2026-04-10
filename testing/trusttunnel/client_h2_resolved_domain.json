@@ -1,0 +1,21 @@
+{
+  "protocol": "trusttunnel",
+  "settings": {
+    "address": "edge.example.com",
+    "port": 9443,
+    "username": "u1",
+    "password": "p1",
+    "hostname": "vpn.example.com",
+    "transport": "http2",
+    "clientRandom": "deadbeef",
+    "udp": false
+  },
+  "streamSettings": {
+    "network": "tcp",
+    "security": "tls",
+    "tlsSettings": {
+      "serverName": "vpn.example.com",
+      "alpn": ["h2"]
+    }
+  }
+}

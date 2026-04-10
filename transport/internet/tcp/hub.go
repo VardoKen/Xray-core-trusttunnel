@@ -3,9 +3,12 @@ package tcp
 import (
 	"context"
 	gotls "crypto/tls"
+	"net/http"
 	"strings"
 	"time"
 
+	"github.com/apernet/quic-go"
+	"github.com/apernet/quic-go/http3"
 	goreality "github.com/xtls/reality"
 	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/errors"
@@ -16,32 +19,125 @@ import (
 	"github.com/xtls/xray-core/transport/internet/tls"
 )
 
-// Listener is an internet.Listener that listens for TCP connections.
 type Listener struct {
-	listener      net.Listener
-	tlsConfig     *gotls.Config
-	realityConfig *goreality.Config
-	authConfig    internet.ConnectionAuthenticator
-	config        *Config
-	addConn       internet.ConnHandler
+	listener            net.Listener
+	packetConn          net.PacketConn
+	h3listener          *quic.EarlyListener
+	h3server            *http3.Server
+	trustTunnelTimeouts TrustTunnelServerTimeouts
+	tlsConfig           *gotls.Config
+	realityConfig       *goreality.Config
+	authConfig          internet.ConnectionAuthenticator
+	config              *Config
+	addConn             internet.ConnHandler
+	address             net.Address
+	port                net.Port
 }
 
-// ListenTCP creates a new Listener based on configurations.
+func isH3TLSConfig(cfg *gotls.Config) bool {
+	return cfg != nil && len(cfg.NextProtos) == 1 && cfg.NextProtos[0] == "h3"
+}
+
 func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSettings *internet.MemoryStreamConfig, handler internet.ConnHandler) (internet.Listener, error) {
 	l := &Listener{
 		addConn: handler,
+		address: address,
+		port:    port,
 	}
+
 	tcpSettings := streamSettings.ProtocolSettings.(*Config)
 	l.config = tcpSettings
+	l.trustTunnelTimeouts = trustTunnelServerTimeoutsFromContext(ctx)
 	if l.config != nil {
 		if streamSettings.SocketSettings == nil {
 			streamSettings.SocketSettings = &internet.SocketConfig{}
 		}
 		streamSettings.SocketSettings.AcceptProxyProtocol = l.config.AcceptProxyProtocol || streamSettings.SocketSettings.AcceptProxyProtocol
 	}
+
+	if config := tls.ConfigFromStreamSettings(streamSettings); config != nil {
+		l.tlsConfig = config.GetTLSConfig()
+	}
+	if config := reality.ConfigFromStreamSettings(streamSettings); config != nil {
+		l.realityConfig = config.GetREALITYConfig()
+		go goreality.DetectPostHandshakeRecordsLens(l.realityConfig)
+	}
+	if l.realityConfig != nil && trustTunnelServerTransportHintsFromContext(ctx).WantsHTTP3 {
+		return nil, errors.New("trusttunnel http3 with REALITY is unsupported: current Xray REALITY transport is TCP-only").AtWarning()
+	}
+
+	if tcpSettings.HeaderSettings != nil {
+		headerConfig, err := tcpSettings.HeaderSettings.GetInstance()
+		if err != nil {
+			return nil, errors.New("invalid header settings").Base(err).AtError()
+		}
+		auth, err := internet.CreateConnectionAuthenticator(headerConfig)
+		if err != nil {
+			return nil, errors.New("invalid header settings.").Base(err).AtError()
+		}
+		l.authConfig = auth
+	}
+
+	if port != net.Port(0) && isH3TLSConfig(l.tlsConfig) {
+		packetConn, err := internet.ListenSystemPacket(ctx, &net.UDPAddr{
+			IP:   address.IP(),
+			Port: int(port),
+		}, streamSettings.SocketSettings)
+		if err != nil {
+			return nil, errors.New("failed to listen UDP on ", address, ":", port).Base(err)
+		}
+		errors.LogInfo(ctx, "listening H3/QUIC on ", address, ":", port)
+
+		clientRandomTracker := newH3ClientRandomTracker()
+		wrappedPacketConn := &h3ClientRandomPacketConn{
+			PacketConn: packetConn,
+			tracker:    clientRandomTracker,
+		}
+
+		quicConfig := &quic.Config{}
+		if l.trustTunnelTimeouts.TLSHandshakeTimeout > 0 {
+			quicConfig.HandshakeIdleTimeout = l.trustTunnelTimeouts.TLSHandshakeTimeout
+		}
+		if l.trustTunnelTimeouts.ClientListenerTimeout > 0 {
+			quicConfig.MaxIdleTimeout = l.trustTunnelTimeouts.ClientListenerTimeout
+		}
+
+		h3listener, err := quic.ListenEarly(wrappedPacketConn, l.tlsConfig, quicConfig)
+		if err != nil {
+			_ = packetConn.Close()
+			return nil, errors.New("failed to listen QUIC on ", address, ":", port).Base(err)
+		}
+
+		l.packetConn = packetConn
+		l.h3listener = h3listener
+
+		localAddr := packetConn.LocalAddr()
+		l.h3server = &http3.Server{
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				remoteAddr, err := net.ResolveUDPAddr("udp", req.RemoteAddr)
+				if err != nil {
+					remoteAddr = &net.UDPAddr{
+						IP:   []byte{0, 0, 0, 0},
+						Port: 0,
+					}
+				}
+
+				clientRandom := clientRandomTracker.Get(remoteAddr.String())
+				l.addConn(stat.Connection(newHTTP3RequestConn(req, w, remoteAddr, localAddr, clientRandom)))
+			}),
+		}
+		if l.trustTunnelTimeouts.ClientListenerTimeout > 0 {
+			l.h3server.IdleTimeout = l.trustTunnelTimeouts.ClientListenerTimeout
+		}
+
+		go l.keepAcceptingH3()
+		return l, nil
+	}
+
 	var listener net.Listener
 	var err error
-	if port == net.Port(0) { // unix
+
+	if port == net.Port(0) {
 		if !address.Family().IsDomain() {
 			return nil, errors.New("invalid unix listen: ", address).AtError()
 		}
@@ -74,26 +170,6 @@ func ListenTCP(ctx context.Context, address net.Address, port net.Port, streamSe
 
 	l.listener = listener
 
-	if config := tls.ConfigFromStreamSettings(streamSettings); config != nil {
-		l.tlsConfig = config.GetTLSConfig()
-	}
-	if config := reality.ConfigFromStreamSettings(streamSettings); config != nil {
-		l.realityConfig = config.GetREALITYConfig()
-		go goreality.DetectPostHandshakeRecordsLens(l.realityConfig)
-	}
-
-	if tcpSettings.HeaderSettings != nil {
-		headerConfig, err := tcpSettings.HeaderSettings.GetInstance()
-		if err != nil {
-			return nil, errors.New("invalid header settings").Base(err).AtError()
-		}
-		auth, err := internet.CreateConnectionAuthenticator(headerConfig)
-		if err != nil {
-			return nil, errors.New("invalid header settings.").Base(err).AtError()
-		}
-		l.authConfig = auth
-	}
-
 	go l.keepAccepting()
 	return l, nil
 }
@@ -115,7 +191,15 @@ func (v *Listener) keepAccepting() {
 
 		go func() {
 			if v.tlsConfig != nil {
+				conn = wrapTrustTunnelClientRandomConnWithTimeout(conn, v.trustTunnelTimeouts.TLSHandshakeTimeout)
 				conn = tls.Server(conn, v.tlsConfig)
+				if handshakeTimeout := v.trustTunnelTimeouts.TLSHandshakeTimeout; handshakeTimeout > 0 {
+					if err := trustTunnelServerHandshake(conn, handshakeTimeout); err != nil {
+						errors.LogInfoInner(context.Background(), err, "failed TLS handshake")
+						common.Close(conn)
+						return
+					}
+				}
 			} else if v.realityConfig != nil {
 				if conn, err = reality.Server(conn, v.realityConfig); err != nil {
 					errors.LogInfo(context.Background(), err.Error())
@@ -130,14 +214,65 @@ func (v *Listener) keepAccepting() {
 	}
 }
 
-// Addr implements internet.Listener.Addr.
-func (v *Listener) Addr() net.Addr {
-	return v.listener.Addr()
+func (v *Listener) keepAcceptingH3() {
+	for {
+		conn, err := v.h3listener.Accept(context.Background())
+		if err != nil {
+			errStr := err.Error()
+			if strings.Contains(errStr, "closed") {
+				break
+			}
+			errors.LogWarningInner(context.Background(), err, "failed to accept h3 connections")
+			if strings.Contains(errStr, "too many") {
+				time.Sleep(time.Millisecond * 500)
+			}
+			continue
+		}
+
+		go func() {
+			if err := v.h3server.ServeQUICConn(conn); err != nil {
+				errors.LogDebugInner(context.Background(), err, "h3 connection ended")
+			}
+			_ = conn.CloseWithError(0, "")
+		}()
+	}
 }
 
-// Close implements internet.Listener.Close.
+func (v *Listener) Addr() net.Addr {
+	if v.listener != nil {
+		return v.listener.Addr()
+	}
+	if v.packetConn != nil {
+		return v.packetConn.LocalAddr()
+	}
+	return nil
+}
+
 func (v *Listener) Close() error {
-	return v.listener.Close()
+	var ret error
+
+	if v.h3server != nil {
+		if err := v.h3server.Close(); ret == nil {
+			ret = err
+		}
+	}
+	if v.h3listener != nil {
+		if err := v.h3listener.Close(); ret == nil {
+			ret = err
+		}
+	}
+	if v.packetConn != nil {
+		if err := v.packetConn.Close(); ret == nil {
+			ret = err
+		}
+	}
+	if v.listener != nil {
+		if err := v.listener.Close(); ret == nil {
+			ret = err
+		}
+	}
+
+	return ret
 }
 
 func init() {

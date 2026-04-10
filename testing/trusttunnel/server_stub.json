@@ -1,0 +1,31 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "tt-in",
+      "listen": "0.0.0.0",
+      "port": 8443,
+      "protocol": "trusttunnel",
+      "settings": {
+        "users": [
+          { "email": "u1@example.com", "username": "u1", "password": "p1" }
+        ],
+        "hosts": [
+          {
+            "hostname": "vpn.example.com",
+            "certificateFile": "/path/to/server.crt",
+            "keyFile": "/path/to/server.key"
+          }
+        ],
+        "transports": ["http2"],
+        "rules": [],
+        "ipv6Available": true,
+        "authFailureStatusCode": 407,
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ]
+}

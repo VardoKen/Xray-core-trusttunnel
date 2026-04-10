@@ -1,0 +1,44 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "tt-in-h3",
+      "listen": "0.0.0.0",
+      "port": 9445,
+      "protocol": "trusttunnel",
+      "settings": {
+        "users": [
+          { "username": "u1", "password": "p1" }
+        ],
+        "hosts": [
+          {
+            "hostname": "vpn.example.com",
+            "certificateFile": "/path/to/official/cert.pem",
+            "keyFile": "/path/to/official/key.pem"
+          }
+        ],
+        "transports": ["http3"],
+        "rules": [],
+        "ipv6Available": true,
+        "authFailureStatusCode": 407,
+        "udp": true
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": ["h3"],
+          "certificates": [
+            {
+              "certificateFile": "/path/to/official/cert.pem",
+              "keyFile": "/path/to/official/key.pem"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ]
+}

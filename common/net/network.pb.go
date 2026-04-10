@@ -28,6 +28,7 @@ const (
 	Network_TCP     Network = 2
 	Network_UDP     Network = 3
 	Network_UNIX    Network = 4
+	Network_ICMP    Network = 5
 )
 
 // Enum value maps for Network.
@@ -37,12 +38,14 @@ var (
 		2: "TCP",
 		3: "UDP",
 		4: "UNIX",
+		5: "ICMP",
 	}
 	Network_value = map[string]int32{
 		"Unknown": 0,
 		"TCP":     2,
 		"UDP":     3,
 		"UNIX":    4,
+		"ICMP":    5,
 	}
 )
 
@@ -124,12 +127,13 @@ const file_common_net_network_proto_rawDesc = "" +
 	"\n" +
 	"\x18common/net/network.proto\x12\x0fxray.common.net\"A\n" +
 	"\vNetworkList\x122\n" +
-	"\anetwork\x18\x01 \x03(\x0e2\x18.xray.common.net.NetworkR\anetwork*2\n" +
+	"\anetwork\x18\x01 \x03(\x0e2\x18.xray.common.net.NetworkR\anetwork*<\n" +
 	"\aNetwork\x12\v\n" +
 	"\aUnknown\x10\x00\x12\a\n" +
 	"\x03TCP\x10\x02\x12\a\n" +
 	"\x03UDP\x10\x03\x12\b\n" +
-	"\x04UNIX\x10\x04BO\n" +
+	"\x04UNIX\x10\x04\x12\b\n" +
+	"\x04ICMP\x10\x05BO\n" +
 	"\x13com.xray.common.netP\x01Z$github.com/xtls/xray-core/common/net\xaa\x02\x0fXray.Common.Netb\x06proto3"
 
 var (

@@ -147,6 +147,10 @@ func (w *tcpWorker) Start() error {
 		ctx = hyCtx.ContextWithValidator(ctx, v.HysteriaInboundValidator())
 	}
 
+	if provider, ok := w.proxy.(interface{ ListenerContext(context.Context) context.Context }); ok {
+		ctx = provider.ListenerContext(ctx)
+	}
+
 	hub, err := internet.ListenTCP(ctx, w.address, w.port, w.stream, func(conn stat.Connection) {
 		go w.callback(conn)
 	})

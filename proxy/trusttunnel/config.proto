@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package xray.proxy.trusttunnel;
+
+option csharp_namespace = "Xray.Proxy.TrustTunnel";
+option go_package = "github.com/xtls/xray-core/proxy/trusttunnel";
+option java_package = "com.xray.proxy.trusttunnel";
+option java_multiple_files = true;
+
+import "common/protocol/user.proto";
+import "common/protocol/server_spec.proto";
+
+message Account {
+  string username = 1;
+  string password = 2;
+  uint32 max_http2_conns = 3;
+  uint32 max_http3_conns = 4;
+}
+
+enum TransportProtocol {
+  HTTP2 = 0;
+  HTTP3 = 1;
+  AUTO = 2;
+}
+
+enum PostQuantumGroupSetting {
+  POST_QUANTUM_GROUP_SETTING_AUTO = 0;
+  POST_QUANTUM_GROUP_SETTING_DISABLED = 1;
+  POST_QUANTUM_GROUP_SETTING_ENABLED = 2;
+}
+
+message Rule {
+  string cidr = 1;
+  string client_random = 2;
+  bool allow = 3;
+}
+
+message ServerHost {
+  string hostname = 1;
+  string certificate_path = 2;
+  string key_path = 3;
+}
+
+message ClientConfig {
+  xray.common.protocol.ServerEndpoint server = 1;
+  string hostname = 2;
+  TransportProtocol transport = 3;
+  bool has_ipv6 = 4;
+  bool skip_verification = 5;
+  string certificate_pem = 6;
+  string client_random = 7;
+  bool anti_dpi = 8;
+  bool enable_udp = 9;
+  PostQuantumGroupSetting post_quantum_group_enabled = 10;
+  repeated xray.common.protocol.ServerEndpoint servers = 11;
+}
+
+message ServerConfig {
+  repeated xray.common.protocol.User users = 1;
+  repeated ServerHost hosts = 2;
+  repeated TransportProtocol transports = 3;
+  repeated Rule rules = 4;
+  bool ipv6_available = 5;
+  uint32 auth_failure_status_code = 6;
+  bool enable_udp = 7;
+  string icmp_interface_name = 8;
+  uint32 icmp_request_timeout_secs = 9;
+  bool allow_private_network_connections = 10;
+  uint32 icmp_recv_message_queue_capacity = 11;
+  uint32 tls_handshake_timeout_secs = 12;
+  uint32 client_listener_timeout_secs = 13;
+  uint32 connection_establishment_timeout_secs = 14;
+  uint32 tcp_connections_timeout_secs = 15;
+  uint32 udp_connections_timeout_secs = 16;
+  uint32 default_max_http2_conns_per_client = 17;
+  uint32 default_max_http3_conns_per_client = 18;
+}

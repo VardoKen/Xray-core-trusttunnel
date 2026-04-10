@@ -1,0 +1,57 @@
+{
+  "log": { "loglevel": "debug" },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-out",
+      "protocol": "trusttunnel",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": 9444,
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.example.com",
+        "transport": "http2",
+        "hasIpv6": true,
+        "skipVerification": false,
+        "certificatePemFile": "/path/to/official/cert.pem",
+        "clientRandom": "",
+        "antiDpi": false,
+        "udp": false
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.example.com",
+          "allowInsecure": true,
+          "alpn": ["h2"]
+        }
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["socks-in"],
+        "outboundTag": "tt-out"
+      }
+    ]
+  }
+}

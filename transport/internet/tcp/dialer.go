@@ -34,6 +34,9 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 	}
 
 	if config := tls.ConfigFromStreamSettings(streamSettings); config != nil {
+		if tls.AntiDPIEnabledFromContext(ctx) {
+			conn = tls.WrapConnWithAntiDPI(conn)
+		}
 		mitmServerName := session.MitmServerNameFromContext(ctx)
 		mitmAlpn11 := session.MitmAlpn11FromContext(ctx)
 		var tlsConfig *gotls.Config
@@ -41,6 +44,14 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 			tlsConfig = config.GetTLSConfig(tls.WithOverrideName(mitmServerName))
 		} else {
 			tlsConfig = config.GetTLSConfig(tls.WithDestination(dest))
+		}
+		if spec := tls.ClientHelloRandomSpecFromContext(ctx); spec != "" {
+			reader, err := tls.NewClientHelloRandomReader(spec, tlsConfig.Rand)
+			if err != nil {
+				conn.Close()
+				return nil, errors.New("failed to apply TLS client hello random").Base(err).AtWarning()
+			}
+			tlsConfig.Rand = reader
 		}
 
 		isFromMitmVerify := false
@@ -96,6 +107,9 @@ func Dial(ctx context.Context, dest net.Destination, streamSettings *internet.Me
 			return nil, errors.New("MITM freedom RAW TLS: unexpected Negotiated Protocol (" + negotiatedProtocol + ") with " + mitmServerName).AtWarning()
 		}
 	} else if config := reality.ConfigFromStreamSettings(streamSettings); config != nil {
+		if tls.AntiDPIEnabledFromContext(ctx) {
+			conn = tls.WrapConnWithAntiDPI(conn)
+		}
 		if conn, err = reality.UClient(conn, config, ctx, dest); err != nil {
 			return nil, err
 		}

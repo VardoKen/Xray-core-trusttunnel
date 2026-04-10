@@ -1,0 +1,29 @@
+loglevel = "debug"
+vpn_mode = "general"
+killswitch_enabled = false
+killswitch_allow_ports = []
+post_quantum_group_enabled = true
+exclusions = []
+dns_upstreams = []
+
+[endpoint]
+hostname = "vpn.example.com"
+addresses = ["127.0.0.1:9443"]
+custom_sni = ""
+has_ipv6 = true
+username = "u1"
+password = "p1"
+client_random = ""
+skip_verification = false
+certificate = """
+-----BEGIN CERTIFICATE-----
+REPLACE_WITH_YOUR_TRUSTED_SERVER_CERTIFICATE
+-----END CERTIFICATE-----
+"""
+upstream_protocol = "http2"
+anti_dpi = false
+
+[listener.socks]
+address = "127.0.0.1:11081"
+username = ""
+password = ""

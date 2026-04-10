@@ -77,6 +77,8 @@ func (v Network) Build() net.Network {
 		return net.Network_UDP
 	case "unix":
 		return net.Network_UNIX
+	case "icmp":
+		return net.Network_ICMP
 	default:
 		return net.Network_Unknown
 	}
