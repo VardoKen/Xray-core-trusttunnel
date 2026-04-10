@@ -546,6 +546,14 @@ Start:
 		return nil
 	}
 
+	if isTrustTunnelMultipathOpenHost(req.Host) || isTrustTunnelMultipathAttachHost(req.Host) {
+		writePlainResponse(conn, http.StatusNotImplemented, "Not Implemented", trustTunnelMultipathUnsupportedProtoText+"\n", map[string]string{
+			"Connection": "close",
+		})
+		errors.LogInfo(ctx, trustTunnelMultipathUnsupportedProtoText)
+		return nil
+	}
+
 	dest, err := http_proto.ParseHost(req.Host, net.Port(443))
 	if err != nil {
 		writePlainResponse(conn, http.StatusBadRequest, "Bad Request", "invalid CONNECT host\n", map[string]string{
@@ -819,6 +827,10 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 		if fl, ok := w.(http.Flusher); ok {
 			fl.Flush()
 		}
+		return
+	}
+
+	if s.serveMultipathControlRequest(proto, ctx, w, req, user, cleanupConn) {
 		return
 	}
 

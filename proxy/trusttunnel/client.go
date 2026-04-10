@@ -557,6 +557,10 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		return err
 	}
 
+	if multipath := c.config.GetMultipath(); multipath != nil && multipath.GetEnabled() {
+		return errors.New(trustTunnelMultipathPayloadNotReadyText).AtError()
+	}
+
 	if ob.Target.Network == xnet.Network_ICMP {
 		return c.processICMP(ctx, link, dialer, ob.Target)
 	}

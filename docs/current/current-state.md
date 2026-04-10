@@ -48,11 +48,12 @@ TrustTunnel в текущем дереве подтверждённо наход
 - полный `testing/scenarios` проходит как локально, так и на Debian lab; compile-only sweep `GOFLAGS=-buildvcs=false go test -run '^$' ./...` проходит по всему дереву, а текущие full-tree ограничения остаются только внешними для `app/dns` QUIC probe и asset-зависимыми для `geoip.dat`, а не branch-регрессиями TrustTunnel;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
 
-На ветке `feat/trusttunnel-multipath` открыта новая experimental-R&D линия TrustTunnel Multipath Transport. На текущем этапе она всё ещё не изменила это подтверждённое runtime-состояние, но уже вышла из чисто текстового плана в phase 1 implementation:
-- `proxy/trusttunnel/config.proto` и `infra/conf/trusttunnel.go` уже содержат experimental client-side `multipath.*` config surface;
-- `infra/conf/trusttunnel_lint.go` уже fail-fast режет multipath вне phase-1 scope: не `HTTP/2 over TLS`, `transport=auto/http3`, `udp=true`, отсутствие multi-endpoint pool, `minChannels < 2` и `maxChannels < minChannels`;
-- `proxy/trusttunnel/multipath_session.go` уже содержит минимальные runtime-структуры `MultipathSession`, `MultipathChannel` и server-side session registry skeleton;
-- product-ready multipath data path, `_mptcp_open`, `_mptcp_attach`, framed payload layer и remote-live multi-IP traffic distribution пока ещё не реализованы и не подтверждены.
+На ветке `feat/trusttunnel-multipath` открыта новая experimental-R&D линия TrustTunnel Multipath Transport. На текущем этапе она всё ещё не изменила это подтверждённое runtime-состояние stable TrustTunnel path, но уже вышла из phase 1 в phase 2 control-path implementation:
+- `proxy/trusttunnel/config.proto`, `infra/conf/trusttunnel.go` и `infra/conf/trusttunnel_lint.go` уже дают experimental `multipath.*` config surface и fail-fast guardrails для phase-1 scope: только `HTTP/2 over TLS`, без `transport=auto/http3`, без `udp=true`, с обязательным multi-endpoint pool и с проверкой `minChannels/maxChannels`;
+- `proxy/trusttunnel/multipath_session.go` уже содержит не только `MultipathSession` / `MultipathChannel` и server-side registry skeleton, но и attach-secret, attach-deadline, replay-guard и channel-limit validation;
+- `proxy/trusttunnel/multipath_control.go` и `proxy/trusttunnel/multipath_server.go` уже реализуют `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation и secondary channel attach на server-side control path;
+- H1 и H3 pseudo-host path для multipath сейчас честно режутся как unsupported, а client-side runtime пока fail-fast отклоняет `multipath.enabled=true` marker'ом `trusttunnel multipath payload traffic is not implemented yet: control path exists but framed data path is still missing`;
+- framed payload layer, scheduler/reassembly data path и remote-live multi-IP traffic distribution пока ещё не реализованы и не подтверждены.
 
 ## 2. Что закрыто на текущем состоянии
 

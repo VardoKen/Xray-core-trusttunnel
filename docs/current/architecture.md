@@ -165,7 +165,7 @@
 - UDP CONNECT на official authority `_udp2`; server-side reserved-host matcher сохраняет backward-compat на `_udp2` и legacy `_udp2:0`
 - ICMP CONNECT на `_icmp:0` для H2 и H3
 - common outbound features `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4` проходят через тот же generic Xray outbound layer и не требуют TrustTunnel-specific routing surface
-- experimental `multipath.*` config surface и runtime skeleton уже существуют, но пока не меняют data-plane и не образуют working multipath path
+- experimental `multipath.*` config surface уже существует вместе с `_mptcp_open` / `_mptcp_attach` control path, но пока не меняет payload data-plane и не образует working multipath path
 
 ### 4.3. Поля outbound, реально участвующие в runtime
 
@@ -180,12 +180,12 @@
 - `HasIpv6` как client-side gate для явных IPv6 literal targets и domain targets без `targetStrategy useipv4/forceipv4`
 - `AntiDpi` как split первой TCP-based записи ClientHello на `HTTP/2 over TLS` и `HTTP/2 over REALITY`
 
-Experimental config/runtime skeleton:
+Experimental multipath surface:
 - `Multipath`
 
 Практическая граница:
-- `multipath.*` на текущем этапе является phase-1 config/runtime skeleton surface;
-- `_mptcp_open`, `_mptcp_attach`, framed payload layer и реальное multi-channel traffic distribution ещё не существуют в working runtime.
+- `multipath.*` на текущем этапе уже является phase-2 control surface: config/validator, session registry, `_mptcp_open`, `_mptcp_attach`, attach-proof и server-side channel attach существуют;
+- client-side payload path пока deliberately fail-fast режется, потому что framed multipath data layer, scheduler/reassembly и реальное multi-channel traffic distribution ещё не существуют в working runtime.
 
 ### 4.3.1. Generic TLS surface на поддержанном H2/TLS path
 

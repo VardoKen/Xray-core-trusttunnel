@@ -1,9 +1,12 @@
 package trusttunnel
 
 import (
+	"crypto/hmac"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/xtls/xray-core/common/errors"
 	xnet "github.com/xtls/xray-core/common/net"
 )
 
@@ -17,26 +20,33 @@ const (
 )
 
 type trustTunnelMultipathSessionOptions struct {
-	ID          string
-	Target      xnet.Destination
-	MinChannels uint32
-	MaxChannels uint32
-	Scheduler   MultipathScheduler
-	Strict      bool
+	ID            string
+	Target        xnet.Destination
+	TargetHost    string
+	MinChannels   uint32
+	MaxChannels   uint32
+	Scheduler     MultipathScheduler
+	Strict        bool
+	AttachTimeout time.Duration
+	AttachSecret  []byte
 }
 
 type trustTunnelMultipathSession struct {
-	id          string
-	target      xnet.Destination
-	createdAt   time.Time
-	minChannels uint32
-	maxChannels uint32
-	scheduler   MultipathScheduler
-	strict      bool
+	id             string
+	target         xnet.Destination
+	targetHost     string
+	createdAt      time.Time
+	minChannels    uint32
+	maxChannels    uint32
+	scheduler      MultipathScheduler
+	strict         bool
+	attachSecret   []byte
+	attachDeadline time.Time
 
-	mu       sync.RWMutex
-	state    trustTunnelMultipathSessionState
-	channels map[uint32]*trustTunnelMultipathChannel
+	mu         sync.RWMutex
+	state      trustTunnelMultipathSessionState
+	channels   map[uint32]*trustTunnelMultipathChannel
+	usedNonces map[string]time.Time
 }
 
 type trustTunnelMultipathChannel struct {
@@ -46,6 +56,17 @@ type trustTunnelMultipathChannel struct {
 	lastSeenAt time.Time
 	closing    bool
 }
+
+const (
+	trustTunnelMultipathPrimaryChannelID = 1
+
+	trustTunnelMultipathAttachReplayText       = "trusttunnel multipath attach replay detected"
+	trustTunnelMultipathAttachExpiredText      = "trusttunnel multipath attach window expired"
+	trustTunnelMultipathAttachTargetMismatch   = "trusttunnel multipath attach target mismatch"
+	trustTunnelMultipathAttachProofInvalidText = "trusttunnel multipath attach proof is invalid"
+	trustTunnelMultipathDuplicateChannelText   = "trusttunnel multipath channel already exists"
+	trustTunnelMultipathChannelLimitText       = "trusttunnel multipath channel limit reached"
+)
 
 func newTrustTunnelMultipathSession(options trustTunnelMultipathSessionOptions) *trustTunnelMultipathSession {
 	minChannels := options.MinChannels
@@ -60,17 +81,29 @@ func newTrustTunnelMultipathSession(options trustTunnelMultipathSessionOptions) 
 	if scheduler == MultipathScheduler_MULTIPATH_SCHEDULER_UNSPECIFIED {
 		scheduler = MultipathScheduler_MULTIPATH_SCHEDULER_ROUND_ROBIN
 	}
+	targetHost := strings.TrimSpace(options.TargetHost)
+	if targetHost == "" {
+		targetHost = options.Target.NetAddr()
+	}
+	attachTimeout := options.AttachTimeout
+	if attachTimeout <= 0 {
+		attachTimeout = trustTunnelMultipathDefaultAttachTimeout
+	}
 
 	return &trustTunnelMultipathSession{
-		id:          options.ID,
-		target:      options.Target,
-		createdAt:   time.Now(),
-		minChannels: minChannels,
-		maxChannels: maxChannels,
-		scheduler:   scheduler,
-		strict:      options.Strict,
-		state:       trustTunnelMultipathSessionOpening,
-		channels:    make(map[uint32]*trustTunnelMultipathChannel),
+		id:             options.ID,
+		target:         options.Target,
+		targetHost:     targetHost,
+		createdAt:      time.Now(),
+		minChannels:    minChannels,
+		maxChannels:    maxChannels,
+		scheduler:      scheduler,
+		strict:         options.Strict,
+		attachSecret:   append([]byte(nil), options.AttachSecret...),
+		attachDeadline: time.Now().Add(attachTimeout),
+		state:          trustTunnelMultipathSessionOpening,
+		channels:       make(map[uint32]*trustTunnelMultipathChannel),
+		usedNonces:     make(map[string]time.Time),
 	}
 }
 
@@ -81,12 +114,46 @@ func (s *trustTunnelMultipathSession) ID() string {
 	return s.id
 }
 
-func (s *trustTunnelMultipathSession) AddChannel(channel *trustTunnelMultipathChannel) {
+func (s *trustTunnelMultipathSession) TargetHost() string {
+	if s == nil {
+		return ""
+	}
+	return s.targetHost
+}
+
+func (s *trustTunnelMultipathSession) AttachSecretHeaderValue() string {
+	if s == nil || len(s.attachSecret) == 0 {
+		return ""
+	}
+	return trustTunnelMultipathAttachSecretHeaderValue(s.attachSecret)
+}
+
+func (s *trustTunnelMultipathSession) PrimaryChannelID() uint32 {
+	return trustTunnelMultipathPrimaryChannelID
+}
+
+func (s *trustTunnelMultipathSession) AddChannel(channel *trustTunnelMultipathChannel) error {
 	if s == nil || channel == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.addChannelLocked(channel)
+}
+
+func (s *trustTunnelMultipathSession) addChannelLocked(channel *trustTunnelMultipathChannel) error {
+	if channel == nil {
+		return nil
+	}
+	if channel.id == 0 {
+		return errors.New("trusttunnel multipath channel id is invalid").AtInfo()
+	}
+	if _, exists := s.channels[channel.id]; exists {
+		return errors.New(trustTunnelMultipathDuplicateChannelText).AtInfo()
+	}
+	if s.maxChannels > 0 && uint32(len(s.channels)) >= s.maxChannels {
+		return errors.New(trustTunnelMultipathChannelLimitText).AtInfo()
+	}
 	now := time.Now()
 	if channel.createdAt.IsZero() {
 		channel.createdAt = now
@@ -95,7 +162,10 @@ func (s *trustTunnelMultipathSession) AddChannel(channel *trustTunnelMultipathCh
 	s.channels[channel.id] = channel
 	if uint32(len(s.channels)) >= s.minChannels {
 		s.state = trustTunnelMultipathSessionActive
+	} else {
+		s.state = trustTunnelMultipathSessionOpening
 	}
+	return nil
 }
 
 func (s *trustTunnelMultipathSession) RemoveChannel(channelID uint32) {
@@ -130,6 +200,58 @@ func (s *trustTunnelMultipathSession) State() trustTunnelMultipathSessionState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.state
+}
+
+func (s *trustTunnelMultipathSession) AttachChannel(request *trustTunnelMultipathAttachRequest, endpoint string, now time.Time) error {
+	if s == nil {
+		return errors.New("trusttunnel multipath session is nil").AtInfo()
+	}
+	if request == nil {
+		return errors.New("trusttunnel multipath attach request is nil").AtInfo()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.attachDeadline.IsZero() && now.After(s.attachDeadline) {
+		return errors.New(trustTunnelMultipathAttachExpiredText).AtInfo()
+	}
+	if request.Timestamp.Before(now.Add(-trustTunnelMultipathAttachSkewWindow)) || request.Timestamp.After(now.Add(trustTunnelMultipathAttachSkewWindow)) {
+		return errors.New(trustTunnelMultipathAttachExpiredText).AtInfo()
+	}
+	if !strings.EqualFold(strings.TrimSpace(request.TargetHost), s.targetHost) {
+		return errors.New(trustTunnelMultipathAttachTargetMismatch).AtInfo()
+	}
+
+	s.cleanupUsedNoncesLocked(now.Add(-trustTunnelMultipathAttachSkewWindow))
+	if _, seen := s.usedNonces[request.Nonce]; seen {
+		return errors.New(trustTunnelMultipathAttachReplayText).AtInfo()
+	}
+
+	expectedProof := trustTunnelMultipathComputeAttachProof(s.attachSecret, s.id, request.ChannelID, request.Nonce, request.Timestamp.Unix(), s.targetHost)
+	if !hmac.Equal([]byte(expectedProof), []byte(request.Proof)) {
+		return errors.New(trustTunnelMultipathAttachProofInvalidText).AtInfo()
+	}
+
+	if err := s.addChannelLocked(&trustTunnelMultipathChannel{
+		id:       request.ChannelID,
+		endpoint: endpoint,
+	}); err != nil {
+		return err
+	}
+	s.usedNonces[request.Nonce] = now
+	return nil
+}
+
+func (s *trustTunnelMultipathSession) cleanupUsedNoncesLocked(cutoff time.Time) {
+	if s == nil {
+		return
+	}
+	for nonce, usedAt := range s.usedNonces {
+		if usedAt.Before(cutoff) {
+			delete(s.usedNonces, nonce)
+		}
+	}
 }
 
 type trustTunnelMultipathSessionRegistry struct {
@@ -169,4 +291,13 @@ func (r *trustTunnelMultipathSessionRegistry) Delete(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.sessions, id)
+}
+
+func (r *trustTunnelMultipathSessionRegistry) Count() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.sessions)
 }

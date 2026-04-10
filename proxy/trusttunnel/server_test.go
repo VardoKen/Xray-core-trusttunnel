@@ -79,6 +79,7 @@ func newTestTrustTunnelServer(t *testing.T, cfg *ServerConfig) *Server {
 		config:            cfg,
 		users:             store,
 		connectionLimiter: newTrustTunnelConnectionLimiter(store.GetAll(), cfg.GetDefaultMaxHttp2ConnsPerClient(), cfg.GetDefaultMaxHttp3ConnsPerClient()),
+		multipathSessions: newTrustTunnelMultipathSessionRegistry(),
 		newICMPSession: func(trustTunnelICMPSessionOptions) (trustTunnelICMPHandler, error) {
 			return nil, goerrors.New("icmp unavailable in unit test")
 		},

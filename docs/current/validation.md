@@ -164,19 +164,22 @@
 - первый resolved адрес `127.0.0.2:9443` действительно отбрасывается как failed endpoint, а downstream probe через SOCKS `127.0.0.1:18093` всё равно даёт `{"ip":"37.252.0.130"}`;
 - remote bundle `tcpdump.txt` фиксирует трафик на `37.252.0.130:9443`, то есть fallback идёт именно на второй resolved remote IP, а не на synthetic local bypass.
 
-### 1.3. Multipath phase 1: config / validator / session skeleton
+### 1.3. Multipath phase 1-2: config / validator / control path
 
 Подтверждено на 2026-04-10:
-- phase-1 multipath surface уже существует в локальном и lab worktree;
-- validated scope ограничен config model, validator guardrails и runtime skeleton без data-path.
+- multipath phase 1 и phase 2 control-path уже существуют в локальном worktree;
+- validated scope по-прежнему deliberately ограничен config model, validator, session/control path и explicit fail-fast без payload data-path.
 
 Кодовые точки:
 - `proxy/trusttunnel/config.proto`
 - `proxy/trusttunnel/config.pb.go`
 - `infra/conf/trusttunnel.go`
 - `infra/conf/trusttunnel_lint.go`
+- `proxy/trusttunnel/multipath_control.go`
 - `proxy/trusttunnel/multipath_session.go`
+- `proxy/trusttunnel/multipath_server.go`
 - `proxy/trusttunnel/server.go`
+- `proxy/trusttunnel/client.go`
 
 Что именно подтверждено:
 - protobuf/config model уже содержит `MultipathScheduler` и `MultipathConfig`, а outbound JSON binding принимает `multipath.*`;
@@ -187,18 +190,21 @@
   - отсутствие multi-endpoint pool;
   - `multipath.minChannels < 2`;
   - `multipath.maxChannels < multipath.minChannels`;
-- runtime skeleton уже содержит `MultipathSession`, `MultipathChannel` и server-side session registry без включения их в active data-plane;
-- current verdict deliberately ограничен phase 1: `_mptcp_open`, `_mptcp_attach`, attach-proof, framed payload layer и multi-IP traffic distribution ещё не реализованы.
+- runtime layer уже содержит `MultipathSession`, `MultipathChannel`, server-side session registry, attach-secret, attach-deadline, replay-guard и channel-limit validation;
+- server-side H2 control path уже реализует `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation и secondary channel attach;
+- H1 и H3 pseudo-host path для multipath честно режутся как unsupported;
+- current client runtime пока deliberately fail-fast режет `multipath.enabled=true` marker'ом `trusttunnel multipath payload traffic is not implemented yet: control path exists but framed data path is still missing`;
+- current verdict deliberately ограничен phase 2 control path: framed payload layer, scheduler/reassembly и multi-IP traffic distribution ещё не реализованы.
 
 Подтверждённые команды:
-- на lab:
-  - `go test ./infra/conf -run 'TrustTunnel|Multipath' -count=1`
-  - `go test ./proxy/trusttunnel -run 'Multipath|ServerAttempts|AntiDpi|HTTP3Reality' -count=1`
-  - `go build -buildvcs=false -o /opt/lab/xray-tt/tmp/xray-tt-multipath-phase1 ./main`
+- локально:
+  - `go test ./proxy/trusttunnel -run 'Multipath|ProcessRejectsMultipathPayload|ProcessHTTP1RejectsMultipathPseudoHosts' -count=1`
+  - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound -count=1`
+  - `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main`
 
 Практический вывод:
-- phase 1 закрывает только config/validator/runtime-skeleton задачу;
-- phase 2 должен начинаться уже с `_mptcp_open` / `_mptcp_attach`, а не с повторного проектирования config surface.
+- phase 1 и phase 2 control path уже закрывают config/validator/session/control задачу;
+- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, а framed TCP payload layer и multipath client runtime поверх уже существующего control path.
 
 ### 1.4. Client-Side antiDPI runtime
 

@@ -52,6 +52,46 @@ func TestClientProcessRejectsIncompleteICMPLink(t *testing.T) {
 	}
 }
 
+func TestClientProcessRejectsMultipathPayloadUntilFramedDataPathExists(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			Multipath: &MultipathConfig{
+				Enabled:     true,
+				MinChannels: 2,
+				MaxChannels: 2,
+				Strict:      true,
+			},
+		},
+		server: protocol.NewServerSpec(
+			xnet.TCPDestination(xnet.LocalHostIP, xnet.Port(9443)),
+			&protocol.MemoryUser{
+				Account: &MemoryAccount{
+					Username: "u1",
+					Password: "p1",
+				},
+			},
+		),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), trustTunnelMultipathPayloadNotReadyText) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialer.dialCalls != 0 {
+		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
+	}
+}
+
 type fakeTrustTunnelDialerWithStreamSettings struct {
 	streamSettings *internet.MemoryStreamConfig
 	dialCalls      int
@@ -67,9 +107,9 @@ type fakeTrustTunnelServerSequenceDialer struct {
 
 type nopReadWriteCloser struct{}
 
-func (nopReadWriteCloser) Read([]byte) (int, error)  { return 0, io.EOF }
+func (nopReadWriteCloser) Read([]byte) (int, error)    { return 0, io.EOF }
 func (nopReadWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
-func (nopReadWriteCloser) Close() error { return nil }
+func (nopReadWriteCloser) Close() error                { return nil }
 
 func withTrustTunnelHTTP3Connector(t *testing.T, fn func(context.Context, string, string, *MemoryAccount, *ClientConfig) (io.ReadWriteCloser, error)) {
 	t.Helper()

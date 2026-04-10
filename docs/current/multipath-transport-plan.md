@@ -334,14 +334,13 @@ Validator первой фазы должен fail-fast резать:
 Статус на 2026-04-10:
 - done для phase-1 scope без data-plane
 - реализованы `multipath.*` в config model, validator guardrails и минимальные runtime-структуры `MultipathSession` / `MultipathChannel`
-- не реализованы `_mptcp_open`, `_mptcp_attach`, framed payload layer и multi-IP traffic distribution
+- реализованы attach-secret, attach-deadline, replay-guard и channel-limit validation внутри session model
+- не реализованы framed payload layer и multi-IP traffic distribution
 
 Сделать:
-- config model `multipath.*`;
-- runtime data structures `MultipathSession` и `MultipathChannel`;
-- server session registry;
 - client session manager;
-- unit tests на config/validator/session lifecycle.
+- unit tests на config/validator/session lifecycle;
+- doc sync под phase-1 verdict.
 
 Критерий готовности:
 - multipath session objects живут в runtime;
@@ -351,7 +350,7 @@ Validator первой фазы должен fail-fast резать:
 ### Фаза 2. Primary open + secondary attach
 
 Статус на 2026-04-10:
-- next
+- done для server-side control path без payload data-plane
 
 Сделать:
 - `_mptcp_open`;
@@ -362,9 +361,10 @@ Validator первой фазы должен fail-fast резать:
 - channel registration на server.
 
 Критерий готовности:
-- клиент поднимает минимум 2 transport channels на разные IP;
-- сервер видит их как одну logical session;
-- IP не участвует в auth/session identity.
+- server-side H2 control path создаёт multipath session через `_mptcp_open` и принимает secondary attach через `_mptcp_attach`;
+- attach защищён `session_id + attach proof + nonce + timestamp`, а replay / duplicate channel / max-channels режутся явно;
+- H1 и H3 pseudo-host path не пытаются притворяться поддержанными;
+- client runtime честно fail-fast режет `multipath.enabled=true`, пока framed payload layer ещё не существует.
 
 ### Фаза 3. TCP multipath frame layer
 

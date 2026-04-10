@@ -220,9 +220,9 @@ Experimental phase-1 surface:
 - `multipath.*`
 
 Практическая граница:
-- `multipath.*` уже существует в config model и validator, но пока не образует working client/server data path;
-- текущая фаза ограничена `HTTP/2 over TLS` guardrails, session/channel skeleton и fail-fast validation;
-- `_mptcp_open`, `_mptcp_attach`, framed payload layer и remote-live multi-IP distribution ещё не реализованы, поэтому `multipath.*` пока нельзя использовать как рабочий продуктовый режим.
+- `multipath.*` уже существует в config model и validator и больше не ограничивается одним skeleton-only verdict;
+- текущая фаза уже включает `HTTP/2 over TLS` control-path: session/channel registry, `_mptcp_open`, `_mptcp_attach`, attach-proof и server-side secondary-channel attach;
+- payload data-plane, scheduler/reassembly и remote-live multi-IP distribution ещё не реализованы, поэтому `multipath.*` пока всё ещё нельзя использовать как рабочий продуктовый режим.
 
 ### 3.2. Минимальные правила для H2 outbound
 

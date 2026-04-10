@@ -158,18 +158,19 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 Что уже сделано на текущем этапе:
 - phase 1 больше не является только планом: `config.proto` / `config.pb.go`, JSON binding и validator уже содержат `multipath.*` surface и fail-fast guardrails;
-- `proxy/trusttunnel/multipath_session.go` уже даёт минимальные runtime-структуры `MultipathSession`, `MultipathChannel` и server-side registry skeleton;
-- current scope всё ещё deliberately узкий: data-plane multipath path ещё не начат.
+- `proxy/trusttunnel/multipath_session.go` уже даёт не только `MultipathSession`, `MultipathChannel` и server-side registry skeleton, но и attach-secret, attach-deadline, replay-guard и channel-limit validation;
+- `proxy/trusttunnel/multipath_control.go` и `proxy/trusttunnel/multipath_server.go` уже реализуют `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation и server-side secondary-channel attach;
+- client-side multipath payload path пока deliberately fail-fast режется marker'ом `trusttunnel multipath payload traffic is not implemented yet: control path exists but framed data path is still missing`, поэтому data-plane multipath path всё ещё не начат.
 
 Что дальше:
-- следующий кодовый шаг уже не `multipath.*` model, а `_mptcp_open` / `_mptcp_attach` и attach-proof;
+- следующий кодовый шаг уже не `multipath.*` model и не control-path, а framed TCP payload layer, scheduler/reassembly и первый честный multi-channel client runtime;
 - до этого не заявлять multipath как working runtime-path.
 
 Полный поэтапный план, guardrails и точки интеграции зафиксированы в `docs/current/multipath-transport-plan.md`.
 
 ## 5. Порядок выполнения
 
-1. для ветки `feat/trusttunnel-multipath` идти по `docs/current/multipath-transport-plan.md`: после уже закрытой phase 1 (`config/validator + session model skeleton`) переходить к `_mptcp_open` / `_mptcp_attach` → framed TCP data path → scheduler/recovery → remote-live validation
+1. для ветки `feat/trusttunnel-multipath` идти по `docs/current/multipath-transport-plan.md`: после уже закрытых phase 1 (`config/validator + session model skeleton`) и phase 2 (`_mptcp_open` / `_mptcp_attach` control path) переходить к framed TCP data path → scheduler/recovery → remote-live validation
 2. держать `streamSettings`-нормализацию синхронной с upstream generic TLS / REALITY / outbound plumbing
 3. держать compatibility matrix и validator синхронными с новыми integration-комбинациями
 4. добирать dedicated inbound / generic TLS coverage только при появлении новых product-level требований
