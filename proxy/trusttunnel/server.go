@@ -45,6 +45,7 @@ type Server struct {
 	policyManager     policy.Manager
 	statsManager      stats.Manager
 	connectionLimiter *trustTunnelConnectionLimiter
+	multipathSessions *trustTunnelMultipathSessionRegistry
 	newICMPSession    func(options trustTunnelICMPSessionOptions) (trustTunnelICMPHandler, error)
 }
 
@@ -188,6 +189,7 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 		policyManager:     v.GetFeature(policy.ManagerType()).(policy.Manager),
 		statsManager:      v.GetFeature(stats.ManagerType()).(stats.Manager),
 		connectionLimiter: newTrustTunnelConnectionLimiter(memoryUsers, config.GetDefaultMaxHttp2ConnsPerClient(), config.GetDefaultMaxHttp3ConnsPerClient()),
+		multipathSessions: newTrustTunnelMultipathSessionRegistry(),
 	}, nil
 }
 

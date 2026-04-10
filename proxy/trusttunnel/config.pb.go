@@ -120,6 +120,52 @@ func (PostQuantumGroupSetting) EnumDescriptor() ([]byte, []int) {
 	return file_proxy_trusttunnel_config_proto_rawDescGZIP(), []int{1}
 }
 
+type MultipathScheduler int32
+
+const (
+	MultipathScheduler_MULTIPATH_SCHEDULER_UNSPECIFIED MultipathScheduler = 0
+	MultipathScheduler_MULTIPATH_SCHEDULER_ROUND_ROBIN MultipathScheduler = 1
+)
+
+// Enum value maps for MultipathScheduler.
+var (
+	MultipathScheduler_name = map[int32]string{
+		0: "MULTIPATH_SCHEDULER_UNSPECIFIED",
+		1: "MULTIPATH_SCHEDULER_ROUND_ROBIN",
+	}
+	MultipathScheduler_value = map[string]int32{
+		"MULTIPATH_SCHEDULER_UNSPECIFIED": 0,
+		"MULTIPATH_SCHEDULER_ROUND_ROBIN": 1,
+	}
+)
+
+func (x MultipathScheduler) Enum() *MultipathScheduler {
+	p := new(MultipathScheduler)
+	*p = x
+	return p
+}
+
+func (x MultipathScheduler) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MultipathScheduler) Descriptor() protoreflect.EnumDescriptor {
+	return file_proxy_trusttunnel_config_proto_enumTypes[2].Descriptor()
+}
+
+func (MultipathScheduler) Type() protoreflect.EnumType {
+	return &file_proxy_trusttunnel_config_proto_enumTypes[2]
+}
+
+func (x MultipathScheduler) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MultipathScheduler.Descriptor instead.
+func (MultipathScheduler) EnumDescriptor() ([]byte, []int) {
+	return file_proxy_trusttunnel_config_proto_rawDescGZIP(), []int{2}
+}
+
 type Account struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
@@ -308,6 +354,106 @@ func (x *ServerHost) GetKeyPath() string {
 	return ""
 }
 
+type MultipathConfig struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Enabled             bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	MinChannels         uint32                 `protobuf:"varint,2,opt,name=min_channels,json=minChannels,proto3" json:"min_channels,omitempty"`
+	MaxChannels         uint32                 `protobuf:"varint,3,opt,name=max_channels,json=maxChannels,proto3" json:"max_channels,omitempty"`
+	Scheduler           MultipathScheduler     `protobuf:"varint,4,opt,name=scheduler,proto3,enum=xray.proxy.trusttunnel.MultipathScheduler" json:"scheduler,omitempty"`
+	AttachTimeoutSecs   uint32                 `protobuf:"varint,5,opt,name=attach_timeout_secs,json=attachTimeoutSecs,proto3" json:"attach_timeout_secs,omitempty"`
+	ReorderWindowBytes  uint32                 `protobuf:"varint,6,opt,name=reorder_window_bytes,json=reorderWindowBytes,proto3" json:"reorder_window_bytes,omitempty"`
+	ReorderGapTimeoutMs uint32                 `protobuf:"varint,7,opt,name=reorder_gap_timeout_ms,json=reorderGapTimeoutMs,proto3" json:"reorder_gap_timeout_ms,omitempty"`
+	Strict              bool                   `protobuf:"varint,8,opt,name=strict,proto3" json:"strict,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *MultipathConfig) Reset() {
+	*x = MultipathConfig{}
+	mi := &file_proxy_trusttunnel_config_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MultipathConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MultipathConfig) ProtoMessage() {}
+
+func (x *MultipathConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_proxy_trusttunnel_config_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MultipathConfig.ProtoReflect.Descriptor instead.
+func (*MultipathConfig) Descriptor() ([]byte, []int) {
+	return file_proxy_trusttunnel_config_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *MultipathConfig) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *MultipathConfig) GetMinChannels() uint32 {
+	if x != nil {
+		return x.MinChannels
+	}
+	return 0
+}
+
+func (x *MultipathConfig) GetMaxChannels() uint32 {
+	if x != nil {
+		return x.MaxChannels
+	}
+	return 0
+}
+
+func (x *MultipathConfig) GetScheduler() MultipathScheduler {
+	if x != nil {
+		return x.Scheduler
+	}
+	return MultipathScheduler_MULTIPATH_SCHEDULER_UNSPECIFIED
+}
+
+func (x *MultipathConfig) GetAttachTimeoutSecs() uint32 {
+	if x != nil {
+		return x.AttachTimeoutSecs
+	}
+	return 0
+}
+
+func (x *MultipathConfig) GetReorderWindowBytes() uint32 {
+	if x != nil {
+		return x.ReorderWindowBytes
+	}
+	return 0
+}
+
+func (x *MultipathConfig) GetReorderGapTimeoutMs() uint32 {
+	if x != nil {
+		return x.ReorderGapTimeoutMs
+	}
+	return 0
+}
+
+func (x *MultipathConfig) GetStrict() bool {
+	if x != nil {
+		return x.Strict
+	}
+	return false
+}
+
 type ClientConfig struct {
 	state                   protoimpl.MessageState     `protogen:"open.v1"`
 	Server                  *protocol.ServerEndpoint   `protobuf:"bytes,1,opt,name=server,proto3" json:"server,omitempty"`
@@ -321,13 +467,14 @@ type ClientConfig struct {
 	EnableUdp               bool                       `protobuf:"varint,9,opt,name=enable_udp,json=enableUdp,proto3" json:"enable_udp,omitempty"`
 	PostQuantumGroupEnabled PostQuantumGroupSetting    `protobuf:"varint,10,opt,name=post_quantum_group_enabled,json=postQuantumGroupEnabled,proto3,enum=xray.proxy.trusttunnel.PostQuantumGroupSetting" json:"post_quantum_group_enabled,omitempty"`
 	Servers                 []*protocol.ServerEndpoint `protobuf:"bytes,11,rep,name=servers,proto3" json:"servers,omitempty"`
+	Multipath               *MultipathConfig           `protobuf:"bytes,12,opt,name=multipath,proto3" json:"multipath,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
 
 func (x *ClientConfig) Reset() {
 	*x = ClientConfig{}
-	mi := &file_proxy_trusttunnel_config_proto_msgTypes[3]
+	mi := &file_proxy_trusttunnel_config_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -339,7 +486,7 @@ func (x *ClientConfig) String() string {
 func (*ClientConfig) ProtoMessage() {}
 
 func (x *ClientConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_trusttunnel_config_proto_msgTypes[3]
+	mi := &file_proxy_trusttunnel_config_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -352,19 +499,12 @@ func (x *ClientConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientConfig.ProtoReflect.Descriptor instead.
 func (*ClientConfig) Descriptor() ([]byte, []int) {
-	return file_proxy_trusttunnel_config_proto_rawDescGZIP(), []int{3}
+	return file_proxy_trusttunnel_config_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ClientConfig) GetServer() *protocol.ServerEndpoint {
 	if x != nil {
 		return x.Server
-	}
-	return nil
-}
-
-func (x *ClientConfig) GetServers() []*protocol.ServerEndpoint {
-	if x != nil {
-		return x.Servers
 	}
 	return nil
 }
@@ -432,6 +572,20 @@ func (x *ClientConfig) GetPostQuantumGroupEnabled() PostQuantumGroupSetting {
 	return PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_AUTO
 }
 
+func (x *ClientConfig) GetServers() []*protocol.ServerEndpoint {
+	if x != nil {
+		return x.Servers
+	}
+	return nil
+}
+
+func (x *ClientConfig) GetMultipath() *MultipathConfig {
+	if x != nil {
+		return x.Multipath
+	}
+	return nil
+}
+
 type ServerConfig struct {
 	state                              protoimpl.MessageState `protogen:"open.v1"`
 	Users                              []*protocol.User       `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
@@ -458,7 +612,7 @@ type ServerConfig struct {
 
 func (x *ServerConfig) Reset() {
 	*x = ServerConfig{}
-	mi := &file_proxy_trusttunnel_config_proto_msgTypes[4]
+	mi := &file_proxy_trusttunnel_config_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -470,7 +624,7 @@ func (x *ServerConfig) String() string {
 func (*ServerConfig) ProtoMessage() {}
 
 func (x *ServerConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_proxy_trusttunnel_config_proto_msgTypes[4]
+	mi := &file_proxy_trusttunnel_config_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -483,7 +637,7 @@ func (x *ServerConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerConfig.ProtoReflect.Descriptor instead.
 func (*ServerConfig) Descriptor() ([]byte, []int) {
-	return file_proxy_trusttunnel_config_proto_rawDescGZIP(), []int{4}
+	return file_proxy_trusttunnel_config_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ServerConfig) GetUsers() []*protocol.User {
@@ -615,160 +769,81 @@ func (x *ServerConfig) GetDefaultMaxHttp3ConnsPerClient() uint32 {
 var File_proxy_trusttunnel_config_proto protoreflect.FileDescriptor
 
 const file_proxy_trusttunnel_config_proto_rawDesc = "" +
-	"\x0a\x1e\x70\x72\x6f\x78\x79\x2f\x74\x72\x75\x73\x74\x74\x75\x6e" +
-	"\x6e\x65\x6c\x2f\x63\x6f\x6e\x66\x69\x67\x2e\x70\x72\x6f\x74\x6f" +
-	"\x12\x16\x78\x72\x61\x79\x2e\x70\x72\x6f\x78\x79\x2e\x74\x72\x75" +
-	"\x73\x74\x74\x75\x6e\x6e\x65\x6c\x1a\x1a\x63\x6f\x6d\x6d\x6f\x6e" +
-	"\x2f\x70\x72\x6f\x74\x6f\x63\x6f\x6c\x2f\x75\x73\x65\x72\x2e\x70" +
-	"\x72\x6f\x74\x6f\x1a\x21\x63\x6f\x6d\x6d\x6f\x6e\x2f\x70\x72\x6f" +
-	"\x74\x6f\x63\x6f\x6c\x2f\x73\x65\x72\x76\x65\x72\x5f\x73\x70\x65" +
-	"\x63\x2e\x70\x72\x6f\x74\x6f\x22\x91\x01\x0a\x07\x41\x63\x63\x6f" +
-	"\x75\x6e\x74\x12\x1a\x0a\x08\x75\x73\x65\x72\x6e\x61\x6d\x65\x18" +
-	"\x01\x20\x01\x28\x09\x52\x08\x75\x73\x65\x72\x6e\x61\x6d\x65\x12" +
-	"\x1a\x0a\x08\x70\x61\x73\x73\x77\x6f\x72\x64\x18\x02\x20\x01\x28" +
-	"\x09\x52\x08\x70\x61\x73\x73\x77\x6f\x72\x64\x12\x26\x0a\x0f\x6d" +
-	"\x61\x78\x5f\x68\x74\x74\x70\x32\x5f\x63\x6f\x6e\x6e\x73\x18\x03" +
-	"\x20\x01\x28\x0d\x52\x0d\x6d\x61\x78\x48\x74\x74\x70\x32\x43\x6f" +
-	"\x6e\x6e\x73\x12\x26\x0a\x0f\x6d\x61\x78\x5f\x68\x74\x74\x70\x33" +
-	"\x5f\x63\x6f\x6e\x6e\x73\x18\x04\x20\x01\x28\x0d\x52\x0d\x6d\x61" +
-	"\x78\x48\x74\x74\x70\x33\x43\x6f\x6e\x6e\x73\x22\x55\x0a\x04\x52" +
-	"\x75\x6c\x65\x12\x12\x0a\x04\x63\x69\x64\x72\x18\x01\x20\x01\x28" +
-	"\x09\x52\x04\x63\x69\x64\x72\x12\x23\x0a\x0d\x63\x6c\x69\x65\x6e" +
-	"\x74\x5f\x72\x61\x6e\x64\x6f\x6d\x18\x02\x20\x01\x28\x09\x52\x0c" +
-	"\x63\x6c\x69\x65\x6e\x74\x52\x61\x6e\x64\x6f\x6d\x12\x14\x0a\x05" +
-	"\x61\x6c\x6c\x6f\x77\x18\x03\x20\x01\x28\x08\x52\x05\x61\x6c\x6c" +
-	"\x6f\x77\x22\x6e\x0a\x0a\x53\x65\x72\x76\x65\x72\x48\x6f\x73\x74" +
-	"\x12\x1a\x0a\x08\x68\x6f\x73\x74\x6e\x61\x6d\x65\x18\x01\x20\x01" +
-	"\x28\x09\x52\x08\x68\x6f\x73\x74\x6e\x61\x6d\x65\x12\x29\x0a\x10" +
-	"\x63\x65\x72\x74\x69\x66\x69\x63\x61\x74\x65\x5f\x70\x61\x74\x68" +
-	"\x18\x02\x20\x01\x28\x09\x52\x0f\x63\x65\x72\x74\x69\x66\x69\x63" +
-	"\x61\x74\x65\x50\x61\x74\x68\x12\x19\x0a\x08\x6b\x65\x79\x5f\x70" +
-	"\x61\x74\x68\x18\x03\x20\x01\x28\x09\x52\x07\x6b\x65\x79\x50\x61" +
-	"\x74\x68\x22\xaf\x04\x0a\x0c\x43\x6c\x69\x65\x6e\x74\x43\x6f\x6e" +
-	"\x66\x69\x67\x12\x3c\x0a\x06\x73\x65\x72\x76\x65\x72\x18\x01\x20" +
-	"\x01\x28\x0b\x32\x24\x2e\x78\x72\x61\x79\x2e\x63\x6f\x6d\x6d\x6f" +
-	"\x6e\x2e\x70\x72\x6f\x74\x6f\x63\x6f\x6c\x2e\x53\x65\x72\x76\x65" +
-	"\x72\x45\x6e\x64\x70\x6f\x69\x6e\x74\x52\x06\x73\x65\x72\x76\x65" +
-	"\x72\x12\x1a\x0a\x08\x68\x6f\x73\x74\x6e\x61\x6d\x65\x18\x02\x20" +
-	"\x01\x28\x09\x52\x08\x68\x6f\x73\x74\x6e\x61\x6d\x65\x12\x47\x0a" +
-	"\x09\x74\x72\x61\x6e\x73\x70\x6f\x72\x74\x18\x03\x20\x01\x28\x0e" +
-	"\x32\x29\x2e\x78\x72\x61\x79\x2e\x70\x72\x6f\x78\x79\x2e\x74\x72" +
-	"\x75\x73\x74\x74\x75\x6e\x6e\x65\x6c\x2e\x54\x72\x61\x6e\x73\x70" +
-	"\x6f\x72\x74\x50\x72\x6f\x74\x6f\x63\x6f\x6c\x52\x09\x74\x72\x61" +
-	"\x6e\x73\x70\x6f\x72\x74\x12\x19\x0a\x08\x68\x61\x73\x5f\x69\x70" +
-	"\x76\x36\x18\x04\x20\x01\x28\x08\x52\x07\x68\x61\x73\x49\x70\x76" +
-	"\x36\x12\x2b\x0a\x11\x73\x6b\x69\x70\x5f\x76\x65\x72\x69\x66\x69" +
-	"\x63\x61\x74\x69\x6f\x6e\x18\x05\x20\x01\x28\x08\x52\x10\x73\x6b" +
-	"\x69\x70\x56\x65\x72\x69\x66\x69\x63\x61\x74\x69\x6f\x6e\x12\x27" +
-	"\x0a\x0f\x63\x65\x72\x74\x69\x66\x69\x63\x61\x74\x65\x5f\x70\x65" +
-	"\x6d\x18\x06\x20\x01\x28\x09\x52\x0e\x63\x65\x72\x74\x69\x66\x69" +
-	"\x63\x61\x74\x65\x50\x65\x6d\x12\x23\x0a\x0d\x63\x6c\x69\x65\x6e" +
-	"\x74\x5f\x72\x61\x6e\x64\x6f\x6d\x18\x07\x20\x01\x28\x09\x52\x0c" +
-	"\x63\x6c\x69\x65\x6e\x74\x52\x61\x6e\x64\x6f\x6d\x12\x19\x0a\x08" +
-	"\x61\x6e\x74\x69\x5f\x64\x70\x69\x18\x08\x20\x01\x28\x08\x52\x07" +
-	"\x61\x6e\x74\x69\x44\x70\x69\x12\x1d\x0a\x0a\x65\x6e\x61\x62\x6c" +
-	"\x65\x5f\x75\x64\x70\x18\x09\x20\x01\x28\x08\x52\x09\x65\x6e\x61" +
-	"\x62\x6c\x65\x55\x64\x70\x12\x6c\x0a\x1a\x70\x6f\x73\x74\x5f\x71" +
-	"\x75\x61\x6e\x74\x75\x6d\x5f\x67\x72\x6f\x75\x70\x5f\x65\x6e\x61" +
-	"\x62\x6c\x65\x64\x18\x0a\x20\x01\x28\x0e\x32\x2f\x2e\x78\x72\x61" +
-	"\x79\x2e\x70\x72\x6f\x78\x79\x2e\x74\x72\x75\x73\x74\x74\x75\x6e" +
-	"\x6e\x65\x6c\x2e\x50\x6f\x73\x74\x51\x75\x61\x6e\x74\x75\x6d\x47" +
-	"\x72\x6f\x75\x70\x53\x65\x74\x74\x69\x6e\x67\x52\x17\x70\x6f\x73" +
-	"\x74\x51\x75\x61\x6e\x74\x75\x6d\x47\x72\x6f\x75\x70\x45\x6e\x61" +
-	"\x62\x6c\x65\x64\x12\x3e\x0a\x07\x73\x65\x72\x76\x65\x72\x73\x18" +
-	"\x0b\x20\x03\x28\x0b\x32\x24\x2e\x78\x72\x61\x79\x2e\x63\x6f\x6d" +
-	"\x6d\x6f\x6e\x2e\x70\x72\x6f\x74\x6f\x63\x6f\x6c\x2e\x53\x65\x72" +
-	"\x76\x65\x72\x45\x6e\x64\x70\x6f\x69\x6e\x74\x52\x07\x73\x65\x72" +
-	"\x76\x65\x72\x73\x22\xdf\x08\x0a\x0c\x53\x65\x72\x76\x65\x72\x43" +
-	"\x6f\x6e\x66\x69\x67\x12\x30\x0a\x05\x75\x73\x65\x72\x73\x18\x01" +
-	"\x20\x03\x28\x0b\x32\x1a\x2e\x78\x72\x61\x79\x2e\x63\x6f\x6d\x6d" +
-	"\x6f\x6e\x2e\x70\x72\x6f\x74\x6f\x63\x6f\x6c\x2e\x55\x73\x65\x72" +
-	"\x52\x05\x75\x73\x65\x72\x73\x12\x38\x0a\x05\x68\x6f\x73\x74\x73" +
-	"\x18\x02\x20\x03\x28\x0b\x32\x22\x2e\x78\x72\x61\x79\x2e\x70\x72" +
-	"\x6f\x78\x79\x2e\x74\x72\x75\x73\x74\x74\x75\x6e\x6e\x65\x6c\x2e" +
-	"\x53\x65\x72\x76\x65\x72\x48\x6f\x73\x74\x52\x05\x68\x6f\x73\x74" +
-	"\x73\x12\x49\x0a\x0a\x74\x72\x61\x6e\x73\x70\x6f\x72\x74\x73\x18" +
-	"\x03\x20\x03\x28\x0e\x32\x29\x2e\x78\x72\x61\x79\x2e\x70\x72\x6f" +
-	"\x78\x79\x2e\x74\x72\x75\x73\x74\x74\x75\x6e\x6e\x65\x6c\x2e\x54" +
-	"\x72\x61\x6e\x73\x70\x6f\x72\x74\x50\x72\x6f\x74\x6f\x63\x6f\x6c" +
-	"\x52\x0a\x74\x72\x61\x6e\x73\x70\x6f\x72\x74\x73\x12\x32\x0a\x05" +
-	"\x72\x75\x6c\x65\x73\x18\x04\x20\x03\x28\x0b\x32\x1c\x2e\x78\x72" +
-	"\x61\x79\x2e\x70\x72\x6f\x78\x79\x2e\x74\x72\x75\x73\x74\x74\x75" +
-	"\x6e\x6e\x65\x6c\x2e\x52\x75\x6c\x65\x52\x05\x72\x75\x6c\x65\x73" +
-	"\x12\x25\x0a\x0e\x69\x70\x76\x36\x5f\x61\x76\x61\x69\x6c\x61\x62" +
-	"\x6c\x65\x18\x05\x20\x01\x28\x08\x52\x0d\x69\x70\x76\x36\x41\x76" +
-	"\x61\x69\x6c\x61\x62\x6c\x65\x12\x37\x0a\x18\x61\x75\x74\x68\x5f" +
-	"\x66\x61\x69\x6c\x75\x72\x65\x5f\x73\x74\x61\x74\x75\x73\x5f\x63" +
-	"\x6f\x64\x65\x18\x06\x20\x01\x28\x0d\x52\x15\x61\x75\x74\x68\x46" +
-	"\x61\x69\x6c\x75\x72\x65\x53\x74\x61\x74\x75\x73\x43\x6f\x64\x65" +
-	"\x12\x1d\x0a\x0a\x65\x6e\x61\x62\x6c\x65\x5f\x75\x64\x70\x18\x07" +
-	"\x20\x01\x28\x08\x52\x09\x65\x6e\x61\x62\x6c\x65\x55\x64\x70\x12" +
-	"\x2e\x0a\x13\x69\x63\x6d\x70\x5f\x69\x6e\x74\x65\x72\x66\x61\x63" +
-	"\x65\x5f\x6e\x61\x6d\x65\x18\x08\x20\x01\x28\x09\x52\x11\x69\x63" +
-	"\x6d\x70\x49\x6e\x74\x65\x72\x66\x61\x63\x65\x4e\x61\x6d\x65\x12" +
-	"\x39\x0a\x19\x69\x63\x6d\x70\x5f\x72\x65\x71\x75\x65\x73\x74\x5f" +
-	"\x74\x69\x6d\x65\x6f\x75\x74\x5f\x73\x65\x63\x73\x18\x09\x20\x01" +
-	"\x28\x0d\x52\x16\x69\x63\x6d\x70\x52\x65\x71\x75\x65\x73\x74\x54" +
-	"\x69\x6d\x65\x6f\x75\x74\x53\x65\x63\x73\x12\x49\x0a\x21\x61\x6c" +
-	"\x6c\x6f\x77\x5f\x70\x72\x69\x76\x61\x74\x65\x5f\x6e\x65\x74\x77" +
-	"\x6f\x72\x6b\x5f\x63\x6f\x6e\x6e\x65\x63\x74\x69\x6f\x6e\x73\x18" +
-	"\x0a\x20\x01\x28\x08\x52\x1e\x61\x6c\x6c\x6f\x77\x50\x72\x69\x76" +
-	"\x61\x74\x65\x4e\x65\x74\x77\x6f\x72\x6b\x43\x6f\x6e\x6e\x65\x63" +
-	"\x74\x69\x6f\x6e\x73\x12\x46\x0a\x20\x69\x63\x6d\x70\x5f\x72\x65" +
-	"\x63\x76\x5f\x6d\x65\x73\x73\x61\x67\x65\x5f\x71\x75\x65\x75\x65" +
-	"\x5f\x63\x61\x70\x61\x63\x69\x74\x79\x18\x0b\x20\x01\x28\x0d\x52" +
-	"\x1c\x69\x63\x6d\x70\x52\x65\x63\x76\x4d\x65\x73\x73\x61\x67\x65" +
-	"\x51\x75\x65\x75\x65\x43\x61\x70\x61\x63\x69\x74\x79\x12\x3b\x0a" +
-	"\x1a\x74\x6c\x73\x5f\x68\x61\x6e\x64\x73\x68\x61\x6b\x65\x5f\x74" +
-	"\x69\x6d\x65\x6f\x75\x74\x5f\x73\x65\x63\x73\x18\x0c\x20\x01\x28" +
-	"\x0d\x52\x17\x74\x6c\x73\x48\x61\x6e\x64\x73\x68\x61\x6b\x65\x54" +
-	"\x69\x6d\x65\x6f\x75\x74\x53\x65\x63\x73\x12\x3f\x0a\x1c\x63\x6c" +
-	"\x69\x65\x6e\x74\x5f\x6c\x69\x73\x74\x65\x6e\x65\x72\x5f\x74\x69" +
-	"\x6d\x65\x6f\x75\x74\x5f\x73\x65\x63\x73\x18\x0d\x20\x01\x28\x0d" +
-	"\x52\x19\x63\x6c\x69\x65\x6e\x74\x4c\x69\x73\x74\x65\x6e\x65\x72" +
-	"\x54\x69\x6d\x65\x6f\x75\x74\x53\x65\x63\x73\x12\x51\x0a\x25\x63" +
-	"\x6f\x6e\x6e\x65\x63\x74\x69\x6f\x6e\x5f\x65\x73\x74\x61\x62\x6c" +
-	"\x69\x73\x68\x6d\x65\x6e\x74\x5f\x74\x69\x6d\x65\x6f\x75\x74\x5f" +
-	"\x73\x65\x63\x73\x18\x0e\x20\x01\x28\x0d\x52\x22\x63\x6f\x6e\x6e" +
-	"\x65\x63\x74\x69\x6f\x6e\x45\x73\x74\x61\x62\x6c\x69\x73\x68\x6d" +
-	"\x65\x6e\x74\x54\x69\x6d\x65\x6f\x75\x74\x53\x65\x63\x73\x12\x3f" +
-	"\x0a\x1c\x74\x63\x70\x5f\x63\x6f\x6e\x6e\x65\x63\x74\x69\x6f\x6e" +
-	"\x73\x5f\x74\x69\x6d\x65\x6f\x75\x74\x5f\x73\x65\x63\x73\x18\x0f" +
-	"\x20\x01\x28\x0d\x52\x19\x74\x63\x70\x43\x6f\x6e\x6e\x65\x63\x74" +
-	"\x69\x6f\x6e\x73\x54\x69\x6d\x65\x6f\x75\x74\x53\x65\x63\x73\x12" +
-	"\x3f\x0a\x1c\x75\x64\x70\x5f\x63\x6f\x6e\x6e\x65\x63\x74\x69\x6f" +
-	"\x6e\x73\x5f\x74\x69\x6d\x65\x6f\x75\x74\x5f\x73\x65\x63\x73\x18" +
-	"\x10\x20\x01\x28\x0d\x52\x19\x75\x64\x70\x43\x6f\x6e\x6e\x65\x63" +
-	"\x74\x69\x6f\x6e\x73\x54\x69\x6d\x65\x6f\x75\x74\x53\x65\x63\x73" +
-	"\x12\x49\x0a\x22\x64\x65\x66\x61\x75\x6c\x74\x5f\x6d\x61\x78\x5f" +
-	"\x68\x74\x74\x70\x32\x5f\x63\x6f\x6e\x6e\x73\x5f\x70\x65\x72\x5f" +
-	"\x63\x6c\x69\x65\x6e\x74\x18\x11\x20\x01\x28\x0d\x52\x1d\x64\x65" +
-	"\x66\x61\x75\x6c\x74\x4d\x61\x78\x48\x74\x74\x70\x32\x43\x6f\x6e" +
-	"\x6e\x73\x50\x65\x72\x43\x6c\x69\x65\x6e\x74\x12\x49\x0a\x22\x64" +
-	"\x65\x66\x61\x75\x6c\x74\x5f\x6d\x61\x78\x5f\x68\x74\x74\x70\x33" +
-	"\x5f\x63\x6f\x6e\x6e\x73\x5f\x70\x65\x72\x5f\x63\x6c\x69\x65\x6e" +
-	"\x74\x18\x12\x20\x01\x28\x0d\x52\x1d\x64\x65\x66\x61\x75\x6c\x74" +
-	"\x4d\x61\x78\x48\x74\x74\x70\x33\x43\x6f\x6e\x6e\x73\x50\x65\x72" +
-	"\x43\x6c\x69\x65\x6e\x74\x2a\x33\x0a\x11\x54\x72\x61\x6e\x73\x70" +
-	"\x6f\x72\x74\x50\x72\x6f\x74\x6f\x63\x6f\x6c\x12\x09\x0a\x05\x48" +
-	"\x54\x54\x50\x32\x10\x00\x12\x09\x0a\x05\x48\x54\x54\x50\x33\x10" +
-	"\x01\x12\x08\x0a\x04\x41\x55\x54\x4f\x10\x02\x2a\x8f\x01\x0a\x17" +
-	"\x50\x6f\x73\x74\x51\x75\x61\x6e\x74\x75\x6d\x47\x72\x6f\x75\x70" +
-	"\x53\x65\x74\x74\x69\x6e\x67\x12\x23\x0a\x1f\x50\x4f\x53\x54\x5f" +
-	"\x51\x55\x41\x4e\x54\x55\x4d\x5f\x47\x52\x4f\x55\x50\x5f\x53\x45" +
-	"\x54\x54\x49\x4e\x47\x5f\x41\x55\x54\x4f\x10\x00\x12\x27\x0a\x23" +
-	"\x50\x4f\x53\x54\x5f\x51\x55\x41\x4e\x54\x55\x4d\x5f\x47\x52\x4f" +
-	"\x55\x50\x5f\x53\x45\x54\x54\x49\x4e\x47\x5f\x44\x49\x53\x41\x42" +
-	"\x4c\x45\x44\x10\x01\x12\x26\x0a\x22\x50\x4f\x53\x54\x5f\x51\x55" +
-	"\x41\x4e\x54\x55\x4d\x5f\x47\x52\x4f\x55\x50\x5f\x53\x45\x54\x54" +
-	"\x49\x4e\x47\x5f\x45\x4e\x41\x42\x4c\x45\x44\x10\x02\x42\x64\x0a" +
-	"\x1a\x63\x6f\x6d\x2e\x78\x72\x61\x79\x2e\x70\x72\x6f\x78\x79\x2e" +
-	"\x74\x72\x75\x73\x74\x74\x75\x6e\x6e\x65\x6c\x50\x01\x5a\x2b\x67" +
-	"\x69\x74\x68\x75\x62\x2e\x63\x6f\x6d\x2f\x78\x74\x6c\x73\x2f\x78" +
-	"\x72\x61\x79\x2d\x63\x6f\x72\x65\x2f\x70\x72\x6f\x78\x79\x2f\x74" +
-	"\x72\x75\x73\x74\x74\x75\x6e\x6e\x65\x6c\xaa\x02\x16\x58\x72\x61" +
-	"\x79\x2e\x50\x72\x6f\x78\x79\x2e\x54\x72\x75\x73\x74\x54\x75\x6e" +
-	"\x6e\x65\x6c\x62\x06\x70\x72\x6f\x74\x6f\x33"
+	"\n" +
+	"\x1eproxy/trusttunnel/config.proto\x12\x16xray.proxy.trusttunnel\x1a\x1acommon/protocol/user.proto\x1a!common/protocol/server_spec.proto\"\x91\x01\n" +
+	"\aAccount\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\x12&\n" +
+	"\x0fmax_http2_conns\x18\x03 \x01(\rR\rmaxHttp2Conns\x12&\n" +
+	"\x0fmax_http3_conns\x18\x04 \x01(\rR\rmaxHttp3Conns\"U\n" +
+	"\x04Rule\x12\x12\n" +
+	"\x04cidr\x18\x01 \x01(\tR\x04cidr\x12#\n" +
+	"\rclient_random\x18\x02 \x01(\tR\fclientRandom\x12\x14\n" +
+	"\x05allow\x18\x03 \x01(\bR\x05allow\"n\n" +
+	"\n" +
+	"ServerHost\x12\x1a\n" +
+	"\bhostname\x18\x01 \x01(\tR\bhostname\x12)\n" +
+	"\x10certificate_path\x18\x02 \x01(\tR\x0fcertificatePath\x12\x19\n" +
+	"\bkey_path\x18\x03 \x01(\tR\akeyPath\"\xea\x02\n" +
+	"\x0fMultipathConfig\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12!\n" +
+	"\fmin_channels\x18\x02 \x01(\rR\vminChannels\x12!\n" +
+	"\fmax_channels\x18\x03 \x01(\rR\vmaxChannels\x12H\n" +
+	"\tscheduler\x18\x04 \x01(\x0e2*.xray.proxy.trusttunnel.MultipathSchedulerR\tscheduler\x12.\n" +
+	"\x13attach_timeout_secs\x18\x05 \x01(\rR\x11attachTimeoutSecs\x120\n" +
+	"\x14reorder_window_bytes\x18\x06 \x01(\rR\x12reorderWindowBytes\x123\n" +
+	"\x16reorder_gap_timeout_ms\x18\a \x01(\rR\x13reorderGapTimeoutMs\x12\x16\n" +
+	"\x06strict\x18\b \x01(\bR\x06strict\"\xf6\x04\n" +
+	"\fClientConfig\x12<\n" +
+	"\x06server\x18\x01 \x01(\v2$.xray.common.protocol.ServerEndpointR\x06server\x12\x1a\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\x12G\n" +
+	"\ttransport\x18\x03 \x01(\x0e2).xray.proxy.trusttunnel.TransportProtocolR\ttransport\x12\x19\n" +
+	"\bhas_ipv6\x18\x04 \x01(\bR\ahasIpv6\x12+\n" +
+	"\x11skip_verification\x18\x05 \x01(\bR\x10skipVerification\x12'\n" +
+	"\x0fcertificate_pem\x18\x06 \x01(\tR\x0ecertificatePem\x12#\n" +
+	"\rclient_random\x18\a \x01(\tR\fclientRandom\x12\x19\n" +
+	"\banti_dpi\x18\b \x01(\bR\aantiDpi\x12\x1d\n" +
+	"\n" +
+	"enable_udp\x18\t \x01(\bR\tenableUdp\x12l\n" +
+	"\x1apost_quantum_group_enabled\x18\n" +
+	" \x01(\x0e2/.xray.proxy.trusttunnel.PostQuantumGroupSettingR\x17postQuantumGroupEnabled\x12>\n" +
+	"\aservers\x18\v \x03(\v2$.xray.common.protocol.ServerEndpointR\aservers\x12E\n" +
+	"\tmultipath\x18\f \x01(\v2'.xray.proxy.trusttunnel.MultipathConfigR\tmultipath\"\xdf\b\n" +
+	"\fServerConfig\x120\n" +
+	"\x05users\x18\x01 \x03(\v2\x1a.xray.common.protocol.UserR\x05users\x128\n" +
+	"\x05hosts\x18\x02 \x03(\v2\".xray.proxy.trusttunnel.ServerHostR\x05hosts\x12I\n" +
+	"\n" +
+	"transports\x18\x03 \x03(\x0e2).xray.proxy.trusttunnel.TransportProtocolR\n" +
+	"transports\x122\n" +
+	"\x05rules\x18\x04 \x03(\v2\x1c.xray.proxy.trusttunnel.RuleR\x05rules\x12%\n" +
+	"\x0eipv6_available\x18\x05 \x01(\bR\ripv6Available\x127\n" +
+	"\x18auth_failure_status_code\x18\x06 \x01(\rR\x15authFailureStatusCode\x12\x1d\n" +
+	"\n" +
+	"enable_udp\x18\a \x01(\bR\tenableUdp\x12.\n" +
+	"\x13icmp_interface_name\x18\b \x01(\tR\x11icmpInterfaceName\x129\n" +
+	"\x19icmp_request_timeout_secs\x18\t \x01(\rR\x16icmpRequestTimeoutSecs\x12I\n" +
+	"!allow_private_network_connections\x18\n" +
+	" \x01(\bR\x1eallowPrivateNetworkConnections\x12F\n" +
+	" icmp_recv_message_queue_capacity\x18\v \x01(\rR\x1cicmpRecvMessageQueueCapacity\x12;\n" +
+	"\x1atls_handshake_timeout_secs\x18\f \x01(\rR\x17tlsHandshakeTimeoutSecs\x12?\n" +
+	"\x1cclient_listener_timeout_secs\x18\r \x01(\rR\x19clientListenerTimeoutSecs\x12Q\n" +
+	"%connection_establishment_timeout_secs\x18\x0e \x01(\rR\"connectionEstablishmentTimeoutSecs\x12?\n" +
+	"\x1ctcp_connections_timeout_secs\x18\x0f \x01(\rR\x19tcpConnectionsTimeoutSecs\x12?\n" +
+	"\x1cudp_connections_timeout_secs\x18\x10 \x01(\rR\x19udpConnectionsTimeoutSecs\x12I\n" +
+	"\"default_max_http2_conns_per_client\x18\x11 \x01(\rR\x1ddefaultMaxHttp2ConnsPerClient\x12I\n" +
+	"\"default_max_http3_conns_per_client\x18\x12 \x01(\rR\x1ddefaultMaxHttp3ConnsPerClient*3\n" +
+	"\x11TransportProtocol\x12\t\n" +
+	"\x05HTTP2\x10\x00\x12\t\n" +
+	"\x05HTTP3\x10\x01\x12\b\n" +
+	"\x04AUTO\x10\x02*\x8f\x01\n" +
+	"\x17PostQuantumGroupSetting\x12#\n" +
+	"\x1fPOST_QUANTUM_GROUP_SETTING_AUTO\x10\x00\x12'\n" +
+	"#POST_QUANTUM_GROUP_SETTING_DISABLED\x10\x01\x12&\n" +
+	"\"POST_QUANTUM_GROUP_SETTING_ENABLED\x10\x02*^\n" +
+	"\x12MultipathScheduler\x12#\n" +
+	"\x1fMULTIPATH_SCHEDULER_UNSPECIFIED\x10\x00\x12#\n" +
+	"\x1fMULTIPATH_SCHEDULER_ROUND_ROBIN\x10\x01Bd\n" +
+	"\x1acom.xray.proxy.trusttunnelP\x01Z+github.com/xtls/xray-core/proxy/trusttunnel\xaa\x02\x16Xray.Proxy.TrustTunnelb\x06proto3"
 
 var (
 	file_proxy_trusttunnel_config_proto_rawDescOnce sync.Once
@@ -782,33 +857,37 @@ func file_proxy_trusttunnel_config_proto_rawDescGZIP() []byte {
 	return file_proxy_trusttunnel_config_proto_rawDescData
 }
 
-var file_proxy_trusttunnel_config_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_proxy_trusttunnel_config_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_proxy_trusttunnel_config_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_proxy_trusttunnel_config_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_proxy_trusttunnel_config_proto_goTypes = []any{
 	(TransportProtocol)(0),          // 0: xray.proxy.trusttunnel.TransportProtocol
 	(PostQuantumGroupSetting)(0),    // 1: xray.proxy.trusttunnel.PostQuantumGroupSetting
-	(*Account)(nil),                 // 2: xray.proxy.trusttunnel.Account
-	(*Rule)(nil),                    // 3: xray.proxy.trusttunnel.Rule
-	(*ServerHost)(nil),              // 4: xray.proxy.trusttunnel.ServerHost
-	(*ClientConfig)(nil),            // 5: xray.proxy.trusttunnel.ClientConfig
-	(*ServerConfig)(nil),            // 6: xray.proxy.trusttunnel.ServerConfig
-	(*protocol.ServerEndpoint)(nil), // 7: xray.common.protocol.ServerEndpoint
-	(*protocol.User)(nil),           // 8: xray.common.protocol.User
+	(MultipathScheduler)(0),         // 2: xray.proxy.trusttunnel.MultipathScheduler
+	(*Account)(nil),                 // 3: xray.proxy.trusttunnel.Account
+	(*Rule)(nil),                    // 4: xray.proxy.trusttunnel.Rule
+	(*ServerHost)(nil),              // 5: xray.proxy.trusttunnel.ServerHost
+	(*MultipathConfig)(nil),         // 6: xray.proxy.trusttunnel.MultipathConfig
+	(*ClientConfig)(nil),            // 7: xray.proxy.trusttunnel.ClientConfig
+	(*ServerConfig)(nil),            // 8: xray.proxy.trusttunnel.ServerConfig
+	(*protocol.ServerEndpoint)(nil), // 9: xray.common.protocol.ServerEndpoint
+	(*protocol.User)(nil),           // 10: xray.common.protocol.User
 }
 var file_proxy_trusttunnel_config_proto_depIdxs = []int32{
-	7, // 0: xray.proxy.trusttunnel.ClientConfig.server:type_name -> xray.common.protocol.ServerEndpoint
-	0, // 1: xray.proxy.trusttunnel.ClientConfig.transport:type_name -> xray.proxy.trusttunnel.TransportProtocol
-	1, // 2: xray.proxy.trusttunnel.ClientConfig.post_quantum_group_enabled:type_name -> xray.proxy.trusttunnel.PostQuantumGroupSetting
-	7, // 3: xray.proxy.trusttunnel.ClientConfig.servers:type_name -> xray.common.protocol.ServerEndpoint
-	8, // 4: xray.proxy.trusttunnel.ServerConfig.users:type_name -> xray.common.protocol.User
-	4, // 5: xray.proxy.trusttunnel.ServerConfig.hosts:type_name -> xray.proxy.trusttunnel.ServerHost
-	0, // 6: xray.proxy.trusttunnel.ServerConfig.transports:type_name -> xray.proxy.trusttunnel.TransportProtocol
-	3, // 7: xray.proxy.trusttunnel.ServerConfig.rules:type_name -> xray.proxy.trusttunnel.Rule
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	2,  // 0: xray.proxy.trusttunnel.MultipathConfig.scheduler:type_name -> xray.proxy.trusttunnel.MultipathScheduler
+	9,  // 1: xray.proxy.trusttunnel.ClientConfig.server:type_name -> xray.common.protocol.ServerEndpoint
+	0,  // 2: xray.proxy.trusttunnel.ClientConfig.transport:type_name -> xray.proxy.trusttunnel.TransportProtocol
+	1,  // 3: xray.proxy.trusttunnel.ClientConfig.post_quantum_group_enabled:type_name -> xray.proxy.trusttunnel.PostQuantumGroupSetting
+	9,  // 4: xray.proxy.trusttunnel.ClientConfig.servers:type_name -> xray.common.protocol.ServerEndpoint
+	6,  // 5: xray.proxy.trusttunnel.ClientConfig.multipath:type_name -> xray.proxy.trusttunnel.MultipathConfig
+	10, // 6: xray.proxy.trusttunnel.ServerConfig.users:type_name -> xray.common.protocol.User
+	5,  // 7: xray.proxy.trusttunnel.ServerConfig.hosts:type_name -> xray.proxy.trusttunnel.ServerHost
+	0,  // 8: xray.proxy.trusttunnel.ServerConfig.transports:type_name -> xray.proxy.trusttunnel.TransportProtocol
+	4,  // 9: xray.proxy.trusttunnel.ServerConfig.rules:type_name -> xray.proxy.trusttunnel.Rule
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_proxy_trusttunnel_config_proto_init() }
@@ -821,8 +900,8 @@ func file_proxy_trusttunnel_config_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proxy_trusttunnel_config_proto_rawDesc), len(file_proxy_trusttunnel_config_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   5,
+			NumEnums:      3,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

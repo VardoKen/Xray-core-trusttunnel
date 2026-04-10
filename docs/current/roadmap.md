@@ -156,11 +156,20 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - читать multipath TCP так, как он задан в исходной идее: несколько отдельных TCP-каналов на разные IP внутри одной логической сессии;
 - обязательно подтверждать multi-IP data distribution remote-live прогонами, а не только unit/scenario checks.
 
+Что уже сделано на текущем этапе:
+- phase 1 больше не является только планом: `config.proto` / `config.pb.go`, JSON binding и validator уже содержат `multipath.*` surface и fail-fast guardrails;
+- `proxy/trusttunnel/multipath_session.go` уже даёт минимальные runtime-структуры `MultipathSession`, `MultipathChannel` и server-side registry skeleton;
+- current scope всё ещё deliberately узкий: data-plane multipath path ещё не начат.
+
+Что дальше:
+- следующий кодовый шаг уже не `multipath.*` model, а `_mptcp_open` / `_mptcp_attach` и attach-proof;
+- до этого не заявлять multipath как working runtime-path.
+
 Полный поэтапный план, guardrails и точки интеграции зафиксированы в `docs/current/multipath-transport-plan.md`.
 
 ## 5. Порядок выполнения
 
-1. для ветки `feat/trusttunnel-multipath` идти по `docs/current/multipath-transport-plan.md`: config/validator → session model → `_mptcp_open` / `_mptcp_attach` → framed TCP data path → scheduler/recovery → remote-live validation
+1. для ветки `feat/trusttunnel-multipath` идти по `docs/current/multipath-transport-plan.md`: после уже закрытой phase 1 (`config/validator + session model skeleton`) переходить к `_mptcp_open` / `_mptcp_attach` → framed TCP data path → scheduler/recovery → remote-live validation
 2. держать `streamSettings`-нормализацию синхронной с upstream generic TLS / REALITY / outbound plumbing
 3. держать compatibility matrix и validator синхронными с новыми integration-комбинациями
 4. добирать dedicated inbound / generic TLS coverage только при появлении новых product-level требований

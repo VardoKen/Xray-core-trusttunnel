@@ -216,6 +216,14 @@
 Подтверждённо активная runtime-функция:
 - `clientRandom` для H2 и H3 outbound
 
+Experimental phase-1 surface:
+- `multipath.*`
+
+Практическая граница:
+- `multipath.*` уже существует в config model и validator, но пока не образует working client/server data path;
+- текущая фаза ограничена `HTTP/2 over TLS` guardrails, session/channel skeleton и fail-fast validation;
+- `_mptcp_open`, `_mptcp_attach`, framed payload layer и remote-live multi-IP distribution ещё не реализованы, поэтому `multipath.*` пока нельзя использовать как рабочий продуктовый режим.
+
 ### 3.2. Минимальные правила для H2 outbound
 
 Нужны одновременно:

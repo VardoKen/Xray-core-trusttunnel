@@ -30,6 +30,17 @@ type TrustTunnelEndpointConfig struct {
 	Port    uint16   `json:"port"`
 }
 
+type TrustTunnelMultipathConfig struct {
+	Enabled             bool   `json:"enabled"`
+	MinChannels         uint32 `json:"minChannels"`
+	MaxChannels         uint32 `json:"maxChannels"`
+	Scheduler           string `json:"scheduler"`
+	AttachTimeoutSecs   uint32 `json:"attachTimeoutSecs"`
+	ReorderWindowBytes  uint32 `json:"reorderWindowBytes"`
+	ReorderGapTimeoutMs uint32 `json:"reorderGapTimeoutMs"`
+	Strict              *bool  `json:"strict"`
+}
+
 type TrustTunnelClientConfig struct {
 	Address            *Address                     `json:"address"`
 	Port               uint16                       `json:"port"`
@@ -48,6 +59,7 @@ type TrustTunnelClientConfig struct {
 	AntiDpi            bool                         `json:"antiDpi"`
 	PostQuantumGroup   *bool                        `json:"postQuantumGroupEnabled"`
 	UDP                bool                         `json:"udp"`
+	Multipath          *TrustTunnelMultipathConfig  `json:"multipath"`
 }
 
 func parseTrustTunnelTransport(v string) (trusttunnel.TransportProtocol, error) {
@@ -60,6 +72,15 @@ func parseTrustTunnelTransport(v string) (trusttunnel.TransportProtocol, error) 
 		return trusttunnel.TransportProtocol_HTTP3, nil
 	default:
 		return trusttunnel.TransportProtocol_HTTP2, errors.New("unsupported trusttunnel transport: ", v)
+	}
+}
+
+func parseTrustTunnelMultipathScheduler(v string) (trusttunnel.MultipathScheduler, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "round_robin", "round-robin":
+		return trusttunnel.MultipathScheduler_MULTIPATH_SCHEDULER_ROUND_ROBIN, nil
+	default:
+		return trusttunnel.MultipathScheduler_MULTIPATH_SCHEDULER_UNSPECIFIED, errors.New("unsupported trusttunnel multipath scheduler: ", v)
 	}
 }
 
@@ -148,6 +169,37 @@ func (c *TrustTunnelClientConfig) Build() (proto.Message, error) {
 		} else {
 			config.PostQuantumGroupEnabled = trusttunnel.PostQuantumGroupSetting_POST_QUANTUM_GROUP_SETTING_DISABLED
 		}
+	}
+
+	if c.Multipath != nil {
+		scheduler, err := parseTrustTunnelMultipathScheduler(c.Multipath.Scheduler)
+		if err != nil {
+			return nil, err
+		}
+
+		multipath := &trusttunnel.MultipathConfig{
+			Enabled:             c.Multipath.Enabled,
+			MinChannels:         c.Multipath.MinChannels,
+			MaxChannels:         c.Multipath.MaxChannels,
+			Scheduler:           scheduler,
+			AttachTimeoutSecs:   c.Multipath.AttachTimeoutSecs,
+			ReorderWindowBytes:  c.Multipath.ReorderWindowBytes,
+			ReorderGapTimeoutMs: c.Multipath.ReorderGapTimeoutMs,
+		}
+		if c.Multipath.Strict != nil {
+			multipath.Strict = *c.Multipath.Strict
+		} else if multipath.Enabled {
+			multipath.Strict = true
+		}
+		if multipath.Enabled {
+			if multipath.MinChannels == 0 {
+				multipath.MinChannels = 2
+			}
+			if multipath.MaxChannels == 0 {
+				multipath.MaxChannels = multipath.MinChannels
+			}
+		}
+		config.Multipath = multipath
 	}
 
 	return config, nil

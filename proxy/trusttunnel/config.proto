@@ -29,6 +29,11 @@ enum PostQuantumGroupSetting {
   POST_QUANTUM_GROUP_SETTING_ENABLED = 2;
 }
 
+enum MultipathScheduler {
+  MULTIPATH_SCHEDULER_UNSPECIFIED = 0;
+  MULTIPATH_SCHEDULER_ROUND_ROBIN = 1;
+}
+
 message Rule {
   string cidr = 1;
   string client_random = 2;
@@ -39,6 +44,17 @@ message ServerHost {
   string hostname = 1;
   string certificate_path = 2;
   string key_path = 3;
+}
+
+message MultipathConfig {
+  bool enabled = 1;
+  uint32 min_channels = 2;
+  uint32 max_channels = 3;
+  MultipathScheduler scheduler = 4;
+  uint32 attach_timeout_secs = 5;
+  uint32 reorder_window_bytes = 6;
+  uint32 reorder_gap_timeout_ms = 7;
+  bool strict = 8;
 }
 
 message ClientConfig {
@@ -53,6 +69,7 @@ message ClientConfig {
   bool enable_udp = 9;
   PostQuantumGroupSetting post_quantum_group_enabled = 10;
   repeated xray.common.protocol.ServerEndpoint servers = 11;
+  MultipathConfig multipath = 12;
 }
 
 message ServerConfig {

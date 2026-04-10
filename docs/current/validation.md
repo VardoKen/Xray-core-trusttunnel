@@ -164,7 +164,43 @@
 - первый resolved адрес `127.0.0.2:9443` действительно отбрасывается как failed endpoint, а downstream probe через SOCKS `127.0.0.1:18093` всё равно даёт `{"ip":"37.252.0.130"}`;
 - remote bundle `tcpdump.txt` фиксирует трафик на `37.252.0.130:9443`, то есть fallback идёт именно на второй resolved remote IP, а не на synthetic local bypass.
 
-### 1.3. Client-Side antiDPI runtime
+### 1.3. Multipath phase 1: config / validator / session skeleton
+
+Подтверждено на 2026-04-10:
+- phase-1 multipath surface уже существует в локальном и lab worktree;
+- validated scope ограничен config model, validator guardrails и runtime skeleton без data-path.
+
+Кодовые точки:
+- `proxy/trusttunnel/config.proto`
+- `proxy/trusttunnel/config.pb.go`
+- `infra/conf/trusttunnel.go`
+- `infra/conf/trusttunnel_lint.go`
+- `proxy/trusttunnel/multipath_session.go`
+- `proxy/trusttunnel/server.go`
+
+Что именно подтверждено:
+- protobuf/config model уже содержит `MultipathScheduler` и `MultipathConfig`, а outbound JSON binding принимает `multipath.*`;
+- config-build validator уже fail-fast режет phase-1 invalid combinations:
+  - не `transport=http2`;
+  - не `streamSettings.security=tls`;
+  - `udp=true`;
+  - отсутствие multi-endpoint pool;
+  - `multipath.minChannels < 2`;
+  - `multipath.maxChannels < multipath.minChannels`;
+- runtime skeleton уже содержит `MultipathSession`, `MultipathChannel` и server-side session registry без включения их в active data-plane;
+- current verdict deliberately ограничен phase 1: `_mptcp_open`, `_mptcp_attach`, attach-proof, framed payload layer и multi-IP traffic distribution ещё не реализованы.
+
+Подтверждённые команды:
+- на lab:
+  - `go test ./infra/conf -run 'TrustTunnel|Multipath' -count=1`
+  - `go test ./proxy/trusttunnel -run 'Multipath|ServerAttempts|AntiDpi|HTTP3Reality' -count=1`
+  - `go build -buildvcs=false -o /opt/lab/xray-tt/tmp/xray-tt-multipath-phase1 ./main`
+
+Практический вывод:
+- phase 1 закрывает только config/validator/runtime-skeleton задачу;
+- phase 2 должен начинаться уже с `_mptcp_open` / `_mptcp_attach`, а не с повторного проектирования config surface.
+
+### 1.4. Client-Side antiDPI runtime
 
 Подтверждено dedicated live smoke на 2026-04-09:
 - preflight code state: `7376ab64`;

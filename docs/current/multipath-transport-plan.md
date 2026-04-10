@@ -317,6 +317,9 @@ Validator первой фазы должен fail-fast резать:
 
 ### Фаза 0. Архитектурное сужение задачи
 
+Статус на 2026-04-10:
+- done
+
 Цель:
 - зафиксировать реалистичную модель multipath для TCP;
 - явно зафиксировать, что multipath-TCP в этой ветке реализуется через несколько отдельных TCP-каналов внутри одной логической сессии.
@@ -327,6 +330,11 @@ Validator первой фазы должен fail-fast резать:
 - branch policy: first target = H2/TLS TCP only.
 
 ### Фаза 1. Session model и config surface
+
+Статус на 2026-04-10:
+- done для phase-1 scope без data-plane
+- реализованы `multipath.*` в config model, validator guardrails и минимальные runtime-структуры `MultipathSession` / `MultipathChannel`
+- не реализованы `_mptcp_open`, `_mptcp_attach`, framed payload layer и multi-IP traffic distribution
 
 Сделать:
 - config model `multipath.*`;
@@ -341,6 +349,9 @@ Validator первой фазы должен fail-fast резать:
 - ничего ещё не заявляется как product-ready data path.
 
 ### Фаза 2. Primary open + secondary attach
+
+Статус на 2026-04-10:
+- next
 
 Сделать:
 - `_mptcp_open`;

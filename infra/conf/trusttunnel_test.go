@@ -199,6 +199,57 @@ func TestTrustTunnelClientConfigBuildSupportsMultipleServers(t *testing.T) {
 	}
 }
 
+func TestTrustTunnelClientConfigBuildSupportsMultipath(t *testing.T) {
+	config, err := (&TrustTunnelClientConfig{
+		Servers: []*TrustTunnelEndpointConfig{
+			{
+				Address: &Address{Address: net.ParseAddress("127.0.0.1")},
+				Port:    9443,
+			},
+			{
+				Address: &Address{Address: net.ParseAddress("127.0.0.2")},
+				Port:    9444,
+			},
+		},
+		Username:  "u1",
+		Password:  "p1",
+		Hostname:  "www.google.com",
+		Transport: "http2",
+		Multipath: &TrustTunnelMultipathConfig{
+			Enabled:             true,
+			MinChannels:         2,
+			MaxChannels:         4,
+			Scheduler:           "round_robin",
+			AttachTimeoutSecs:   7,
+			ReorderWindowBytes:  65536,
+			ReorderGapTimeoutMs: 250,
+		},
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+
+	built := config.(*trusttunnel.ClientConfig)
+	if built.GetMultipath() == nil {
+		t.Fatal("multipath = nil, want config")
+	}
+	if !built.GetMultipath().GetEnabled() {
+		t.Fatal("multipath.enabled = false, want true")
+	}
+	if built.GetMultipath().GetMinChannels() != 2 {
+		t.Fatalf("multipath.minChannels = %d, want 2", built.GetMultipath().GetMinChannels())
+	}
+	if built.GetMultipath().GetMaxChannels() != 4 {
+		t.Fatalf("multipath.maxChannels = %d, want 4", built.GetMultipath().GetMaxChannels())
+	}
+	if built.GetMultipath().GetScheduler() != trusttunnel.MultipathScheduler_MULTIPATH_SCHEDULER_ROUND_ROBIN {
+		t.Fatalf("multipath.scheduler = %v, want ROUND_ROBIN", built.GetMultipath().GetScheduler())
+	}
+	if !built.GetMultipath().GetStrict() {
+		t.Fatal("multipath.strict = false, want default true")
+	}
+}
+
 func TestTrustTunnelClientConfigBuildRejectsAddressAndServersTogether(t *testing.T) {
 	_, err := (&TrustTunnelClientConfig{
 		Address: &Address{Address: net.ParseAddress("127.0.0.1")},
@@ -398,6 +449,270 @@ func TestConfigBuildAllowsTrustTunnelAutoPostQuantumWithoutOutboundSecurity(t *t
 	}).Build()
 	if err != nil {
 		t.Fatalf("Build() failed: %v", err)
+	}
+}
+
+func TestConfigBuildAllowsTrustTunnelMultipathOnHTTP2TLS(t *testing.T) {
+	raw := json.RawMessage(`{
+		"servers": [
+			{"address": "192.168.1.50", "port": 9443},
+			{"address": "192.168.1.51", "port": 9443}
+		],
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http2",
+		"multipath": {
+			"enabled": true,
+			"minChannels": 2,
+			"maxChannels": 2,
+			"scheduler": "round_robin"
+		}
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security:    "tls",
+					TLSSettings: &TLSConfig{},
+				},
+			},
+		},
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+}
+
+func TestConfigBuildAllowsTrustTunnelMultipathWithDomainPool(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "ttmulti.lab",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http2",
+		"multipath": {
+			"enabled": true,
+			"minChannels": 2
+		}
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security:    "tls",
+					TLSSettings: &TLSConfig{},
+				},
+			},
+		},
+	}).Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelMultipathWithoutEndpointPool(t *testing.T) {
+	raw := json.RawMessage(`{
+		"address": "192.168.1.50",
+		"port": 9443,
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http2",
+		"multipath": {
+			"enabled": true,
+			"minChannels": 2
+		}
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security:    "tls",
+					TLSSettings: &TLSConfig{},
+				},
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "multipath requires a multi-endpoint pool") {
+		t.Fatalf("Build() error = %v, want multi-endpoint pool guard", err)
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelMultipathWhenMaxChannelsLessThanMin(t *testing.T) {
+	raw := json.RawMessage(`{
+		"servers": [
+			{"address": "192.168.1.50", "port": 9443},
+			{"address": "192.168.1.51", "port": 9443}
+		],
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http2",
+		"multipath": {
+			"enabled": true,
+			"minChannels": 3,
+			"maxChannels": 2
+		}
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security:    "tls",
+					TLSSettings: &TLSConfig{},
+				},
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "multipath.maxChannels >= multipath.minChannels") {
+		t.Fatalf("Build() error = %v, want max>=min guard", err)
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelMultipathWithUnknownScheduler(t *testing.T) {
+	raw := json.RawMessage(`{
+		"servers": [
+			{"address": "192.168.1.50", "port": 9443},
+			{"address": "192.168.1.51", "port": 9443}
+		],
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http2",
+		"multipath": {
+			"enabled": true,
+			"minChannels": 2,
+			"scheduler": "weighted_random"
+		}
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security:    "tls",
+					TLSSettings: &TLSConfig{},
+				},
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "unsupported trusttunnel multipath scheduler") {
+		t.Fatalf("Build() error = %v, want unsupported scheduler guard", err)
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelMultipathOnAutoTransport(t *testing.T) {
+	raw := json.RawMessage(`{
+		"servers": [
+			{"address": "192.168.1.50", "port": 9443},
+			{"address": "192.168.1.51", "port": 9443}
+		],
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "auto",
+		"multipath": {
+			"enabled": true,
+			"minChannels": 2
+		}
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security:    "tls",
+					TLSSettings: &TLSConfig{},
+				},
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "multipath phase 1 supports only transport=http2") {
+		t.Fatalf("Build() error = %v, want http2-only guard", err)
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelMultipathOnReality(t *testing.T) {
+	raw := json.RawMessage(`{
+		"servers": [
+			{"address": "192.168.1.50", "port": 9443},
+			{"address": "192.168.1.51", "port": 9443}
+		],
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http2",
+		"multipath": {
+			"enabled": true,
+			"minChannels": 2
+		}
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security: "reality",
+				},
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "multipath phase 1 supports only HTTP/2 over TLS") {
+		t.Fatalf("Build() error = %v, want H2/TLS-only guard", err)
+	}
+}
+
+func TestConfigBuildRejectsTrustTunnelMultipathWithUDPEnabled(t *testing.T) {
+	raw := json.RawMessage(`{
+		"servers": [
+			{"address": "192.168.1.50", "port": 9443},
+			{"address": "192.168.1.51", "port": 9443}
+		],
+		"username": "u1",
+		"password": "p1",
+		"hostname": "localhost",
+		"transport": "http2",
+		"udp": true,
+		"multipath": {
+			"enabled": true,
+			"minChannels": 2
+		}
+	}`)
+
+	_, err := (&Config{
+		OutboundConfigs: []OutboundDetourConfig{
+			{
+				Protocol: "trusttunnel",
+				Settings: &raw,
+				StreamSetting: &StreamConfig{
+					Security:    "tls",
+					TLSSettings: &TLSConfig{},
+				},
+			},
+		},
+	}).Build()
+	if err == nil || !strings.Contains(err.Error(), "multipath phase 1 is TCP-only") {
+		t.Fatalf("Build() error = %v, want TCP-only guard", err)
 	}
 }
 

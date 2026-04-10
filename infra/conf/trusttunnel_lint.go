@@ -2,6 +2,7 @@ package conf
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/xtls/xray-core/common/errors"
@@ -81,8 +82,52 @@ func validateTrustTunnelOutboundConfig(outbound OutboundDetourConfig) error {
 		return err
 	}
 
+	if err := validateTrustTunnelOutboundMultipath(outbound.StreamSetting, settings, transport); err != nil {
+		return err
+	}
+
 	if settings.PostQuantumGroup != nil && transport == trusttunnel.TransportProtocol_HTTP2 && !trustTunnelSecuritySupportsPostQuantum(outbound.StreamSetting) {
 		return errors.New("trusttunnel postQuantumGroupEnabled is unsupported: current outbound streamSettings have no TLS/REALITY security").AtWarning()
+	}
+
+	return nil
+}
+
+func validateTrustTunnelOutboundMultipath(stream *StreamConfig, settings *TrustTunnelClientConfig, transport trusttunnel.TransportProtocol) error {
+	if settings == nil || settings.Multipath == nil || !settings.Multipath.Enabled {
+		return nil
+	}
+
+	multipath := settings.Multipath
+	minChannels := multipath.MinChannels
+	if minChannels == 0 {
+		minChannels = 2
+	}
+	maxChannels := multipath.MaxChannels
+	if maxChannels == 0 {
+		maxChannels = minChannels
+	}
+
+	if minChannels < 2 {
+		return errors.New("trusttunnel multipath requires multipath.minChannels >= 2").AtError()
+	}
+	if maxChannels < minChannels {
+		return errors.New("trusttunnel multipath requires multipath.maxChannels >= multipath.minChannels").AtError()
+	}
+	if transport != trusttunnel.TransportProtocol_HTTP2 {
+		return errors.New("trusttunnel multipath phase 1 supports only transport=http2").AtError()
+	}
+	if stream == nil || !strings.EqualFold(stream.Security, "tls") {
+		return errors.New("trusttunnel multipath phase 1 supports only HTTP/2 over TLS").AtError()
+	}
+	if settings.UDP {
+		return errors.New("trusttunnel multipath phase 1 is TCP-only and does not support udp=true").AtError()
+	}
+	if !trustTunnelConfigHasMultipathEndpointPool(settings) {
+		return errors.New("trusttunnel multipath requires a multi-endpoint pool: use multiple servers entries or a domain-valued address that can resolve to multiple IPs").AtError()
+	}
+	if _, err := parseTrustTunnelMultipathScheduler(multipath.Scheduler); err != nil {
+		return err
 	}
 
 	return nil
@@ -131,6 +176,49 @@ func trustTunnelServerSupportsHTTP3(settings *TrustTunnelServerConfig) bool {
 	}
 
 	return false
+}
+
+func trustTunnelConfigHasMultipathEndpointPool(settings *TrustTunnelClientConfig) bool {
+	if settings == nil {
+		return false
+	}
+
+	endpoints := settings.Servers
+	if len(endpoints) == 0 && settings.Address != nil {
+		endpoints = []*TrustTunnelEndpointConfig{{
+			Address: settings.Address,
+			Port:    settings.Port,
+		}}
+	}
+
+	if len(endpoints) == 0 {
+		return false
+	}
+	if len(endpoints) == 1 {
+		return trustTunnelEndpointIsDomain(endpoints[0])
+	}
+
+	seen := make(map[string]struct{}, len(endpoints))
+	domainFound := false
+	for _, endpoint := range endpoints {
+		if endpoint == nil || endpoint.Address == nil || endpoint.Address.Address == nil {
+			continue
+		}
+		if endpoint.Address.Family().IsDomain() {
+			domainFound = true
+			continue
+		}
+		key := endpoint.Address.String() + ":" + strconv.Itoa(int(endpoint.Port))
+		seen[key] = struct{}{}
+	}
+	return domainFound || len(seen) >= 2
+}
+
+func trustTunnelEndpointIsDomain(endpoint *TrustTunnelEndpointConfig) bool {
+	if endpoint == nil || endpoint.Address == nil || endpoint.Address.Address == nil {
+		return false
+	}
+	return endpoint.Address.Family().IsDomain()
 }
 
 func trustTunnelSecurityIsReality(stream *StreamConfig) bool {
