@@ -153,7 +153,7 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - не считать multipath “ещё одним endpoint-policy patch'ем”;
 - не пытаться внедрить его сразу в H2/H3/UDP/REALITY;
 - начать с `HTTP/2 over TLS` и explicit session/channel/frame layer;
-- не трактовать literal-требование “сервер отвечает со случайного IP” как реализуемое для одного TCP-сокета;
+- читать multipath TCP так, как он задан в исходной идее: несколько отдельных TCP-каналов на разные IP внутри одной логической сессии;
 - обязательно подтверждать multi-IP data distribution remote-live прогонами, а не только unit/scenario checks.
 
 Полный поэтапный план, guardrails и точки интеграции зафиксированы в `docs/current/multipath-transport-plan.md`.
