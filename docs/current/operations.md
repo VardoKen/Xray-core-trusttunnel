@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — эксплуатационная база
 
 Статус: current
-Дата фиксации: 2026-04-09
-Коммит состояния: `507ff073`
+Дата фиксации: 2026-04-10
+Коммит состояния: `d2249887`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -221,7 +221,7 @@ Experimental phase-1 surface:
 
 Практическая граница:
 - `multipath.*` уже существует в config model и validator и больше не ограничивается одним skeleton-only verdict;
-- текущая фаза уже включает `HTTP/2 over TLS` control-path: session/channel registry, `_mptcp_open`, `_mptcp_attach`, attach-proof и server-side secondary-channel attach;
+- текущая фаза уже включает `HTTP/2 over TLS` control-path: session/channel registry, `_mptcp_open`, `_mptcp_attach`, attach-proof и server-side secondary-channel attach; этот phase-2 control path уже подтверждён Linux-to-Linux live open/attach между lab `192.168.1.19` и второй VM `192.168.1.25` с alias IP `192.168.1.50/51`;
 - payload data-plane, scheduler/reassembly и remote-live multi-IP distribution ещё не реализованы, поэтому `multipath.*` пока всё ещё нельзя использовать как рабочий продуктовый режим.
 
 ### 3.2. Минимальные правила для H2 outbound

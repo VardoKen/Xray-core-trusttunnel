@@ -160,6 +160,7 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - phase 1 больше не является только планом: `config.proto` / `config.pb.go`, JSON binding и validator уже содержат `multipath.*` surface и fail-fast guardrails;
 - `proxy/trusttunnel/multipath_session.go` уже даёт не только `MultipathSession`, `MultipathChannel` и server-side registry skeleton, но и attach-secret, attach-deadline, replay-guard и channel-limit validation;
 - `proxy/trusttunnel/multipath_control.go` и `proxy/trusttunnel/multipath_server.go` уже реализуют `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation и server-side secondary-channel attach;
+- phase 2 больше не считается только локально-зелёным control-path: bundle `/opt/lab/xray-tt/logs/multipath-phase2-live-20260410-194957` уже подтверждает Linux-to-Linux H2/TLS `_mptcp_open` на `192.168.1.50:9443` и `_mptcp_attach` на `192.168.1.51:9443` с `200/200` и server markers на второй VM `192.168.1.25`;
 - client-side multipath payload path пока deliberately fail-fast режется marker'ом `trusttunnel multipath payload traffic is not implemented yet: control path exists but framed data path is still missing`, поэтому data-plane multipath path всё ещё не начат.
 
 Что дальше:
@@ -170,7 +171,7 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 
 ## 5. Порядок выполнения
 
-1. для ветки `feat/trusttunnel-multipath` идти по `docs/current/multipath-transport-plan.md`: после уже закрытых phase 1 (`config/validator + session model skeleton`) и phase 2 (`_mptcp_open` / `_mptcp_attach` control path) переходить к framed TCP data path → scheduler/recovery → remote-live validation
+1. для ветки `feat/trusttunnel-multipath` идти по `docs/current/multipath-transport-plan.md`: после уже закрытых phase 1 (`config/validator + session model skeleton`) и phase 2 (`_mptcp_open` / `_mptcp_attach` control path с Linux-to-Linux live validation) переходить к framed TCP data path → scheduler/recovery → remote-live multi-IP data validation
 2. держать `streamSettings`-нормализацию синхронной с upstream generic TLS / REALITY / outbound plumbing
 3. держать compatibility matrix и validator синхронными с новыми integration-комбинациями
 4. добирать dedicated inbound / generic TLS coverage только при появлении новых product-level требований

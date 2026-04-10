@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — подтверждённые проверки и границы тестирования
 
 Статус: current
-Дата фиксации: 2026-04-09
-Коммит состояния: `507ff073`
+Дата фиксации: 2026-04-10
+Коммит состояния: `d2249887`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -167,7 +167,7 @@
 ### 1.3. Multipath phase 1-2: config / validator / control path
 
 Подтверждено на 2026-04-10:
-- multipath phase 1 и phase 2 control-path уже существуют в локальном worktree;
+- multipath phase 1 и phase 2 control-path уже существуют не только в локальном worktree, но и в Linux-to-Linux live retest между `192.168.1.19` и `192.168.1.25`;
 - validated scope по-прежнему deliberately ограничен config model, validator, session/control path и explicit fail-fast без payload data-path.
 
 Кодовые точки:
@@ -192,6 +192,20 @@
   - `multipath.maxChannels < multipath.minChannels`;
 - runtime layer уже содержит `MultipathSession`, `MultipathChannel`, server-side session registry, attach-secret, attach-deadline, replay-guard и channel-limit validation;
 - server-side H2 control path уже реализует `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation и secondary channel attach;
+- live preflight был таким:
+  - local code state: `d2249887`;
+  - lab repo HEAD: `c1f3508f6286e78bb4535e6c256476c39aaa4102`, clean worktree;
+  - lab repo path: `/opt/lab/xray-tt/src/xray-core-trusttunnel`;
+  - lab binary path: `/opt/lab/xray-tt/tmp/xray-tt-multipath-phase2-live`;
+  - secondary VM runtime binary path: `/root/tt-multipath/xray-tt-multipath-phase2-live`;
+  - secondary VM config path: `/root/tt-multipath/server.json`;
+  - cert/key path: `/root/tt-multipath/server.crt`, `/root/tt-multipath/server.key`;
+  - authoritative lab bundle: `/opt/lab/xray-tt/logs/multipath-phase2-live-20260410-194957`;
+- Linux-to-Linux live control-path дополнительно подтверждает:
+  - вторая VM `192.168.1.25` слушает `:9443` на `192.168.1.50` и `192.168.1.51`;
+  - `_mptcp_open` на `192.168.1.50:9443` возвращает `200` и headers `X-TrustTunnel-Multipath-Session-Id`, `X-TrustTunnel-Multipath-Attach-Secret`, `X-TrustTunnel-Multipath-Primary-Channel-Id=1`;
+  - `_mptcp_attach` на `192.168.1.51:9443` возвращает `200` и тот же `session_id`;
+  - server error log на `192.168.1.25` содержит `trusttunnel H2 multipath open accepted for tcp:example.com:443` и `trusttunnel H2 multipath attach accepted for tcp:example.com:443`;
 - H1 и H3 pseudo-host path для multipath честно режутся как unsupported;
 - current client runtime пока deliberately fail-fast режет `multipath.enabled=true` marker'ом `trusttunnel multipath payload traffic is not implemented yet: control path exists but framed data path is still missing`;
 - current verdict deliberately ограничен phase 2 control path: framed payload layer, scheduler/reassembly и multi-IP traffic distribution ещё не реализованы.
@@ -203,7 +217,7 @@
   - `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main`
 
 Практический вывод:
-- phase 1 и phase 2 control path уже закрывают config/validator/session/control задачу;
+- phase 1 и phase 2 control path уже закрывают config/validator/session/control задачу и больше не висят как только локально-зелёный verdict;
 - следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, а framed TCP payload layer и multipath client runtime поверх уже существующего control path.
 
 ### 1.4. Client-Side antiDPI runtime

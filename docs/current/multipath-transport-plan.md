@@ -351,6 +351,7 @@ Validator первой фазы должен fail-fast резать:
 
 Статус на 2026-04-10:
 - done для server-side control path без payload data-plane
+- Linux-to-Linux H2/TLS live control validation уже подтверждена через bundle `/opt/lab/xray-tt/logs/multipath-phase2-live-20260410-194957`: `_mptcp_open` проходит на `192.168.1.50:9443`, `_mptcp_attach` проходит на `192.168.1.51:9443`, обе операции дают `200`, а server log на `192.168.1.25` фиксирует open/attach markers
 
 Сделать:
 - `_mptcp_open`;
@@ -364,6 +365,7 @@ Validator первой фазы должен fail-fast резать:
 - server-side H2 control path создаёт multipath session через `_mptcp_open` и принимает secondary attach через `_mptcp_attach`;
 - attach защищён `session_id + attach proof + nonce + timestamp`, а replay / duplicate channel / max-channels режутся явно;
 - H1 и H3 pseudo-host path не пытаются притворяться поддержанными;
+- real H2/TLS open/attach уже подтверждён между двумя Linux VM на разных alias IP одного сервера;
 - client runtime честно fail-fast режет `multipath.enabled=true`, пока framed payload layer ещё не существует.
 
 ### Фаза 3. TCP multipath frame layer
@@ -561,8 +563,7 @@ Multipath должен быть:
 
 ## 11. Ближайшие шаги
 
-1. Добавить `multipath.*` в config model и validator.
-2. Ввести server/client session registry и channel objects.
-3. Спроектировать `_mptcp_open` / `_mptcp_attach`.
-4. Сделать минимальный framed TCP data path для двух channels.
-5. Поднять первый remote-live стенд с двумя IP и доказать одновременную передачу по обоим IP.
+1. Сохранить phase-2 control-path как уже закрытый и live-подтверждённый базовый слой.
+2. Сделать минимальный framed TCP data path для двух channels.
+3. Добавить client-side scheduler/reassembly поверх уже существующего `_mptcp_open` / `_mptcp_attach`.
+4. Поднять первый remote-live стенд с multi-IP payload data-plane и доказать одновременную передачу по обоим IP.
