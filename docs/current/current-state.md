@@ -1,9 +1,9 @@
 # TrustTunnel / Xray-Core — текущее состояние проекта
 
 Статус: current
-Дата фиксации: 2026-04-09
+Дата фиксации: 2026-04-10
 Коммит состояния: `507ff073`
-Ветка: `feat/trusttunnel-integration`
+Ветка: `feat/trusttunnel-multipath`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
 
@@ -47,6 +47,8 @@ TrustTunnel в текущем дереве подтверждённо наход
 - server-side inbound/outbound/user traffic counters и `onlineMap` sanity-check;
 - полный `testing/scenarios` проходит как локально, так и на Debian lab; compile-only sweep `GOFLAGS=-buildvcs=false go test -run '^$' ./...` проходит по всему дереву, а текущие full-tree ограничения остаются только внешними для `app/dns` QUIC probe и asset-зависимыми для `geoip.dat`, а не branch-регрессиями TrustTunnel;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
+
+На ветке `feat/trusttunnel-multipath` открыта новая experimental-R&D линия TrustTunnel Multipath Transport, но она пока не изменила это подтверждённое runtime-состояние. На текущем этапе зафиксирован только подробный план и guardrails для multipath-внедрения: `docs/current/multipath-transport-plan.md`.
 
 ## 2. Что закрыто на текущем состоянии
 

@@ -1,7 +1,7 @@
 # TrustTunnel / Xray-Core — roadmap
 
 Статус: current
-Дата фиксации: 2026-04-09
+Дата фиксации: 2026-04-10
 База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path, outbound clientRandom, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, client-side `postQuantumGroupEnabled`, `hasIpv6` domain-target guard, `antiDpi` runtime для `HTTP/2 over TLS` и `HTTP/2 over REALITY`, config-build validator, common outbound/inbound Xray integration scenarios, dynamic user management, `transport=auto` / H3→H2 fallback и clean-head live traffic matrix
 Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom, `_icmp` protocol/runtime surface, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, common outbound integration coverage, inbound `sniffing + routeOnly`, `_icmp` routing/policy/stats plumbing и dynamic user management
 Не использовать для: фиксации уже закрытых багов и исторической хронологии
@@ -14,6 +14,7 @@
 1. не переоткрывать уже закрытый H2 production path по REALITY без новых доказательств;
 2. довести TrustTunnel до корректной интеграции с общими механизмами Xray-Core;
 3. не переоткрывать H3 + REALITY как “просто ещё один parity-gap”: current R&D уже упёрся в stop-factor текущего Xray transport layer.
+4. для новой R&D-ветки `feat/trusttunnel-multipath` multipath transport вести как отдельный experimental block; канонический план зафиксирован в `docs/current/multipath-transport-plan.md`.
 
 Уже закрытые integration-блоки не возвращаются в roadmap без новых доказательств:
 - common outbound features `sendThrough`, `proxySettings`, `mux`, `targetStrategy`;
@@ -144,9 +145,22 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - ближайший следующий выбор архитектуры — нужен ли ещё один уровень endpoint-health / endpoint-selection модели поверх уже готовых fallback / delayed race / cooldown / active probe / resolved-address expansion, например более близкое к original relay/address-selection поведение;
 - не смешивать этот блок с уже закрытыми H2/H3 transport gaps, `_icmp`, REALITY, validator или generic Xray integration.
 
+### 3.6. Experimental multipath transport
+
+Новая ветка `feat/trusttunnel-multipath` открыта под отдельный R&D-блок TrustTunnel Multipath Transport.
+
+Ключевые правила для этого блока:
+- не считать multipath “ещё одним endpoint-policy patch'ем”;
+- не пытаться внедрить его сразу в H2/H3/UDP/REALITY;
+- начать с `HTTP/2 over TLS` и explicit session/channel/frame layer;
+- не трактовать literal-требование “сервер отвечает со случайного IP” как реализуемое для одного TCP-сокета;
+- обязательно подтверждать multi-IP data distribution remote-live прогонами, а не только unit/scenario checks.
+
+Полный поэтапный план, guardrails и точки интеграции зафиксированы в `docs/current/multipath-transport-plan.md`.
+
 ## 5. Порядок выполнения
 
-1. добить следующий этап multi-endpoint outbound policy: определить, нужен ли ещё один original-style endpoint-health / selection слой поверх уже готовых `servers[]` fallback, delayed race, cooldown, active probing и resolved-address expansion
+1. для ветки `feat/trusttunnel-multipath` идти по `docs/current/multipath-transport-plan.md`: config/validator → session model → `_mptcp_open` / `_mptcp_attach` → framed TCP data path → scheduler/recovery → remote-live validation
 2. держать `streamSettings`-нормализацию синхронной с upstream generic TLS / REALITY / outbound plumbing
 3. держать compatibility matrix и validator синхронными с новыми integration-комбинациями
 4. добирать dedicated inbound / generic TLS coverage только при появлении новых product-level требований
