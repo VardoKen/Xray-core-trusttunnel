@@ -1,7 +1,7 @@
 # TrustTunnel / Xray-Core — подтверждённые проверки и границы тестирования
 
 Статус: current
-Дата фиксации: 2026-04-13
+Дата фиксации: 2026-04-14
 Коммит состояния: `c1932ca6`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
@@ -166,10 +166,11 @@
 
 ### 1.3. Multipath phase 1-6: config / validator / control path / payload runtime / quorum hardening / recovery-rejoin / outer-layer quorum-loss surfacing
 
-Подтверждено на 2026-04-13:
+Подтверждено на 2026-04-14:
 - multipath phase 1, phase 2, phase 3, phase 4, phase 5 и phase 6 уже существуют не только в локальном worktree, но и в Linux live retest на второй VM `192.168.1.25`;
 - validated scope уже включает config model, validator, session/control path, H2/TLS payload data-path, dynamic channel set, bounded reorder backpressure, strict channel-quorum semantics, recovery/rejoin после реального channel-loss и peer-visible outer-layer quorum-loss marker;
-- следующей открытой фазой остаётся уже не quorum-loss surfacing, а external multi-IP validation вне этой локальной Linux VM.
+- локальная multi-host валидация теперь закрыта и для IPv6: один client source address может одновременно держать несколько TCP-каналов к нескольким server destination IPv6 внутри одной session-level модели;
+- следующей открытой фазой остаётся уже не quorum-loss surfacing и не локальная IPv4/IPv6 VM-валидация, а external multi-IP validation вне этой локальной Linux VM.
 
 Кодовые точки:
 - `proxy/trusttunnel/config.proto`
@@ -216,6 +217,16 @@
   - authoritative negative bundle: `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-204116`;
   - authoritative rejoin bundle: `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749`;
   - live topology: server слушает `:9443` на alias IP `192.168.1.50` и `192.168.1.51`, а client запускается внутри Linux netns `ttmpc` с address `10.200.0.2`;
+- отдельный host-to-host IPv6 preflight был таким:
+  - lab host: `192.168.1.19`, runtime workspace `/opt/lab/xray-tt`, runtime binary `/opt/lab/xray-tt/tmp/xray-tt-multipath-linux-phase6`;
+  - server host: `192.168.1.25`, runtime workspace `/root/tt-multipath-ipv6`, runtime binary `/root/tt-multipath-phase3/xray-tt-multipath-linux-phase6`;
+  - client config path: `/opt/lab/xray-tt/multipath-ipv6/client.json`;
+  - server config path: `/root/tt-multipath-ipv6/server.json`;
+  - client source address: `fd42:5940:deef::19/64`;
+  - server destination addresses: `fd42:5940:deef::50/64`, `fd42:5940:deef::51/64`;
+  - authoritative IPv6 positive bundle: `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-positive-20260414-002036` и `/root/tt-multipath-ipv6/logs/multipath-ipv6-positive-20260414-002024`;
+  - authoritative IPv6 negative bundle: `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-gap-20260414-002600` и `/root/tt-multipath-ipv6/logs/multipath-ipv6-gap-20260414-002549`;
+  - authoritative IPv6 rejoin bundle: `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-002736` и `/root/tt-multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-002725`;
 - Linux positive live payload run дополнительно подтверждает:
   - `_mptcp_open` на `192.168.1.50:9443` возвращает `200` и server log фиксирует `trusttunnel H2 multipath open accepted for tcp:127.0.0.1:18080`;
   - `_mptcp_attach` на `192.168.1.51:9443` возвращает `200` и server log фиксирует `trusttunnel H2 multipath attach accepted for tcp:127.0.0.1:18080`;
@@ -239,9 +250,31 @@
   - server log фиксирует `trusttunnel multipath quorum degraded ... got=1 want=2`, затем `trusttunnel multipath quorum restored ... channels=2`, а rejoined attach проходит как `channel=3`;
   - client log фиксирует `trusttunnel multipath rejoined endpoint 192.168.1.51:9443 ... channel=3`;
   - прежний server-side failure marker `trusttunnel multipath server session dispatch ended ... context canceled` больше не воспроизводится;
+- host-to-host IPv6 positive run дополнительно подтверждает:
+  - staged-download через client bundle `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-positive-20260414-002036` завершается с `curl.exitcode = 0`;
+  - `download.expected.sha256` и `download.actual.sha256` совпадают как `79cf58c41ad3d94d7b41c668dfb378899d2cc70b6a28736122c1331626476731`;
+  - `ss-9543.txt` на lab фиксирует два established канала от одного client source address `fd42:5940:deef::19` к `fd42:5940:deef::50:9543` и `fd42:5940:deef::51:9543`;
+  - server log фиксирует `trusttunnel H2 multipath open accepted` и `trusttunnel H2 multipath attach accepted` для той же logical session;
+- host-to-host IPv6 negative run дополнительно подтверждает:
+  - `curl.exitcode = 18` и `curl.stderr.log` содержит `end of response with 8388608 bytes missing`;
+  - `client-markers.txt` и `client-error.log` фиксируют `trusttunnel multipath quorum degraded`, затем `trusttunnel multipath quorum grace expired` и outer-layer marker `trusttunnel connection ends > proxy/trusttunnel: trusttunnel multipath channel quorum lost`;
+  - `server-error.log` на VM `192.168.1.25` фиксирует тот же quorum-loss marker для server-side dispatch;
+- host-to-host IPv6 rejoin-run дополнительно подтверждает:
+  - `curl.exitcode = 0`, а `download.expected.sha256` и `download.actual.sha256` снова совпадают;
+  - `client-markers.txt` фиксирует `trusttunnel multipath quorum restored` и `trusttunnel multipath rejoined endpoint [fd42:5940:deef::51]:9543 ... channel=3`;
+  - `ss-after-rejoin.txt` на server side снова показывает два established канала на `fd42:5940:deef::50:9543` и `fd42:5940:deef::51:9543`;
+- host-to-host IPv6 `4-of-4` positive run дополнительно подтверждает:
+  - client config `/opt/lab/xray-tt/multipath-ipv6/client4.json` поднимает один client source address `fd42:5940:deef::19` сразу на четыре server destination IPv6 `fd42:5940:deef::50/51/52/53`;
+  - client bundle `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-positive-20260414-004247` завершается с `curl.exitcode = 0`, а `download.expected.sha256` и `download.actual.sha256` снова совпадают;
+  - `ss-9543.txt` на lab фиксирует одновременно четыре established канала к `::50`, `::51`, `::52`, `::53`;
+  - server log в `/root/tt-multipath-ipv6/server-error.log` фиксирует attach `channel=2`, `channel=3`, `channel=4`;
+- host-to-host IPv6 `4-of-4` recovery/rejoin-run дополнительно подтверждает:
+  - client bundle `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-004428` завершается с `curl.exitcode = 0`, а `download.expected.sha256` и `download.actual.sha256` совпадают;
+  - `client-markers.txt` фиксирует `trusttunnel multipath quorum degraded ... got=3 want=4`, затем `trusttunnel multipath quorum restored ... channels=4` и `trusttunnel multipath rejoined endpoint [fd42:5940:deef::53]:9543 ... channel=5`;
+  - `ss-after-rejoin.txt` на server side снова показывает четыре активных канала после восстановления quorum;
 - H1 и H3 pseudo-host path для multipath честно режутся как unsupported;
 - current verdict уже не ограничен control-only phase 2 или initial payload-only phase 3: multi-IP traffic distribution, strict quorum semantics, reorder-window hardening, recovery/rejoin и outer-layer quorum-loss surfacing реально присутствуют в коде и подтверждены тестами;
-- открытым остаётся только external multi-IP validation.
+- открытым остаётся только public/external multi-IP validation за пределами локальной пары VM.
 
 Подтверждённые команды:
 - локально:
@@ -258,7 +291,7 @@
 
 Практический вывод:
 - phase 1, phase 2, phase 3, phase 4, phase 5 и phase 6 уже закрывают config/validator/session/control, payload/runtime verdict, quorum-hardening, recovery/rejoin и outer-layer quorum-loss surfacing для `HTTP/2 over TLS`;
-- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, не первый framed payload path, не recovery/rejoin и не quorum-loss surfacing, а более жёсткая external multi-IP validation.
+- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, не первый framed payload path, не recovery/rejoin, не quorum-loss surfacing и не локальная IPv6 VM-валидация, а более жёсткая external multi-IP validation.
 
 ### 1.4. Client-Side antiDPI runtime
 

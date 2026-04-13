@@ -1,7 +1,7 @@
 # TrustTunnel / Xray-Core — roadmap
 
 Статус: current
-Дата фиксации: 2026-04-13
+Дата фиксации: 2026-04-14
 База roadmap: состояние проекта после закрытия `_icmp` protocol/runtime gap, H2/H3 official `_icmp` interop, product-level Linux TUN path, auth semantics на pseudo-host path, outbound clientRandom, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, client-side `postQuantumGroupEnabled`, `hasIpv6` domain-target guard, `antiDpi` runtime для `HTTP/2 over TLS` и `HTTP/2 over REALITY`, config-build validator, common outbound/inbound Xray integration scenarios, dynamic user management, `transport=auto` / H3→H2 fallback и clean-head live traffic matrix
 Область истины: только открытые задачи после закрытия H3 rules, ложного `H3_NO_ERROR`, legacy H3-path, H2 `_check`, auth semantics на pseudo-host path, outbound clientRandom, `_icmp` protocol/runtime surface, полного UDP interop matrix, auth/stats sanity-check, observable timeout surface, common outbound integration coverage, inbound `sniffing + routeOnly`, `_icmp` routing/policy/stats plumbing и dynamic user management
 Не использовать для: фиксации уже закрытых багов и исторической хронологии
@@ -165,9 +165,11 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - phase 4 scheduler/quorum hardening уже закрыт: `proxy/trusttunnel/multipath_session.go` и `proxy/trusttunnel/multipath_frame.go` держат dynamic channel set, per-channel accounting, bounded reorder backpressure и explicit strict quorum-loss semantics, а negative bundle `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-204116` подтверждает реальный channel-loss path через `nft reject with tcp reset` на одном alias IP.
 - phase 5 recovery/rejoin уже закрыт: bundle `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749` подтверждает quorum restore после channel-loss, успешный rejoin `channel=3`, повторные `ESTAB` каналы на `192.168.1.50/51` и отсутствие прежнего server-side collapse в `unknown session` / `context canceled`.
 - phase 6 outer-layer quorum-loss surfacing уже закрыт: negative rerun `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-204116` вместе с client `/root/tt-multipath-phase3/client-error.log` и server `/root/tt-multipath-phase3/server-error.log` подтверждает peer-visible marker `trusttunnel connection ends > proxy/trusttunnel: trusttunnel multipath channel quorum lost`.
+- локальная multi-host IPv6 validation тоже уже закрыта: client bundles `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-positive-20260414-002036`, `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-gap-20260414-002600`, `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-002736` и server bundles `/root/tt-multipath-ipv6/logs/multipath-ipv6-positive-20260414-002024`, `/root/tt-multipath-ipv6/logs/multipath-ipv6-gap-20260414-002549`, `/root/tt-multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-002725` подтверждают ту же strict-model семантику на двух реальных Linux host при одном client source address `fd42:5940:deef::19` и двух server destination IPv6 `fd42:5940:deef::50/51`.
+- локальная IPv6 validation больше не ограничена `2-of-2`: client bundle `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-positive-20260414-004247` и rejoin bundle `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-004428` вместе с server bundle `/root/tt-multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-004416` подтверждают `4-of-4` и восстановление `3/4 -> 4/4` на destination IPv6 `fd42:5940:deef::50/51/52/53`.
 
 Что дальше:
-- следующий кодовый шаг уже не `multipath.*` model, не control-path, не первый payload path, не recovery/rejoin и не outer-layer quorum-loss surfacing, а более жёсткая external multi-IP live validation;
+- следующий кодовый шаг уже не `multipath.*` model, не control-path, не первый payload path, не recovery/rejoin, не outer-layer quorum-loss surfacing и не локальная IPv6 VM-валидация, а более жёсткая public/external multi-IP live validation;
 - до закрытия этой фазы не заявлять multipath как стабильный продуктовый runtime-path.
 
 Полный поэтапный план, guardrails и точки интеграции зафиксированы в `docs/current/multipath-transport-plan.md`.
