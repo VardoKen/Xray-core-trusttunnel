@@ -403,15 +403,28 @@ Validator первой фазы должен fail-fast резать:
 
 ### Фаза 5. Recovery
 
-Сделать:
-- reopen channels через existing endpoint policy;
-- active probe для rejoin;
-- graceful drain broken channels;
-- optional rebalance после возврата endpoint.
+Статус на 2026-04-13:
+- reopen channels через existing endpoint policy уже реализован;
+- active probe / rejoin path уже реализован поверх существующего channel lifecycle;
+- graceful drain broken channels уже реализован через session-side channel failure handling;
+- server-side multipath session больше не коллапсирует от потери attach-канала: runtime отвязан от request-scoped context через `context.WithoutCancel(...)`;
+- reassembler больше не срабатывает по idle-timeout без реального reorder-gap;
+- attach-deadline watcher после первого quorum ориентируется на `session.Ready()`, а не на текущий `Active()` state;
+- peer channel-loss может быть surfaced control-frame `channel_closed`;
+- authoritative live bundle `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749` подтверждает `quorum degraded -> quorum restored`, rejoin `channel=3`, повторные `ESTAB` каналы и совпадающий SHA-256 `download.bin`.
+
+Что ещё осталось внутри фазы 5:
+- если понадобится, расширить recovery telemetry до более явных peer-visible counters;
+- не допустить регресса обратно в `unknown session` / `context canceled` при потере secondary channel;
+- не подменять rejoin hidden single-path fallback'ом: strict quorum по-прежнему должен оставаться обязательным.
 
 Критерий готовности:
 - multipath session переживает потерю одного канала без silent collapse в single-path, если можно быстро восстановить channel quorum;
 - иначе session закрывается по strict policy с явным downstream-observable verdict.
+
+Текущий verdict:
+- фазу 5 считать закрытой для локальной Linux multi-IP лаборатории;
+- внешняя multi-host validation остаётся отдельной следующей фазой.
 
 ### Фаза 6. Live validation для TCP
 

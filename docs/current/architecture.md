@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-13
-Коммит состояния: `8a889b69`
+Коммит состояния: `69ea1a44`
 Ветка: `feat/trusttunnel-multipath`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -165,7 +165,7 @@
 - UDP CONNECT на official authority `_udp2`; server-side reserved-host matcher сохраняет backward-compat на `_udp2` и legacy `_udp2:0`
 - ICMP CONNECT на `_icmp:0` для H2 и H3
 - common outbound features `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4` проходят через тот же generic Xray outbound layer и не требуют TrustTunnel-specific routing surface
-- experimental `multipath.*` config surface уже существует вместе с `_mptcp_open` / `_mptcp_attach` control path и H2/TLS framed payload runtime; current phase-4 code уже держит dynamic channel snapshot, per-channel accounting, bounded reorder backpressure и explicit strict quorum-loss semantics, а live-positive bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248` подтверждает working multi-IP payload path на второй VM `192.168.1.25` с alias IP `192.168.1.50/51`; recovery/rejoin и external multi-IP validation ещё остаются открытыми фазами
+- experimental `multipath.*` config surface уже существует вместе с `_mptcp_open` / `_mptcp_attach` control path, H2/TLS framed payload runtime и phase-5 recovery/rejoin path; current code уже держит dynamic channel snapshot, per-channel accounting, bounded reorder backpressure, explicit strict quorum-loss semantics, peer `channel_closed` control-frame и detached session runtime через `context.WithoutCancel(...)`, а live-positive bundles `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248` и `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749` подтверждают working multi-IP payload path и rejoin после channel-loss на второй VM `192.168.1.25` с alias IP `192.168.1.50/51`; explicit outer-layer quorum-loss marker в negative bundle и external multi-IP validation ещё остаются открытыми фазами
 
 ### 4.3. Поля outbound, реально участвующие в runtime
 
@@ -184,10 +184,11 @@ Experimental multipath surface:
 - `Multipath`
 
 Практическая граница:
-- `multipath.*` на текущем этапе уже является phase-4 experimental runtime surface: config/validator, session registry, `_mptcp_open`, `_mptcp_attach`, attach-proof, client/server framed payload layer, server-side payload dispatch после channel quorum, dynamic writer retry по surviving channels и explicit strict quorum-loss error уже существуют;
+- `multipath.*` на текущем этапе уже является phase-5 experimental runtime surface: config/validator, session registry, `_mptcp_open`, `_mptcp_attach`, attach-proof, client/server framed payload layer, server-side payload dispatch после channel quorum, dynamic writer retry по surviving channels, explicit strict quorum-loss error и recovery/rejoin уже существуют;
 - positive live bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248` подтверждает real H2/TLS payload path на разных IP (`192.168.1.50` / `192.168.1.51`) внутри одной multipath session с целыми download/upload hash;
 - negative live bundle `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-092142` подтверждает реальный channel-loss path через `nft reject with tcp reset` на одном alias IP, но явный outer-layer quorum-loss marker в live bundle пока не surfaced;
-- recovery/rejoin и external multi-IP validation ещё не закрыты.
+- positive live rejoin bundle `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749` подтверждает восстановление quorum и успешный rejoin без `unknown session` / `context canceled`;
+- external multi-IP validation ещё не закрыта.
 
 ### 4.3.1. Generic TLS surface на поддержанном H2/TLS path
 

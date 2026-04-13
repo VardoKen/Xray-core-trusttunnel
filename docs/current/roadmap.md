@@ -163,16 +163,17 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - phase 2 больше не считается только локально-зелёным control-path: bundle `/opt/lab/xray-tt/logs/multipath-phase2-live-20260410-194957` уже подтверждает Linux-to-Linux H2/TLS `_mptcp_open` на `192.168.1.50:9443` и `_mptcp_attach` на `192.168.1.51:9443` с `200/200` и server markers на второй VM `192.168.1.25`;
 - phase 3 initial payload/runtime уже не является только первым data-plane verdict: свежий positive bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248` на `192.168.1.25` повторно подтверждает `4 MiB` download/upload с одновременными TCP channels на `192.168.1.50` и `192.168.1.51`;
 - phase 4 scheduler/quorum hardening уже начат и частично закрыт: `proxy/trusttunnel/multipath_session.go` и `proxy/trusttunnel/multipath_frame.go` теперь держат dynamic channel set, per-channel accounting, bounded reorder backpressure и explicit strict quorum-loss semantics, а negative bundle `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-092142` подтверждает реальный channel-loss path через `nft reject with tcp reset` на одном alias IP.
+- phase 5 recovery/rejoin уже закрыт: bundle `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749` подтверждает quorum restore после channel-loss, успешный rejoin `channel=3`, повторные `ESTAB` каналы на `192.168.1.50/51` и отсутствие прежнего server-side collapse в `unknown session` / `context canceled`.
 
 Что дальше:
-- следующий кодовый шаг уже не `multipath.*` model, не control-path и не первый payload path, а recovery/rejoin, более явный outer-layer/runtime marker для strict quorum-loss и более жёсткая external multi-IP live validation;
+- следующий кодовый шаг уже не `multipath.*` model, не control-path, не первый payload path и не recovery/rejoin, а более явный outer-layer/runtime marker для strict quorum-loss и более жёсткая external multi-IP live validation;
 - до закрытия этих фаз не заявлять multipath как стабильный продуктовый runtime-path.
 
 Полный поэтапный план, guardrails и точки интеграции зафиксированы в `docs/current/multipath-transport-plan.md`.
 
 ## 5. Порядок выполнения
 
-1. для ветки `feat/trusttunnel-multipath` идти по `docs/current/multipath-transport-plan.md`: после уже закрытых phase 1 (`config/validator + session model skeleton`), phase 2 (`_mptcp_open` / `_mptcp_attach` control path), phase 3 (`framed TCP payload path с first live multi-IP validation`) и частично закрытой phase 4 (`scheduler/quorum hardening`) переходить к recovery/rejoin → outer-layer quorum-loss surfacing → multi-host / external multi-IP validation
+1. для ветки `feat/trusttunnel-multipath` идти по `docs/current/multipath-transport-plan.md`: после уже закрытых phase 1 (`config/validator + session model skeleton`), phase 2 (`_mptcp_open` / `_mptcp_attach` control path), phase 3 (`framed TCP payload path с first live multi-IP validation`), phase 4 (`scheduler/quorum hardening`) и phase 5 (`recovery/rejoin`) переходить к outer-layer quorum-loss surfacing → multi-host / external multi-IP validation
 2. держать `streamSettings`-нормализацию синхронной с upstream generic TLS / REALITY / outbound plumbing
 3. держать compatibility matrix и validator синхронными с новыми integration-комбинациями
 4. добирать dedicated inbound / generic TLS coverage только при появлении новых product-level требований

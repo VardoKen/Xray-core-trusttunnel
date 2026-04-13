@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-13
-Коммит состояния: `8a889b69`
+Коммит состояния: `69ea1a44`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -216,15 +216,16 @@
 Подтверждённо активная runtime-функция:
 - `clientRandom` для H2 и H3 outbound
 
-Experimental phase-3 surface:
+Experimental phase-5 surface:
 - `multipath.*`
 
 Практическая граница:
 - `multipath.*` уже существует в config model и validator и больше не ограничивается одним skeleton-only verdict;
-- текущая фаза уже включает `HTTP/2 over TLS` payload path: session/channel registry, `_mptcp_open`, `_mptcp_attach`, attach-proof, server-side quorum wait, framed payload layer, dynamic writer retry по surviving channels, bounded reorder backpressure и explicit strict quorum-loss semantics;
+- текущая фаза уже включает `HTTP/2 over TLS` payload path: session/channel registry, `_mptcp_open`, `_mptcp_attach`, attach-proof, server-side quorum wait, framed payload layer, dynamic writer retry по surviving channels, bounded reorder backpressure, explicit strict quorum-loss semantics и recovery/rejoin;
 - authoritative positive Linux multi-IP live payload run на второй VM `192.168.1.25` подтверждён через bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248` с `4 MiB` download/upload и одновременными TCP connections на `192.168.1.50` и `192.168.1.51`;
 - separate negative live run через bundle `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-092142` уже подтверждает channel-loss path по `nft reject with tcp reset` на одном alias IP, но явный outer-layer marker `trusttunnel multipath channel quorum lost` в live bundle пока ещё не surfaced;
-- recovery/rejoin и отдельная external multi-IP validation между разными host ещё не закрыты, поэтому `multipath.*` всё ещё остаётся experimental R&D surface, а не продуктовым режимом.
+- separate live rejoin run через bundle `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749` подтверждает восстановление quorum после channel-loss, повторное наличие двух `ESTAB` каналов и целостный `download.bin` hash;
+- отдельная external multi-IP validation между разными host и более явный outer-layer quorum-loss marker всё ещё не закрыты, поэтому `multipath.*` всё ещё остаётся experimental R&D surface, а не продуктовым режимом.
 
 ### 3.2. Минимальные правила для H2 outbound
 
