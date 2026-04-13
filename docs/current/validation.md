@@ -164,11 +164,11 @@
 - первый resolved адрес `127.0.0.2:9443` действительно отбрасывается как failed endpoint, а downstream probe через SOCKS `127.0.0.1:18093` всё равно даёт `{"ip":"37.252.0.130"}`;
 - remote bundle `tcpdump.txt` фиксирует трафик на `37.252.0.130:9443`, то есть fallback идёт именно на второй resolved remote IP, а не на synthetic local bypass.
 
-### 1.3. Multipath phase 1-2: config / validator / control path
+### 1.3. Multipath phase 1-3: config / validator / control path / initial payload runtime
 
-Подтверждено на 2026-04-10:
-- multipath phase 1 и phase 2 control-path уже существуют не только в локальном worktree, но и в Linux-to-Linux live retest между `192.168.1.19` и `192.168.1.25`;
-- validated scope по-прежнему deliberately ограничен config model, validator, session/control path и explicit fail-fast без payload data-path.
+Подтверждено на 2026-04-13:
+- multipath phase 1, phase 2 и initial phase 3 уже существуют не только в локальном worktree, но и в Linux live payload retest на второй VM `192.168.1.25`;
+- validated scope уже включает config model, validator, session/control path и initial H2/TLS payload data-path, но ещё не закрывает strict channel-quorum enforcement и recovery/rejoin.
 
 Кодовые точки:
 - `proxy/trusttunnel/config.proto`
@@ -178,8 +178,12 @@
 - `proxy/trusttunnel/multipath_control.go`
 - `proxy/trusttunnel/multipath_session.go`
 - `proxy/trusttunnel/multipath_server.go`
+- `proxy/trusttunnel/multipath_server_runtime.go`
+- `proxy/trusttunnel/multipath_client.go`
+- `proxy/trusttunnel/multipath_frame.go`
 - `proxy/trusttunnel/server.go`
 - `proxy/trusttunnel/client.go`
+- `proxy/trusttunnel/stream_settings_compat.go`
 
 Что именно подтверждено:
 - protobuf/config model уже содержит `MultipathScheduler` и `MultipathConfig`, а outbound JSON binding принимает `multipath.*`;
@@ -190,35 +194,45 @@
   - отсутствие multi-endpoint pool;
   - `multipath.minChannels < 2`;
   - `multipath.maxChannels < multipath.minChannels`;
-- runtime layer уже содержит `MultipathSession`, `MultipathChannel`, server-side session registry, attach-secret, attach-deadline, replay-guard и channel-limit validation;
-- server-side H2 control path уже реализует `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation и secondary channel attach;
+- runtime layer уже содержит `MultipathSession`, `MultipathChannel`, server-side session registry, attach-secret, attach-deadline, replay-guard, channel-limit validation, ready/close lifecycle, reorder window и gap-timeout;
+- server-side H2 path уже реализует `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation, secondary channel attach, payload dispatch после channel quorum и session teardown;
+- client/runtime layer уже реализует initial payload data-plane: framed stream, round-robin write distribution и reorder/reassembly на read-path;
 - live preflight был таким:
-  - local code state: `d2249887`;
-  - lab repo HEAD: `c1f3508f6286e78bb4535e6c256476c39aaa4102`, clean worktree;
-  - lab repo path: `/opt/lab/xray-tt/src/xray-core-trusttunnel`;
-  - lab binary path: `/opt/lab/xray-tt/tmp/xray-tt-multipath-phase2-live`;
-  - secondary VM runtime binary path: `/root/tt-multipath/xray-tt-multipath-phase2-live`;
-  - secondary VM config path: `/root/tt-multipath/server.json`;
-  - cert/key path: `/root/tt-multipath/server.crt`, `/root/tt-multipath/server.key`;
-  - authoritative lab bundle: `/opt/lab/xray-tt/logs/multipath-phase2-live-20260410-194957`;
-- Linux-to-Linux live control-path дополнительно подтверждает:
-  - вторая VM `192.168.1.25` слушает `:9443` на `192.168.1.50` и `192.168.1.51`;
-  - `_mptcp_open` на `192.168.1.50:9443` возвращает `200` и headers `X-TrustTunnel-Multipath-Session-Id`, `X-TrustTunnel-Multipath-Attach-Secret`, `X-TrustTunnel-Multipath-Primary-Channel-Id=1`;
-  - `_mptcp_attach` на `192.168.1.51:9443` возвращает `200` и тот же `session_id`;
-  - server error log на `192.168.1.25` содержит `trusttunnel H2 multipath open accepted for tcp:example.com:443` и `trusttunnel H2 multipath attach accepted for tcp:example.com:443`;
+  - local code state: `e971e8c1`;
+  - local worktree: clean после code-commit;
+  - local build path: `C:\Users\Vardo\GPTProject\xray-core-trusttunnel\tmp\xray-tt-multipath-linux`;
+  - runtime host: вторая VM `192.168.1.25`, `root`, Debian 13;
+  - runtime workspace: `/root/tt-multipath-phase3`;
+  - runtime binary path: `/root/tt-multipath-phase3/xray-tt-20260413a`;
+  - runtime config path: `/root/tt-multipath-phase3/server.json`, `/root/tt-multipath-phase3/client.json`;
+  - cert/key path: `/root/tt-multipath-phase3/server.crt`, `/root/tt-multipath-phase3/server.key`;
+  - authoritative bundle: `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-083616`;
+  - live topology: server слушает `:9443` на alias IP `192.168.1.50` и `192.168.1.51`, а client запускается внутри Linux netns `ttmpc` с address `10.200.0.2`;
+- Linux live payload run дополнительно подтверждает:
+  - `_mptcp_open` на `192.168.1.50:9443` возвращает `200` и server log фиксирует `trusttunnel H2 multipath open accepted for tcp:127.0.0.1:18080`;
+  - `_mptcp_attach` на `192.168.1.51:9443` возвращает `200` и server log фиксирует `trusttunnel H2 multipath attach accepted for tcp:127.0.0.1:18080`;
+  - `4 MiB` download через SOCKS → TrustTunnel multipath → local HTTP app даёт совпадающий SHA-256 `d3bc57b716f8caf3b4d1a113f58f4cca5d26dec9b151490aeb363e8aa2dd3c88`;
+  - `4 MiB` upload даёт совпадающий SHA-256 `dacfbb7180d3ede7c9016d73da04d2d036dc2bbad986e0528bf96b3c41ff799b`;
+  - `ss-9443.txt` внутри bundle фиксирует одновременные established TCP connections на `192.168.1.50:9443` и `192.168.1.51:9443` от `10.200.0.2` для download и upload session;
+  - server после quorum реально делает downstream dispatch к `127.0.0.1:18080`, а не остаётся на control-path;
 - H1 и H3 pseudo-host path для multipath честно режутся как unsupported;
-- current client runtime пока deliberately fail-fast режет `multipath.enabled=true` marker'ом `trusttunnel multipath payload traffic is not implemented yet: control path exists but framed data path is still missing`;
-- current verdict deliberately ограничен phase 2 control path: framed payload layer, scheduler/reassembly и multi-IP traffic distribution ещё не реализованы.
+- current verdict уже не ограничен control-only phase 2: client fail-fast marker удалён, а initial framed payload layer и multi-IP traffic distribution реально подтверждены;
+- current verdict всё ещё deliberately не включает strict enforcement при падении active channels ниже `minChannels`, recovery/rejoin и separate-host/external multi-IP validation.
 
 Подтверждённые команды:
 - локально:
-  - `go test ./proxy/trusttunnel -run 'Multipath|ProcessRejectsMultipathPayload|ProcessHTTP1RejectsMultipathPseudoHosts' -count=1`
+  - `go test ./proxy/trusttunnel -run 'TLSCompatibility|Multipath' -count=1`
   - `go test ./proxy/trusttunnel/... ./transport/internet/tcp ./app/proxyman/inbound -count=1`
+  - `go test ./testing/scenarios -run 'TestTrustTunnel' -count=1 -timeout 90m -v`
+  - `$env:GOFLAGS='-buildvcs=false'; go test -run '^$' ./...`
   - `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main`
+  - `$env:GOOS='linux'; $env:GOARCH='amd64'; go build -buildvcs=false -o ./tmp/xray-tt-multipath-linux ./main`
+- live:
+  - `XRAY_BIN=/root/tt-multipath-phase3/xray-tt-20260413a bash /root/tt-multipath-phase3/live.sh`
 
 Практический вывод:
-- phase 1 и phase 2 control path уже закрывают config/validator/session/control задачу и больше не висят как только локально-зелёный verdict;
-- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, а framed TCP payload layer и multipath client runtime поверх уже существующего control path.
+- phase 1, phase 2 и initial phase 3 уже закрывают config/validator/session/control и первый payload/runtime verdict для `HTTP/2 over TLS`;
+- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach` и не первый framed payload path, а scheduler/strict enforcement, recovery/rejoin и более жёсткая live validation между разными Linux host.
 
 ### 1.4. Client-Side antiDPI runtime
 

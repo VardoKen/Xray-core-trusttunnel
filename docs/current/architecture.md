@@ -165,7 +165,7 @@
 - UDP CONNECT на official authority `_udp2`; server-side reserved-host matcher сохраняет backward-compat на `_udp2` и legacy `_udp2:0`
 - ICMP CONNECT на `_icmp:0` для H2 и H3
 - common outbound features `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4` проходят через тот же generic Xray outbound layer и не требуют TrustTunnel-specific routing surface
-- experimental `multipath.*` config surface уже существует вместе с `_mptcp_open` / `_mptcp_attach` control path, причём этот control path уже подтверждён Linux-to-Linux H2/TLS live open/attach между `192.168.1.19` и `192.168.1.25`; при этом payload data-plane он пока всё ещё не меняет и working multipath path не образует
+- experimental `multipath.*` config surface уже существует вместе с `_mptcp_open` / `_mptcp_attach` control path и initial framed payload runtime; initial Linux multi-IP live validation уже подтверждает working H2/TLS payload path на второй VM `192.168.1.25` с alias IP `192.168.1.50/51`, но strict enforcement / recovery / separate-host validation ещё остаются открытыми фазами
 
 ### 4.3. Поля outbound, реально участвующие в runtime
 
@@ -184,8 +184,9 @@ Experimental multipath surface:
 - `Multipath`
 
 Практическая граница:
-- `multipath.*` на текущем этапе уже является phase-2 control surface: config/validator, session registry, `_mptcp_open`, `_mptcp_attach`, attach-proof и server-side channel attach существуют, а live bundle `/opt/lab/xray-tt/logs/multipath-phase2-live-20260410-194957` дополнительно подтверждает real H2/TLS open/attach на разных IP (`192.168.1.50` / `192.168.1.51`) внутри одной multipath session;
-- client-side payload path пока deliberately fail-fast режется, потому что framed multipath data layer, scheduler/reassembly и реальное multi-channel traffic distribution ещё не существуют в working runtime.
+- `multipath.*` на текущем этапе уже является phase-3 experimental runtime surface: config/validator, session registry, `_mptcp_open`, `_mptcp_attach`, attach-proof, client/server framed payload layer и server-side payload dispatch после channel quorum существуют;
+- initial live bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-083616` подтверждает real H2/TLS payload path на разных IP (`192.168.1.50` / `192.168.1.51`) внутри одной multipath session с целыми download/upload hash;
+- round-robin scheduler baseline и reorder/reassembly уже есть, но strict enforcement при потере quorum, recovery/rejoin и separate-host validation ещё не закрыты.
 
 ### 4.3.1. Generic TLS surface на поддержанном H2/TLS path
 

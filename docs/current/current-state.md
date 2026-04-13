@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — текущее состояние проекта
 
 Статус: current
-Дата фиксации: 2026-04-10
-Коммит состояния: `d2249887`
+Дата фиксации: 2026-04-13
+Коммит состояния: `e971e8c1`
 Ветка: `feat/trusttunnel-multipath`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -48,13 +48,14 @@ TrustTunnel в текущем дереве подтверждённо наход
 - полный `testing/scenarios` проходит как локально, так и на Debian lab; compile-only sweep `GOFLAGS=-buildvcs=false go test -run '^$' ./...` проходит по всему дереву, а текущие full-tree ограничения остаются только внешними для `app/dns` QUIC probe и asset-зависимыми для `geoip.dat`, а не branch-регрессиями TrustTunnel;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
 
-На ветке `feat/trusttunnel-multipath` открыта новая experimental-R&D линия TrustTunnel Multipath Transport. На текущем этапе она всё ещё не изменила это подтверждённое runtime-состояние stable TrustTunnel path, но уже вышла из phase 1 в phase 2 control-path implementation:
+На ветке `feat/trusttunnel-multipath` открыта новая experimental-R&D линия TrustTunnel Multipath Transport. На текущем этапе она всё ещё не изменила это подтверждённое runtime-состояние stable TrustTunnel path, но уже вышла из phase 2 control-only в phase 3 initial payload/runtime implementation:
 - `proxy/trusttunnel/config.proto`, `infra/conf/trusttunnel.go` и `infra/conf/trusttunnel_lint.go` уже дают experimental `multipath.*` config surface и fail-fast guardrails для phase-1 scope: только `HTTP/2 over TLS`, без `transport=auto/http3`, без `udp=true`, с обязательным multi-endpoint pool и с проверкой `minChannels/maxChannels`;
-- `proxy/trusttunnel/multipath_session.go` уже содержит не только `MultipathSession` / `MultipathChannel` и server-side registry skeleton, но и attach-secret, attach-deadline, replay-guard и channel-limit validation;
-- `proxy/trusttunnel/multipath_control.go` и `proxy/trusttunnel/multipath_server.go` уже реализуют `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation и secondary channel attach на server-side control path;
-- phase 2 больше не ограничен только локальными unit/scenario verdict: Linux-to-Linux live control-path уже подтверждён bundle `/opt/lab/xray-tt/logs/multipath-phase2-live-20260410-194957`, где `_mptcp_open` проходит на `192.168.1.50:9443`, `_mptcp_attach` проходит на `192.168.1.51:9443`, обе операции возвращают `200`, а server log на `192.168.1.25` содержит `trusttunnel H2 multipath open accepted` и `trusttunnel H2 multipath attach accepted`;
-- H1 и H3 pseudo-host path для multipath сейчас честно режутся как unsupported, а client-side runtime пока fail-fast отклоняет `multipath.enabled=true` marker'ом `trusttunnel multipath payload traffic is not implemented yet: control path exists but framed data path is still missing`;
-- framed payload layer, scheduler/reassembly data path и remote-live multi-IP traffic distribution пока ещё не реализованы и не подтверждены.
+- `proxy/trusttunnel/multipath_session.go` уже содержит не только `MultipathSession` / `MultipathChannel`, attach-secret, attach-deadline, replay-guard и channel-limit validation, но и ready/close lifecycle, live stream handles, reorder window и gap-timeout для framed payload layer;
+- `proxy/trusttunnel/multipath_control.go`, `proxy/trusttunnel/multipath_server.go` и `proxy/trusttunnel/multipath_server_runtime.go` уже реализуют `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation, secondary channel attach, server-side quorum wait и payload dispatch после готовности session;
+- `proxy/trusttunnel/multipath_client.go` и `proxy/trusttunnel/multipath_frame.go` уже дают initial H2/TLS payload runtime: client открывает primary + secondary channel, framed stream режет payload на чанки, round-robin распределяет write-path по каналам и reassembles out-of-order frames на read-path;
+- initial Linux multi-IP live payload validation уже подтверждена на второй VM `192.168.1.25` через bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-083616`: `_mptcp_open` проходит на `192.168.1.50:9443`, `_mptcp_attach` проходит на `192.168.1.51:9443`, `4 MiB` download и `4 MiB` upload дают совпадающие SHA-256, а `ss-9443.txt` фиксирует одновременные established TCP connections на обоих alias IP внутри одной logical session;
+- H1 и H3 pseudo-host path для multipath по-прежнему честно режутся как unsupported;
+- следующими открытыми фазами остаются scheduler/strict-enforcement при потере channel quorum, recovery/rejoin и отдельная remote-live validation между разными Linux host, а не только внутри одной VM с netns-клиентом.
 
 ## 2. Что закрыто на текущем состоянии
 

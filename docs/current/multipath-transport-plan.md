@@ -370,12 +370,10 @@ Validator первой фазы должен fail-fast резать:
 
 ### Фаза 3. TCP multipath frame layer
 
-Сделать:
-- framed payload format;
-- chunking;
-- sequence numbering;
-- reorder buffer;
-- reverse-direction framing.
+Статус на 2026-04-13:
+- initial phase-3 payload/runtime уже реализован для `HTTP/2 over TLS`
+- `proxy/trusttunnel/multipath_frame.go`, `proxy/trusttunnel/multipath_client.go` и `proxy/trusttunnel/multipath_server_runtime.go` уже дают framed payload format, chunking, sequence numbering, reverse-direction framing и базовый reorder/reassembly
+- live bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-083616` уже подтверждает `4 MiB` download/upload с совпадающими hash и одновременными TCP channels на `192.168.1.50` / `192.168.1.51`
 
 Критерий готовности:
 - один downstream TCP stream реально проходит через несколько outer TCP channels;
@@ -384,8 +382,11 @@ Validator первой фазы должен fail-fast резать:
 
 ### Фаза 4. Scheduler и strict enforcement
 
+Статус на 2026-04-13:
+- baseline round-robin scheduler уже существует и используется в initial payload runtime
+- не закрыты fairness counters, per-channel backpressure и strict policy при падении active channels ниже `minChannels`
+
 Сделать:
-- round-robin scheduler как baseline;
 - fairness counters;
 - per-channel backpressure;
 - strict policy при падении количества active channels ниже `minChannels`.
