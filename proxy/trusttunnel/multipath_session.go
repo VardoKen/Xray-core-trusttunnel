@@ -429,6 +429,10 @@ func (s *trustTunnelMultipathSession) Updates() <-chan struct{} {
 }
 
 func (s *trustTunnelMultipathSession) Close(err error) {
+	s.close(err, true)
+}
+
+func (s *trustTunnelMultipathSession) close(err error, notifyPeer bool) {
 	if s == nil {
 		return
 	}
@@ -444,6 +448,10 @@ func (s *trustTunnelMultipathSession) Close(err error) {
 		}
 		s.notifyUpdatedLocked()
 		s.mu.Unlock()
+
+		if notifyPeer && isTrustTunnelMultipathQuorumLostError(err) {
+			trustTunnelWriteMultipathSessionClosingBestEffort(channels, trustTunnelMultipathControlCloseReasonQuorumLost)
+		}
 
 		for _, channel := range channels {
 			if channel == nil || channel.stream == nil {
@@ -620,6 +628,22 @@ func newTrustTunnelMultipathQuorumLostError(remaining int, minChannels uint32, c
 		return errors.New(trustTunnelMultipathChannelQuorumLostText, ": got ", remaining, ", want ", minChannels).AtWarning()
 	}
 	return errors.New(trustTunnelMultipathChannelQuorumLostText, ": got ", remaining, ", want ", minChannels).Base(cause).AtWarning()
+}
+
+func isTrustTunnelMultipathQuorumLostError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), trustTunnelMultipathChannelQuorumLostText)
+}
+
+func trustTunnelWriteMultipathSessionClosingBestEffort(channels []*trustTunnelMultipathChannel, reason uint8) {
+	frame := trustTunnelMultipathSessionClosingControlFrame(reason)
+	for _, channel := range channels {
+		if channel == nil || channel.stream == nil || channel.closing {
+			continue
+		}
+		if err := channel.writeControlFrame(frame, trustTunnelMultipathControlWriteTimeout); err != nil {
+			errors.LogDebug(context.Background(), "trusttunnel multipath session-close control write failed for channel=", channel.id, ": ", err)
+		}
+	}
 }
 
 func (c *trustTunnelMultipathChannel) noteRead(payloadLen int) {

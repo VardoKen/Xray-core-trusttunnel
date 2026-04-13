@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -531,11 +532,15 @@ func TestTrustTunnelMultipathControlChannelClosedDegradesPeerSession(t *testing.
 	payload[0] = trustTunnelMultipathControlChannelClosed
 	binary.BigEndian.PutUint32(payload[1:5], 1)
 
-	if err := stream.handleControlFrame(&trustTunnelMultipathFrame{
+	stop, err := stream.handleControlFrame(&trustTunnelMultipathFrame{
 		Flags:   trustTunnelMultipathFrameFlagControl,
 		Payload: payload,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("handleControlFrame() error: %v", err)
+	}
+	if stop {
+		t.Fatal("handleControlFrame() stop = true, want false")
 	}
 
 	if got := session.ActiveChannelCount(); got != 1 {
@@ -543,6 +548,93 @@ func TestTrustTunnelMultipathControlChannelClosedDegradesPeerSession(t *testing.
 	}
 	if got := session.State(); got != trustTunnelMultipathSessionDegraded {
 		t.Fatalf("State() = %v, want %v", got, trustTunnelMultipathSessionDegraded)
+	}
+}
+
+func TestTrustTunnelMultipathSessionCloseNotifiesPeerOnQuorumLoss(t *testing.T) {
+	stream1 := &recordingMultipathStream{}
+	stream2 := &recordingMultipathStream{}
+	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:          "sess-notify-close",
+		Target:      xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:  "1.1.1.1:443",
+		MinChannels: 2,
+		MaxChannels: 2,
+		Strict:      true,
+	})
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443", stream: stream1}); err != nil {
+		t.Fatalf("AddChannel(channel1) error: %v", err)
+	}
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443", stream: stream2}); err != nil {
+		t.Fatalf("AddChannel(channel2) error: %v", err)
+	}
+
+	session.Close(newTrustTunnelMultipathQuorumLostError(1, 2, io.EOF))
+
+	frame1, err := trustTunnelReadMultipathFrame(bytes.NewReader(stream1.Bytes()))
+	if err != nil {
+		t.Fatalf("trustTunnelReadMultipathFrame(channel1) error: %v", err)
+	}
+	frame2, err := trustTunnelReadMultipathFrame(bytes.NewReader(stream2.Bytes()))
+	if err != nil {
+		t.Fatalf("trustTunnelReadMultipathFrame(channel2) error: %v", err)
+	}
+
+	for i, frame := range []*trustTunnelMultipathFrame{frame1, frame2} {
+		if frame.Flags&trustTunnelMultipathFrameFlagControl == 0 {
+			t.Fatalf("frame%d is not control", i+1)
+		}
+		if len(frame.Payload) != 2 {
+			t.Fatalf("frame%d payload len = %d, want 2", i+1, len(frame.Payload))
+		}
+		if frame.Payload[0] != trustTunnelMultipathControlSessionClosing {
+			t.Fatalf("frame%d control type = %d, want %d", i+1, frame.Payload[0], trustTunnelMultipathControlSessionClosing)
+		}
+		if frame.Payload[1] != trustTunnelMultipathControlCloseReasonQuorumLost {
+			t.Fatalf("frame%d close reason = %d, want %d", i+1, frame.Payload[1], trustTunnelMultipathControlCloseReasonQuorumLost)
+		}
+	}
+}
+
+func TestTrustTunnelMultipathControlSessionClosingSurfacesPeerMarker(t *testing.T) {
+	channel1Client, channel1Server := net.Pipe()
+	channel2Client, channel2Server := net.Pipe()
+	defer channel1Server.Close()
+	defer channel2Server.Close()
+
+	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:            "sess-peer-close",
+		Target:        xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:    "1.1.1.1:443",
+		MinChannels:   2,
+		MaxChannels:   2,
+		Strict:        true,
+		AttachTimeout: 500 * time.Millisecond,
+	})
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443", stream: channel1Client}); err != nil {
+		t.Fatalf("AddChannel(channel1) error: %v", err)
+	}
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443", stream: channel2Client}); err != nil {
+		t.Fatalf("AddChannel(channel2) error: %v", err)
+	}
+
+	stream, err := newTrustTunnelMultipathStream(session)
+	if err != nil {
+		t.Fatalf("newTrustTunnelMultipathStream() error: %v", err)
+	}
+	defer stream.Close()
+
+	go func() {
+		_ = trustTunnelWriteMultipathFrame(channel1Server, trustTunnelMultipathSessionClosingControlFrame(trustTunnelMultipathControlCloseReasonQuorumLost))
+	}()
+
+	buf := make([]byte, 32)
+	_, err = stream.Read(buf)
+	if err == nil || !strings.Contains(err.Error(), trustTunnelMultipathChannelQuorumLostText) {
+		t.Fatalf("stream.Read() error = %v, want %q", err, trustTunnelMultipathChannelQuorumLostText)
+	}
+	if !session.IsClosed() {
+		t.Fatal("session.IsClosed() = false, want true")
 	}
 }
 
@@ -568,4 +660,34 @@ func (r reassemblerReader) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 	return r.reassembler.Read(p)
+}
+
+type recordingMultipathStream struct {
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	closed bool
+}
+
+func (r *recordingMultipathStream) Read([]byte) (int, error) { return 0, io.EOF }
+
+func (r *recordingMultipathStream) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return 0, io.ErrClosedPipe
+	}
+	return r.buf.Write(p)
+}
+
+func (r *recordingMultipathStream) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed = true
+	return nil
+}
+
+func (r *recordingMultipathStream) Bytes() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]byte(nil), r.buf.Bytes()...)
 }
