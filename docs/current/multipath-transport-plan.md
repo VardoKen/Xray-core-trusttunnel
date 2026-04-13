@@ -1,7 +1,7 @@
 # TrustTunnel Multipath Transport — план R&D
 
-Статус: draft R&D plan  
-Дата фиксации: 2026-04-10  
+Статус: draft R&D plan
+Дата фиксации: 2026-04-13
 Ветка: `feat/trusttunnel-multipath`  
 Область истины: план новой экспериментальной линии разработки, а не описание уже подтверждённого runtime  
 Не использовать для: утверждений вида «multipath уже реализован» или «multipath уже interoperable»
@@ -383,18 +383,23 @@ Validator первой фазы должен fail-fast резать:
 ### Фаза 4. Scheduler и strict enforcement
 
 Статус на 2026-04-13:
-- baseline round-robin scheduler уже существует и используется в initial payload runtime
-- не закрыты fairness counters, per-channel backpressure и strict policy при падении active channels ниже `minChannels`
+- baseline round-robin scheduler уже существует и используется в payload runtime;
+- per-channel accounting counters уже добавлены в `MultipathChannel`;
+- writer уже работает по dynamic channel snapshot, выбрасывает failed channel из active set и продолжает на surviving channels, если strict quorum ещё соблюдён;
+- reorder path уже использует bounded backpressure вместо мгновенного `reorder window exceeded`, если missing gap ещё может закрыться;
+- strict policy при падении active channels ниже `minChannels` уже реализована в runtime и подтверждена unit/scenario тестами;
+- positive Linux live bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248` подтверждает, что после phase-4 hardening payload path остаётся рабочим;
+- negative Linux live bundle `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-092142` подтверждает реальный channel-loss path через `nft reject with tcp reset`, но явный outer-layer marker `trusttunnel multipath channel quorum lost` в live bundle пока ещё не surfaced.
 
 Сделать:
-- fairness counters;
-- per-channel backpressure;
-- strict policy при падении количества active channels ниже `minChannels`.
+- если понадобится, расширить fairness counters до scheduler-quality telemetry;
+- вынести explicit outer-layer/runtime marker для strict quorum-loss в live bundle, а не только в unit/scenario verdict;
+- не допустить регресса bounded backpressure обратно в мгновенный overflow-fail.
 
 Критерий готовности:
 - runtime не липнет к одному IP;
 - трафик действительно распределяется;
-- single-channel degeneration не проходит незамеченной.
+- single-channel degeneration не проходит незамеченной и даёт понятный runtime verdict.
 
 ### Фаза 5. Recovery
 
@@ -406,7 +411,7 @@ Validator первой фазы должен fail-fast резать:
 
 Критерий готовности:
 - multipath session переживает потерю одного канала без silent collapse в single-path, если можно быстро восстановить channel quorum;
-- иначе session закрывается по strict policy.
+- иначе session закрывается по strict policy с явным downstream-observable verdict.
 
 ### Фаза 6. Live validation для TCP
 
@@ -423,7 +428,8 @@ Validator первой фазы должен fail-fast резать:
 Критерий готовности:
 - подтверждённый real-traffic path lab → remote multipath endpoint → internet;
 - подтверждённое распределение трафика между IP;
-- отсутствие silent fallback в один IP.
+- отсутствие silent fallback в один IP;
+- положительный и отрицательный real-traffic verdict с понятными bundle markers.
 
 ### Фаза 7. `HTTP/2 over REALITY`
 

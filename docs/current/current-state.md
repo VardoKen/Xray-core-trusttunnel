@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-13
-Коммит состояния: `e971e8c1`
+Коммит состояния: `8a889b69`
 Ветка: `feat/trusttunnel-multipath`
 Область истины: фактическое состояние проекта после сессии, закрывшей H3 rules, ложный `H3_NO_ERROR` и legacy H3-path
 Не использовать для: исторической хронологии, описания старых тупиковых веток и промежуточных решений
@@ -48,14 +48,15 @@ TrustTunnel в текущем дереве подтверждённо наход
 - полный `testing/scenarios` проходит как локально, так и на Debian lab; compile-only sweep `GOFLAGS=-buildvcs=false go test -run '^$' ./...` проходит по всему дереву, а текущие full-tree ограничения остаются только внешними для `app/dns` QUIC probe и asset-зависимыми для `geoip.dat`, а не branch-регрессиями TrustTunnel;
 - базовая межоперабельность в направлениях official client → our server и our client → official endpoint.
 
-На ветке `feat/trusttunnel-multipath` открыта новая experimental-R&D линия TrustTunnel Multipath Transport. На текущем этапе она всё ещё не изменила это подтверждённое runtime-состояние stable TrustTunnel path, но уже вышла из phase 2 control-only в phase 3 initial payload/runtime implementation:
+На ветке `feat/trusttunnel-multipath` открыта новая experimental-R&D линия TrustTunnel Multipath Transport. На текущем этапе она всё ещё не изменила это подтверждённое runtime-состояние stable TrustTunnel path, но уже вышла из phase 3 initial payload/runtime в phase 4 scheduler/quorum hardening:
 - `proxy/trusttunnel/config.proto`, `infra/conf/trusttunnel.go` и `infra/conf/trusttunnel_lint.go` уже дают experimental `multipath.*` config surface и fail-fast guardrails для phase-1 scope: только `HTTP/2 over TLS`, без `transport=auto/http3`, без `udp=true`, с обязательным multi-endpoint pool и с проверкой `minChannels/maxChannels`;
-- `proxy/trusttunnel/multipath_session.go` уже содержит не только `MultipathSession` / `MultipathChannel`, attach-secret, attach-deadline, replay-guard и channel-limit validation, но и ready/close lifecycle, live stream handles, reorder window и gap-timeout для framed payload layer;
+- `proxy/trusttunnel/multipath_session.go` уже содержит не только `MultipathSession` / `MultipathChannel`, attach-secret, attach-deadline, replay-guard и channel-limit validation, но и ready/close lifecycle, live stream handles, reorder window, gap-timeout, per-channel accounting counters и explicit strict quorum-loss semantics;
 - `proxy/trusttunnel/multipath_control.go`, `proxy/trusttunnel/multipath_server.go` и `proxy/trusttunnel/multipath_server_runtime.go` уже реализуют `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation, secondary channel attach, server-side quorum wait и payload dispatch после готовности session;
-- `proxy/trusttunnel/multipath_client.go` и `proxy/trusttunnel/multipath_frame.go` уже дают initial H2/TLS payload runtime: client открывает primary + secondary channel, framed stream режет payload на чанки, round-robin распределяет write-path по каналам и reassembles out-of-order frames на read-path;
-- initial Linux multi-IP live payload validation уже подтверждена на второй VM `192.168.1.25` через bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-083616`: `_mptcp_open` проходит на `192.168.1.50:9443`, `_mptcp_attach` проходит на `192.168.1.51:9443`, `4 MiB` download и `4 MiB` upload дают совпадающие SHA-256, а `ss-9443.txt` фиксирует одновременные established TCP connections на обоих alias IP внутри одной logical session;
+- `proxy/trusttunnel/multipath_client.go` и `proxy/trusttunnel/multipath_frame.go` уже дают H2/TLS multipath payload runtime с dynamic channel set: writer переживает write-fail канала и продолжает на surviving channels, а reorder path вместо мгновенного overflow-fail использует bounded backpressure до закрытия gap или timeout;
+- authoritative Linux multi-IP positive live validation подтверждена на второй VM `192.168.1.25` через bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248`: `_mptcp_open` проходит на `192.168.1.50:9443`, `_mptcp_attach` проходит на `192.168.1.51:9443`, `4 MiB` download и `4 MiB` upload дают совпадающие SHA-256, а `ss-9443.txt` фиксирует одновременные established TCP connections на обоих alias IP внутри одной logical session;
+- separate negative Linux live validation через bundle `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-092142` уже подтверждает channel-loss path: второй VM хватает `nft reject with tcp reset` на server-side канале `192.168.1.51:9443`, downstream long download рвётся с `curl: (18) end of response ... missing`, но explicit outer-layer marker `trusttunnel multipath channel quorum lost` в live bundle пока ещё не surfaced и остаётся отдельным follow-up;
 - H1 и H3 pseudo-host path для multipath по-прежнему честно режутся как unsupported;
-- следующими открытыми фазами остаются scheduler/strict-enforcement при потере channel quorum, recovery/rejoin и отдельная remote-live validation между разными Linux host, а не только внутри одной VM с netns-клиентом.
+- следующими открытыми фазами остаются recovery/rejoin, более явный outer-layer/runtime marker для strict quorum-loss в live bundle и отдельная external multi-IP validation вне локальной Linux VM.
 
 ## 2. Что закрыто на текущем состоянии
 

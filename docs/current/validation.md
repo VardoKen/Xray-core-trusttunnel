@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — подтверждённые проверки и границы тестирования
 
 Статус: current
-Дата фиксации: 2026-04-10
-Коммит состояния: `d2249887`
+Дата фиксации: 2026-04-13
+Коммит состояния: `8a889b69`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -164,11 +164,12 @@
 - первый resolved адрес `127.0.0.2:9443` действительно отбрасывается как failed endpoint, а downstream probe через SOCKS `127.0.0.1:18093` всё равно даёт `{"ip":"37.252.0.130"}`;
 - remote bundle `tcpdump.txt` фиксирует трафик на `37.252.0.130:9443`, то есть fallback идёт именно на второй resolved remote IP, а не на synthetic local bypass.
 
-### 1.3. Multipath phase 1-3: config / validator / control path / initial payload runtime
+### 1.3. Multipath phase 1-4: config / validator / control path / payload runtime / quorum hardening
 
 Подтверждено на 2026-04-13:
-- multipath phase 1, phase 2 и initial phase 3 уже существуют не только в локальном worktree, но и в Linux live payload retest на второй VM `192.168.1.25`;
-- validated scope уже включает config model, validator, session/control path и initial H2/TLS payload data-path, но ещё не закрывает strict channel-quorum enforcement и recovery/rejoin.
+- multipath phase 1, phase 2, phase 3 и phase 4 уже существуют не только в локальном worktree, но и в Linux live retest на второй VM `192.168.1.25`;
+- validated scope уже включает config model, validator, session/control path, H2/TLS payload data-path, dynamic channel set, bounded reorder backpressure и strict channel-quorum semantics;
+- recovery/rejoin, explicit outer-layer quorum-loss marker в live bundle и external multi-IP validation всё ещё остаются открытыми фазами.
 
 Кодовые точки:
 - `proxy/trusttunnel/config.proto`
@@ -194,30 +195,37 @@
   - отсутствие multi-endpoint pool;
   - `multipath.minChannels < 2`;
   - `multipath.maxChannels < multipath.minChannels`;
-- runtime layer уже содержит `MultipathSession`, `MultipathChannel`, server-side session registry, attach-secret, attach-deadline, replay-guard, channel-limit validation, ready/close lifecycle, reorder window и gap-timeout;
+- runtime layer уже содержит `MultipathSession`, `MultipathChannel`, server-side session registry, attach-secret, attach-deadline, replay-guard, channel-limit validation, ready/close lifecycle, reorder window, gap-timeout, per-channel accounting counters и explicit strict quorum-loss semantics;
 - server-side H2 path уже реализует `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation, secondary channel attach, payload dispatch после channel quorum и session teardown;
-- client/runtime layer уже реализует initial payload data-plane: framed stream, round-robin write distribution и reorder/reassembly на read-path;
+- client/runtime layer уже реализует payload data-plane: framed stream, round-robin write distribution, writer retry по surviving channels, reorder/reassembly на read-path и bounded backpressure вместо мгновенного `reorder window exceeded`;
 - live preflight был таким:
-  - local code state: `e971e8c1`;
+  - local code state: `8a889b69`;
   - local worktree: clean после code-commit;
-  - local build path: `C:\Users\Vardo\GPTProject\xray-core-trusttunnel\tmp\xray-tt-multipath-linux`;
+  - local build path: `C:\Users\Vardo\GPTProject\xray-core-trusttunnel\tmp\xray-tt-multipath-linux-phase4`;
   - runtime host: вторая VM `192.168.1.25`, `root`, Debian 13;
   - runtime workspace: `/root/tt-multipath-phase3`;
-  - runtime binary path: `/root/tt-multipath-phase3/xray-tt-20260413a`;
+  - runtime binary path: `/root/tt-multipath-phase3/xray-tt-multipath-linux-phase4`;
   - runtime config path: `/root/tt-multipath-phase3/server.json`, `/root/tt-multipath-phase3/client.json`;
   - cert/key path: `/root/tt-multipath-phase3/server.crt`, `/root/tt-multipath-phase3/server.key`;
-  - authoritative bundle: `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-083616`;
+  - authoritative positive bundle: `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248`;
+  - authoritative negative bundle: `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-092142`;
   - live topology: server слушает `:9443` на alias IP `192.168.1.50` и `192.168.1.51`, а client запускается внутри Linux netns `ttmpc` с address `10.200.0.2`;
-- Linux live payload run дополнительно подтверждает:
+- Linux positive live payload run дополнительно подтверждает:
   - `_mptcp_open` на `192.168.1.50:9443` возвращает `200` и server log фиксирует `trusttunnel H2 multipath open accepted for tcp:127.0.0.1:18080`;
   - `_mptcp_attach` на `192.168.1.51:9443` возвращает `200` и server log фиксирует `trusttunnel H2 multipath attach accepted for tcp:127.0.0.1:18080`;
   - `4 MiB` download через SOCKS → TrustTunnel multipath → local HTTP app даёт совпадающий SHA-256 `d3bc57b716f8caf3b4d1a113f58f4cca5d26dec9b151490aeb363e8aa2dd3c88`;
-  - `4 MiB` upload даёт совпадающий SHA-256 `dacfbb7180d3ede7c9016d73da04d2d036dc2bbad986e0528bf96b3c41ff799b`;
+  - `4 MiB` upload даёт совпадающий SHA-256 `e150e00353f6c4cb2b887a603b815dd3f9d11477021d1ae93ee47f391a919267`;
   - `ss-9443.txt` внутри bundle фиксирует одновременные established TCP connections на `192.168.1.50:9443` и `192.168.1.51:9443` от `10.200.0.2` для download и upload session;
   - server после quorum реально делает downstream dispatch к `127.0.0.1:18080`, а не остаётся на control-path;
+- Linux negative live reset-run дополнительно подтверждает:
+  - harness на второй VM использует `nft reject with tcp reset`, потому что на этом Debian host отсутствует `iptables`;
+  - `drop.log` фиксирует `drop-mode=nft`;
+  - long-lived `64 MiB` download через SOCKS → TrustTunnel multipath → local HTTP app рвётся с `curl exitcode 18` и `end of response ... missing`;
+  - `download.headers` успевает зафиксировать `HTTP/1.0 200 OK` и полный `Content-Length: 67108864`, то есть session стартует корректно, а ломается уже после начала payload transfer;
+  - live bundle подтверждает реальный channel-loss path на одном alias IP, но explicit outer-layer marker `trusttunnel multipath channel quorum lost` в bundle logs пока ещё не surfaced;
 - H1 и H3 pseudo-host path для multipath честно режутся как unsupported;
-- current verdict уже не ограничен control-only phase 2: client fail-fast marker удалён, а initial framed payload layer и multi-IP traffic distribution реально подтверждены;
-- current verdict всё ещё deliberately не включает strict enforcement при падении active channels ниже `minChannels`, recovery/rejoin и separate-host/external multi-IP validation.
+- current verdict уже не ограничен control-only phase 2 или initial payload-only phase 3: multi-IP traffic distribution, strict quorum semantics и reorder-window hardening реально присутствуют в коде и подтверждены тестами;
+- current verdict всё ещё deliberately не включает recovery/rejoin, explicit outer-layer quorum-loss marker в live bundle и external multi-IP validation.
 
 Подтверждённые команды:
 - локально:
@@ -226,13 +234,14 @@
   - `go test ./testing/scenarios -run 'TestTrustTunnel' -count=1 -timeout 90m -v`
   - `$env:GOFLAGS='-buildvcs=false'; go test -run '^$' ./...`
   - `go build -buildvcs=false -o ./tmp/xray-tt-current.exe ./main`
-  - `$env:GOOS='linux'; $env:GOARCH='amd64'; go build -buildvcs=false -o ./tmp/xray-tt-multipath-linux ./main`
+  - `$env:GOOS='linux'; $env:GOARCH='amd64'; go build -buildvcs=false -o ./tmp/xray-tt-multipath-linux-phase4 ./main`
 - live:
-  - `XRAY_BIN=/root/tt-multipath-phase3/xray-tt-20260413a bash /root/tt-multipath-phase3/live.sh`
+  - `XRAY_BIN=/root/tt-multipath-phase3/xray-tt-multipath-linux-phase4 bash /root/tt-multipath-phase3/live.sh`
+  - `XRAY_BIN=/root/tt-multipath-phase3/xray-tt-multipath-linux-phase4 bash /root/tt-multipath-phase3/gap.sh`
 
 Практический вывод:
-- phase 1, phase 2 и initial phase 3 уже закрывают config/validator/session/control и первый payload/runtime verdict для `HTTP/2 over TLS`;
-- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach` и не первый framed payload path, а scheduler/strict enforcement, recovery/rejoin и более жёсткая live validation между разными Linux host.
+- phase 1, phase 2, phase 3 и phase 4 уже закрывают config/validator/session/control, payload/runtime verdict и базовый quorum-hardening для `HTTP/2 over TLS`;
+- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, не первый framed payload path и не первый strict-quorum patch, а recovery/rejoin, более явный outer-layer quorum-loss marker и более жёсткая external multi-IP validation.
 
 ### 1.4. Client-Side antiDPI runtime
 
