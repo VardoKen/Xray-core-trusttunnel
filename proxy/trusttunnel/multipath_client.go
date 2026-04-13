@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/xtls/xray-core/common/errors"
@@ -168,8 +169,112 @@ func (c *Client) processMultipathTCP(
 	}
 	defer stream.Close()
 
+	nextAttachChannelID := &atomic.Uint32{}
+	nextAttachChannelID.Store(nextChannelID)
+	go c.runMultipathRecoveryLoop(ctx, dialer, sessionState, targetHost, openResult.response.AttachSecret, nextAttachChannelID, tlsHandledByStreamSettings)
+
 	cleanupSession = false
 	return runTrustTunnelStreamTunnel(ctx, link, stream)
+}
+
+func (c *Client) runMultipathRecoveryLoop(
+	ctx context.Context,
+	dialer internet.Dialer,
+	sessionState *trustTunnelMultipathSession,
+	targetHost string,
+	attachSecret string,
+	nextChannelID *atomic.Uint32,
+	tlsHandledByStreamSettings bool,
+) {
+	if c == nil || sessionState == nil || nextChannelID == nil {
+		return
+	}
+
+	for {
+		if sessionState.IsClosed() {
+			return
+		}
+
+		if sessionState.ActiveChannelCount() < int(sessionState.MinChannels()) {
+			c.tryRestoreMultipathQuorum(ctx, dialer, sessionState, targetHost, attachSecret, nextChannelID, tlsHandledByStreamSettings)
+		}
+
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-sessionState.Closed():
+			timer.Stop()
+			return
+		case <-sessionState.Updates():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		case <-timer.C:
+		}
+	}
+}
+
+func (c *Client) tryRestoreMultipathQuorum(
+	ctx context.Context,
+	dialer internet.Dialer,
+	sessionState *trustTunnelMultipathSession,
+	targetHost string,
+	attachSecret string,
+	nextChannelID *atomic.Uint32,
+	tlsHandledByStreamSettings bool,
+) {
+	if c == nil || sessionState == nil || nextChannelID == nil {
+		return
+	}
+
+	activeEndpoints := make(map[string]struct{})
+	for _, channel := range sessionState.ChannelSnapshot() {
+		if channel == nil {
+			continue
+		}
+		activeEndpoints[channel.endpoint] = struct{}{}
+	}
+
+	for _, attempt := range c.uniqueMultipathAttempts(c.serverAttempts()) {
+		if sessionState.IsClosed() || sessionState.ActiveChannelCount() >= int(sessionState.MinChannels()) {
+			return
+		}
+		if attempt.server == nil {
+			continue
+		}
+
+		endpoint := attempt.server.Destination.NetAddr()
+		if _, exists := activeEndpoints[endpoint]; exists {
+			continue
+		}
+
+		channelID := nextChannelID.Add(1) - 1
+		conn, err := c.openMultipathSecondaryChannel(ctx, dialer, attempt, sessionState.ID(), attachSecret, channelID, targetHost, tlsHandledByStreamSettings)
+		if err != nil {
+			c.noteServerFailure(attempt.index)
+			errors.LogWarning(ctx, "trusttunnel multipath recovery attach failed for endpoint ", endpoint, ": ", err)
+			continue
+		}
+
+		if err := sessionState.AddChannel(&trustTunnelMultipathChannel{
+			id:       channelID,
+			endpoint: endpoint,
+			stream:   conn,
+		}); err != nil {
+			_ = conn.Close()
+			errors.LogWarning(ctx, "trusttunnel multipath recovery rejected endpoint ", endpoint, ": ", err)
+			continue
+		}
+
+		c.noteServerSuccess(attempt.index)
+		activeEndpoints[endpoint] = struct{}{}
+		errors.LogInfo(ctx, "trusttunnel multipath rejoined endpoint ", endpoint, " session=", sessionState.ID(), " channel=", channelID)
+	}
 }
 
 func (c *Client) uniqueMultipathAttempts(attempts []trustTunnelServerAttempt) []trustTunnelServerAttempt {

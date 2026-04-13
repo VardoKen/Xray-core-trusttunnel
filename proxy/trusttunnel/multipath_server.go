@@ -198,11 +198,11 @@ func (s *Server) serveMultipathAttachRequest(ctx context.Context, w http.Respons
 		fl.Flush()
 	}
 
-	sessionState.mu.Lock()
-	if channel := sessionState.channels[attachReq.ChannelID]; channel != nil {
-		channel.stream = newTrustTunnelMultipathHTTP2Stream(w, req.Body)
+	if err := sessionState.SetChannelStream(attachReq.ChannelID, newTrustTunnelMultipathHTTP2Stream(w, req.Body)); err != nil {
+		writeH2Response(w, http.StatusInternalServerError, "failed to finalize multipath attach\n", nil)
+		errors.LogWarningInner(ctx, err, "failed to finalize trusttunnel multipath attach stream")
+		return
 	}
-	sessionState.mu.Unlock()
 
 	s.maybeStartMultipathServerSession(ctx, sessionState, dispatcher)
 	s.waitForMultipathSession(ctx, sessionState)

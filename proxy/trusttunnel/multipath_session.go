@@ -1,6 +1,7 @@
 package trusttunnel
 
 import (
+	"context"
 	"crypto/hmac"
 	"io"
 	"sort"
@@ -47,6 +48,7 @@ type trustTunnelMultipathSession struct {
 	strict         bool
 	attachSecret   []byte
 	attachDeadline time.Time
+	rejoinGrace    time.Duration
 
 	mu         sync.RWMutex
 	state      trustTunnelMultipathSessionState
@@ -54,12 +56,14 @@ type trustTunnelMultipathSession struct {
 	usedNonces map[string]time.Time
 	readyCh    chan struct{}
 	closedCh   chan struct{}
+	updatesCh  chan struct{}
 	closeErr   error
 	startOnce  sync.Once
 	closeOnce  sync.Once
 
-	reorderWindow int
-	gapTimeout    time.Duration
+	quorumLossGeneration uint64
+	reorderWindow        int
+	gapTimeout           time.Duration
 }
 
 type trustTunnelMultipathChannel struct {
@@ -136,6 +140,8 @@ func newTrustTunnelMultipathSession(options trustTunnelMultipathSessionOptions) 
 		usedNonces:     make(map[string]time.Time),
 		readyCh:        make(chan struct{}),
 		closedCh:       make(chan struct{}),
+		updatesCh:      make(chan struct{}, 1),
+		rejoinGrace:    attachTimeout,
 		reorderWindow:  reorderWindow,
 		gapTimeout:     gapTimeout,
 	}
@@ -179,6 +185,7 @@ func (s *trustTunnelMultipathSession) addChannelLocked(channel *trustTunnelMulti
 	if channel == nil {
 		return nil
 	}
+	prevState := s.state
 	if channel.id == 0 {
 		return errors.New("trusttunnel multipath channel id is invalid").AtInfo()
 	}
@@ -196,9 +203,18 @@ func (s *trustTunnelMultipathSession) addChannelLocked(channel *trustTunnelMulti
 	s.channels[channel.id] = channel
 	if uint32(len(s.channels)) >= s.minChannels {
 		s.state = trustTunnelMultipathSessionActive
+		s.quorumLossGeneration++
 		s.markReadyLocked()
 	} else {
-		s.state = trustTunnelMultipathSessionOpening
+		if s.readyReachedLocked() {
+			s.state = trustTunnelMultipathSessionDegraded
+		} else {
+			s.state = trustTunnelMultipathSessionOpening
+		}
+	}
+	s.notifyUpdatedLocked()
+	if prevState == trustTunnelMultipathSessionDegraded && s.state == trustTunnelMultipathSessionActive {
+		errors.LogInfo(context.Background(), "trusttunnel multipath quorum restored session=", s.id, " channels=", len(s.channels))
 	}
 	return nil
 }
@@ -211,12 +227,18 @@ func (s *trustTunnelMultipathSession) RemoveChannel(channelID uint32) {
 	defer s.mu.Unlock()
 	delete(s.channels, channelID)
 	if len(s.channels) == 0 {
-		s.state = trustTunnelMultipathSessionOpening
+		if s.readyReachedLocked() {
+			s.state = trustTunnelMultipathSessionDegraded
+		} else {
+			s.state = trustTunnelMultipathSessionOpening
+		}
+		s.notifyUpdatedLocked()
 		return
 	}
 	if uint32(len(s.channels)) < s.minChannels {
 		s.state = trustTunnelMultipathSessionDegraded
 	}
+	s.notifyUpdatedLocked()
 }
 
 func (s *trustTunnelMultipathSession) HandleChannelFailure(channelID uint32, cause error) error {
@@ -228,8 +250,13 @@ func (s *trustTunnelMultipathSession) HandleChannelFailure(channelID uint32, cau
 	var remaining int
 	var minChannels uint32
 	var strict bool
+	var startGrace bool
+	var grace time.Duration
+	var generation uint64
+	var sessionWasReady bool
 
 	s.mu.Lock()
+	sessionWasReady = s.readyReachedLocked()
 	channel = s.channels[channelID]
 	if channel != nil {
 		delete(s.channels, channelID)
@@ -240,23 +267,36 @@ func (s *trustTunnelMultipathSession) HandleChannelFailure(channelID uint32, cau
 	strict = s.strict
 	switch {
 	case remaining == 0:
-		s.state = trustTunnelMultipathSessionOpening
+		if sessionWasReady {
+			s.state = trustTunnelMultipathSessionDegraded
+		} else {
+			s.state = trustTunnelMultipathSessionOpening
+		}
 	case uint32(remaining) < s.minChannels:
-		s.state = trustTunnelMultipathSessionDegraded
+		if sessionWasReady {
+			s.state = trustTunnelMultipathSessionDegraded
+			if strict {
+				s.quorumLossGeneration++
+				generation = s.quorumLossGeneration
+				startGrace = true
+				grace = s.rejoinGrace
+			}
+		} else {
+			s.state = trustTunnelMultipathSessionOpening
+		}
 	default:
 		s.state = trustTunnelMultipathSessionActive
 	}
+	s.notifyUpdatedLocked()
 	s.mu.Unlock()
 
 	if channel != nil && channel.stream != nil {
 		_ = channel.stream.Close()
 	}
 
-	if strict && uint32(remaining) < minChannels {
-		if cause == nil {
-			return errors.New(trustTunnelMultipathChannelQuorumLostText, ": got ", remaining, ", want ", minChannels).AtWarning()
-		}
-		return errors.New(trustTunnelMultipathChannelQuorumLostText, ": got ", remaining, ", want ", minChannels).Base(cause).AtWarning()
+	if startGrace {
+		errors.LogWarning(context.Background(), "trusttunnel multipath quorum degraded session=", s.id, " got=", remaining, " want=", minChannels, "; waiting ", grace)
+		s.startQuorumLossGrace(generation, cause)
 	}
 
 	return nil
@@ -291,7 +331,7 @@ func (s *trustTunnelMultipathSession) AttachChannel(request *trustTunnelMultipat
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.attachDeadline.IsZero() && now.After(s.attachDeadline) {
+	if !s.attachDeadline.IsZero() && now.After(s.attachDeadline) && !s.readyReachedLocked() {
 		return errors.New(trustTunnelMultipathAttachExpiredText).AtInfo()
 	}
 	if request.Timestamp.Before(now.Add(-trustTunnelMultipathAttachSkewWindow)) || request.Timestamp.After(now.Add(trustTunnelMultipathAttachSkewWindow)) {
@@ -318,6 +358,24 @@ func (s *trustTunnelMultipathSession) AttachChannel(request *trustTunnelMultipat
 		return err
 	}
 	s.usedNonces[request.Nonce] = now
+	return nil
+}
+
+func (s *trustTunnelMultipathSession) SetChannelStream(channelID uint32, stream io.ReadWriteCloser) error {
+	if s == nil {
+		return errors.New("trusttunnel multipath session is nil").AtInfo()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	channel, exists := s.channels[channelID]
+	if !exists || channel == nil {
+		return errors.New("trusttunnel multipath channel is unknown").AtInfo()
+	}
+	channel.stream = stream
+	channel.lastSeenAt = time.Now()
+	s.notifyUpdatedLocked()
 	return nil
 }
 
@@ -361,6 +419,15 @@ func (s *trustTunnelMultipathSession) Closed() <-chan struct{} {
 	return s.closedCh
 }
 
+func (s *trustTunnelMultipathSession) Updates() <-chan struct{} {
+	if s == nil {
+		closed := make(chan struct{})
+		close(closed)
+		return closed
+	}
+	return s.updatesCh
+}
+
 func (s *trustTunnelMultipathSession) Close(err error) {
 	if s == nil {
 		return
@@ -375,6 +442,7 @@ func (s *trustTunnelMultipathSession) Close(err error) {
 		for _, channel := range s.channels {
 			channels = append(channels, channel)
 		}
+		s.notifyUpdatedLocked()
 		s.mu.Unlock()
 
 		for _, channel := range channels {
@@ -457,6 +525,101 @@ func (s *trustTunnelMultipathSession) Strict() bool {
 		return false
 	}
 	return s.strict
+}
+
+func (s *trustTunnelMultipathSession) WaitForQuorum(ctx context.Context) error {
+	if s == nil || !s.strict {
+		return nil
+	}
+
+	for {
+		s.mu.RLock()
+		enough := len(s.channels) >= int(s.minChannels)
+		closeErr := s.closeErr
+		updatesCh := s.updatesCh
+		closedCh := s.closedCh
+		s.mu.RUnlock()
+
+		if enough {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-closedCh:
+			if closeErr != nil {
+				return closeErr
+			}
+			return io.EOF
+		case <-updatesCh:
+		}
+	}
+}
+
+func (s *trustTunnelMultipathSession) readyReachedLocked() bool {
+	if s == nil {
+		return false
+	}
+	select {
+	case <-s.readyCh:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *trustTunnelMultipathSession) notifyUpdatedLocked() {
+	if s == nil {
+		return
+	}
+	select {
+	case s.updatesCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *trustTunnelMultipathSession) startQuorumLossGrace(generation uint64, cause error) {
+	if s == nil {
+		return
+	}
+	if s.rejoinGrace <= 0 {
+		s.Close(newTrustTunnelMultipathQuorumLostError(0, s.minChannels, cause))
+		return
+	}
+
+	go func() {
+		timer := time.NewTimer(s.rejoinGrace)
+		defer timer.Stop()
+
+		select {
+		case <-s.closedCh:
+			return
+		case <-timer.C:
+		}
+
+		s.mu.RLock()
+		remaining := len(s.channels)
+		minChannels := s.minChannels
+		state := s.state
+		stillCurrent := s.quorumLossGeneration == generation
+		s.mu.RUnlock()
+
+		if state != trustTunnelMultipathSessionDegraded || !stillCurrent || uint32(remaining) >= minChannels {
+			return
+		}
+
+		err := newTrustTunnelMultipathQuorumLostError(remaining, minChannels, cause)
+		errors.LogWarningInner(context.Background(), err, "trusttunnel multipath quorum grace expired")
+		s.Close(err)
+	}()
+}
+
+func newTrustTunnelMultipathQuorumLostError(remaining int, minChannels uint32, cause error) error {
+	if cause == nil {
+		return errors.New(trustTunnelMultipathChannelQuorumLostText, ": got ", remaining, ", want ", minChannels).AtWarning()
+	}
+	return errors.New(trustTunnelMultipathChannelQuorumLostText, ": got ", remaining, ", want ", minChannels).Base(cause).AtWarning()
 }
 
 func (c *trustTunnelMultipathChannel) noteRead(payloadLen int) {

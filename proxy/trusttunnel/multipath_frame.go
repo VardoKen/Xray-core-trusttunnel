@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	trustTunnelMultipathFrameMagic      uint32 = 0x4d505431
-	trustTunnelMultipathFrameHeaderSize        = 20
-	trustTunnelMultipathFrameMaxPayload        = 32 * 1024
-	trustTunnelMultipathFrameFlagFIN    uint8  = 1 << 0
+	trustTunnelMultipathFrameMagic       uint32 = 0x4d505431
+	trustTunnelMultipathFrameHeaderSize         = 20
+	trustTunnelMultipathFrameMaxPayload         = 32 * 1024
+	trustTunnelMultipathFrameFlagFIN     uint8  = 1 << 0
+	trustTunnelMultipathFrameFlagControl uint8  = 1 << 1
 )
 
 type trustTunnelMultipathFrame struct {
@@ -23,11 +24,15 @@ type trustTunnelMultipathFrame struct {
 	Payload []byte
 }
 
+const trustTunnelMultipathControlChannelClosed uint8 = 1
+
 type trustTunnelMultipathStream struct {
 	session   *trustTunnelMultipathSession
 	recv      *trustTunnelMultipathFrameReassembler
 	send      *trustTunnelMultipathFrameWriter
 	closeOnce sync.Once
+	readerMu  sync.Mutex
+	readers   map[uint32]struct{}
 }
 
 type trustTunnelMultipathFrameReassembler struct {
@@ -76,11 +81,11 @@ func newTrustTunnelMultipathStream(session *trustTunnelMultipathSession) (*trust
 		session: session,
 		recv:    reassembler,
 		send:    writer,
+		readers: make(map[uint32]struct{}),
 	}
 
-	for _, channel := range channels {
-		go stream.runChannelReader(channel)
-	}
+	stream.startAvailableReaders(channels)
+	go stream.watchSessionChannels()
 
 	return stream, nil
 }
@@ -144,6 +149,49 @@ func (s *trustTunnelMultipathStream) close(err error) {
 	})
 }
 
+func (s *trustTunnelMultipathStream) watchSessionChannels() {
+	if s == nil || s.session == nil {
+		return
+	}
+
+	for {
+		select {
+		case <-s.session.Closed():
+			if s.recv != nil {
+				s.recv.CloseWithError(s.session.CloseErr())
+			}
+			return
+		case <-s.session.Updates():
+			s.startAvailableReaders(nil)
+		}
+	}
+}
+
+func (s *trustTunnelMultipathStream) startAvailableReaders(snapshot []*trustTunnelMultipathChannel) {
+	if s == nil || s.session == nil {
+		return
+	}
+	if snapshot == nil {
+		snapshot = s.session.ChannelSnapshot()
+	}
+
+	for _, channel := range snapshot {
+		if channel == nil || channel.stream == nil || channel.closing {
+			continue
+		}
+
+		s.readerMu.Lock()
+		if _, exists := s.readers[channel.id]; exists {
+			s.readerMu.Unlock()
+			continue
+		}
+		s.readers[channel.id] = struct{}{}
+		s.readerMu.Unlock()
+
+		go s.runChannelReader(channel)
+	}
+}
+
 func (s *trustTunnelMultipathStream) runChannelReader(channel *trustTunnelMultipathChannel) {
 	if s == nil || channel == nil || channel.stream == nil {
 		s.close(errors.New("trusttunnel multipath channel stream is unavailable"))
@@ -166,9 +214,19 @@ func (s *trustTunnelMultipathStream) runChannelReader(channel *trustTunnelMultip
 				if closeErr := s.session.HandleChannelFailure(channel.id, channelErr); closeErr != nil {
 					errors.LogWarningInner(context.Background(), closeErr, "trusttunnel multipath stream closing after channel failure")
 					s.close(closeErr)
+				} else if s.send != nil {
+					s.send.NotifyChannelClosed(channel.id)
 				}
 			}
 			return
+		}
+		if frame.Flags&trustTunnelMultipathFrameFlagControl != 0 {
+			if err := s.handleControlFrame(frame); err != nil {
+				errors.LogWarningInner(context.Background(), err, "trusttunnel multipath control frame handling failed")
+				s.close(err)
+				return
+			}
+			continue
 		}
 		channel.noteRead(len(frame.Payload))
 		if err := s.recv.PushFrame(frame); err != nil {
@@ -176,6 +234,26 @@ func (s *trustTunnelMultipathStream) runChannelReader(channel *trustTunnelMultip
 			s.close(err)
 			return
 		}
+	}
+}
+
+func (s *trustTunnelMultipathStream) handleControlFrame(frame *trustTunnelMultipathFrame) error {
+	if s == nil || s.session == nil || frame == nil {
+		return nil
+	}
+	if len(frame.Payload) < 5 {
+		return errors.New("trusttunnel multipath control frame is too short")
+	}
+
+	switch frame.Payload[0] {
+	case trustTunnelMultipathControlChannelClosed:
+		channelID := binary.BigEndian.Uint32(frame.Payload[1:5])
+		if closeErr := s.session.HandleChannelFailure(channelID, errors.New("peer reported trusttunnel multipath channel loss")); closeErr != nil {
+			return closeErr
+		}
+		return nil
+	default:
+		return errors.New("trusttunnel multipath control frame type is unsupported")
 	}
 }
 
@@ -235,6 +313,29 @@ func (w *trustTunnelMultipathFrameWriter) Close() {
 	w.closed = true
 }
 
+func (w *trustTunnelMultipathFrameWriter) NotifyChannelClosed(channelID uint32) {
+	if w == nil || channelID == 0 {
+		return
+	}
+
+	frame := trustTunnelMultipathChannelClosedControlFrame(channelID)
+	go func() {
+		if err := w.writeControlFrame(frame); err != nil {
+			errors.LogWarningInner(context.Background(), err, "trusttunnel multipath failed to notify peer about lost channel")
+		}
+	}()
+}
+
+func trustTunnelMultipathChannelClosedControlFrame(channelID uint32) *trustTunnelMultipathFrame {
+	payload := make([]byte, 5)
+	payload[0] = trustTunnelMultipathControlChannelClosed
+	binary.BigEndian.PutUint32(payload[1:5], channelID)
+	return &trustTunnelMultipathFrame{
+		Flags:   trustTunnelMultipathFrameFlagControl,
+		Payload: payload,
+	}
+}
+
 func (w *trustTunnelMultipathFrameWriter) writeFrameLocked(frame *trustTunnelMultipathFrame) error {
 	if w.session == nil {
 		return errors.New("trusttunnel multipath writer has no session")
@@ -243,10 +344,16 @@ func (w *trustTunnelMultipathFrameWriter) writeFrameLocked(frame *trustTunnelMul
 	for {
 		channels := w.session.ChannelSnapshot()
 		if len(channels) == 0 {
-			return errors.New("trusttunnel multipath writer has no channels")
+			if err := w.session.WaitForQuorum(context.Background()); err != nil {
+				return err
+			}
+			continue
 		}
 		if w.session.Strict() && len(channels) < int(w.session.MinChannels()) {
-			return errors.New(trustTunnelMultipathChannelQuorumLostText, ": got ", len(channels), ", want ", w.session.MinChannels()).AtWarning()
+			if err := w.session.WaitForQuorum(context.Background()); err != nil {
+				return err
+			}
+			continue
 		}
 		if w.nextChan >= len(channels) {
 			w.nextChan = 0
@@ -262,11 +369,39 @@ func (w *trustTunnelMultipathFrameWriter) writeFrameLocked(frame *trustTunnelMul
 				errors.LogWarningInner(context.Background(), closeErr, "trusttunnel multipath stream write path lost quorum")
 				return closeErr
 			}
+			w.NotifyChannelClosed(channel.id)
 			continue
 		}
 		channel.noteWrite(len(frame.Payload))
 		return nil
 	}
+}
+
+func (w *trustTunnelMultipathFrameWriter) writeControlFrame(frame *trustTunnelMultipathFrame) error {
+	if w == nil || w.session == nil {
+		return errors.New("trusttunnel multipath writer has no session")
+	}
+
+	channels := w.session.ChannelSnapshot()
+	if len(channels) == 0 {
+		return errors.New("trusttunnel multipath writer has no channels")
+	}
+
+	for i := 0; i < len(channels); i++ {
+		channel := channels[i]
+		if channel == nil || channel.stream == nil {
+			continue
+		}
+		if err := channel.writeFrame(frame); err != nil {
+			if closeErr := w.session.HandleChannelFailure(channel.id, err); closeErr != nil {
+				return closeErr
+			}
+			continue
+		}
+		return nil
+	}
+
+	return errors.New("trusttunnel multipath writer could not deliver control frame")
 }
 
 func (r *trustTunnelMultipathFrameReassembler) PushFrame(frame *trustTunnelMultipathFrame) error {
@@ -397,14 +532,19 @@ func (r *trustTunnelMultipathFrameReassembler) Read(p []byte) (int, error) {
 			return 0, io.EOF
 		}
 
-		if waitStarted.IsZero() {
-			waitStarted = time.Now()
-		} else if r.gapTimeout > 0 && time.Since(waitStarted) >= r.gapTimeout {
-			r.closed = true
-			r.err = errors.New("trusttunnel multipath reorder gap timed out")
-			err := r.err
-			r.mu.Unlock()
-			return 0, err
+		hasGap := len(r.pending) > 0
+		if hasGap {
+			if waitStarted.IsZero() {
+				waitStarted = time.Now()
+			} else if r.gapTimeout > 0 && time.Since(waitStarted) >= r.gapTimeout {
+				r.closed = true
+				r.err = errors.New("trusttunnel multipath reorder gap timed out")
+				err := r.err
+				r.mu.Unlock()
+				return 0, err
+			}
+		} else {
+			waitStarted = time.Time{}
 		}
 
 		r.mu.Unlock()

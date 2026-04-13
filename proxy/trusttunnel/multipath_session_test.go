@@ -73,12 +73,13 @@ func TestTrustTunnelMultipathSessionTracksChannelLifecycle(t *testing.T) {
 
 func TestTrustTunnelMultipathSessionHandleChannelFailureStrictBelowQuorum(t *testing.T) {
 	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
-		ID:          "sess-strict",
-		MinChannels: 2,
-		MaxChannels: 2,
-		Target:      xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
-		TargetHost:  "1.1.1.1:443",
-		Strict:      true,
+		ID:            "sess-strict",
+		MinChannels:   2,
+		MaxChannels:   2,
+		Target:        xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:    "1.1.1.1:443",
+		Strict:        true,
+		AttachTimeout: 40 * time.Millisecond,
 	})
 	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443"}); err != nil {
 		t.Fatalf("AddChannel(primary) error: %v", err)
@@ -87,15 +88,23 @@ func TestTrustTunnelMultipathSessionHandleChannelFailureStrictBelowQuorum(t *tes
 		t.Fatalf("AddChannel(secondary) error: %v", err)
 	}
 
-	err := session.HandleChannelFailure(1, io.EOF)
-	if err == nil || !strings.Contains(err.Error(), trustTunnelMultipathChannelQuorumLostText) {
-		t.Fatalf("HandleChannelFailure() error = %v, want %q", err, trustTunnelMultipathChannelQuorumLostText)
+	if err := session.HandleChannelFailure(1, io.EOF); err != nil {
+		t.Fatalf("HandleChannelFailure() error = %v, want nil during grace", err)
 	}
 	if got := session.ActiveChannelCount(); got != 1 {
 		t.Fatalf("ActiveChannelCount() = %d, want 1", got)
 	}
 	if state := session.State(); state != trustTunnelMultipathSessionDegraded {
 		t.Fatalf("state after quorum loss = %v, want degraded", state)
+	}
+
+	select {
+	case <-session.Closed():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("session did not close after quorum-loss grace expired")
+	}
+	if err := session.CloseErr(); err == nil || !strings.Contains(err.Error(), trustTunnelMultipathChannelQuorumLostText) {
+		t.Fatalf("CloseErr() = %v, want %q", err, trustTunnelMultipathChannelQuorumLostText)
 	}
 }
 
@@ -189,5 +198,41 @@ func TestTrustTunnelMultipathSessionAttachChannelValidatesProof(t *testing.T) {
 	replay := *req
 	if err := session.AttachChannel(&replay, "192.168.1.52:9443", now); err == nil || !strings.Contains(err.Error(), trustTunnelMultipathAttachReplayText) {
 		t.Fatalf("AttachChannel(replay) error = %v, want text %q", err, trustTunnelMultipathAttachReplayText)
+	}
+}
+
+func TestTrustTunnelMultipathSessionAllowsLateAttachAfterSessionBecameActive(t *testing.T) {
+	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:            "sess-late-attach",
+		Target:        xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:    "1.1.1.1:443",
+		MinChannels:   2,
+		MaxChannels:   3,
+		AttachSecret:  []byte("0123456789abcdef0123456789abcdef"),
+		AttachTimeout: 10 * time.Millisecond,
+		Strict:        true,
+	})
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: trustTunnelMultipathPrimaryChannelID, endpoint: "192.168.1.50:9443"}); err != nil {
+		t.Fatalf("AddChannel(primary) returned error: %v", err)
+	}
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443"}); err != nil {
+		t.Fatalf("AddChannel(secondary) returned error: %v", err)
+	}
+
+	now := time.Now().Add(100 * time.Millisecond)
+	req := &trustTunnelMultipathAttachRequest{
+		SessionID:  session.ID(),
+		ChannelID:  3,
+		TargetHost: "1.1.1.1:443",
+		Nonce:      "nonce-late-1",
+		Timestamp:  now,
+	}
+	req.Proof = trustTunnelMultipathComputeAttachProof([]byte("0123456789abcdef0123456789abcdef"), session.ID(), req.ChannelID, req.Nonce, req.Timestamp.Unix(), req.TargetHost)
+
+	if err := session.AttachChannel(req, "192.168.1.52:9443", now); err != nil {
+		t.Fatalf("AttachChannel(late active) returned error: %v", err)
+	}
+	if got := session.ActiveChannelCount(); got != 3 {
+		t.Fatalf("ActiveChannelCount() = %d, want 3", got)
 	}
 }

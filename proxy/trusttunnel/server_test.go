@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	xnet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/protocol"
@@ -195,6 +196,98 @@ func TestServeHTTP2CheckReturnsOKWithoutDispatch(t *testing.T) {
 	}
 	if dispatcher.dispatchCount != 0 {
 		t.Fatalf("unexpected dispatch count: got %d, want 0", dispatcher.dispatchCount)
+	}
+}
+
+func TestMultipathAttachDeadlineWatcherDoesNotCloseSessionAfterInitialQuorum(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{})
+	sessionState := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:            "sess-ready-degraded",
+		Target:        xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(18080)),
+		TargetHost:    "127.0.0.1:18080",
+		MinChannels:   2,
+		MaxChannels:   2,
+		Strict:        false,
+		AttachTimeout: 40 * time.Millisecond,
+	})
+	if err := sessionState.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443"}); err != nil {
+		t.Fatalf("AddChannel(primary) error: %v", err)
+	}
+	if err := sessionState.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443"}); err != nil {
+		t.Fatalf("AddChannel(secondary) error: %v", err)
+	}
+
+	server.multipathSessions.Add(sessionState)
+	server.startMultipathAttachDeadlineWatcher(context.Background(), sessionState)
+
+	if err := sessionState.HandleChannelFailure(2, io.EOF); err != nil {
+		t.Fatalf("HandleChannelFailure() error: %v", err)
+	}
+	time.Sleep(120 * time.Millisecond)
+
+	if sessionState.IsClosed() {
+		t.Fatalf("session closed unexpectedly with error: %v", sessionState.CloseErr())
+	}
+	if _, ok := server.multipathSessions.Get(sessionState.ID()); !ok {
+		t.Fatal("session was removed from registry after initial quorum had already been reached")
+	}
+}
+
+func TestMaybeStartMultipathServerSessionDetachesRequestContextCancellation(t *testing.T) {
+	server := newTestTrustTunnelServer(t, &ServerConfig{})
+	sessionState := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:            "sess-detached-ctx",
+		Target:        xnet.TCPDestination(xnet.ParseAddress("127.0.0.1"), xnet.Port(18080)),
+		TargetHost:    "127.0.0.1:18080",
+		MinChannels:   2,
+		MaxChannels:   2,
+		Strict:        true,
+		AttachTimeout: 500 * time.Millisecond,
+	})
+
+	channel1Client, channel1Server := net.Pipe()
+	channel2Client, channel2Server := net.Pipe()
+	defer channel1Server.Close()
+	defer channel2Server.Close()
+
+	if err := sessionState.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443", stream: channel1Client}); err != nil {
+		t.Fatalf("AddChannel(channel1) error: %v", err)
+	}
+	if err := sessionState.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443", stream: channel2Client}); err != nil {
+		t.Fatalf("AddChannel(channel2) error: %v", err)
+	}
+
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	defer parentCancel()
+
+	dispatched := make(chan struct{})
+	dispatcher := &testDispatcher{
+		dispatchFn: func(ctx context.Context, dest xnet.Destination) (*transport.Link, error) {
+			close(dispatched)
+			parentCancel()
+
+			select {
+			case <-ctx.Done():
+				t.Fatal("multipath server session inherited request cancellation")
+			case <-time.After(80 * time.Millisecond):
+			}
+
+			return nil, goerrors.New("stop after cancellation check")
+		},
+	}
+
+	server.maybeStartMultipathServerSession(parentCtx, sessionState, dispatcher)
+
+	select {
+	case <-dispatched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("multipath server session did not start")
+	}
+
+	select {
+	case <-sessionState.Closed():
+	case <-time.After(2 * time.Second):
+		t.Fatal("multipath server session did not exit after dispatcher error")
 	}
 }
 

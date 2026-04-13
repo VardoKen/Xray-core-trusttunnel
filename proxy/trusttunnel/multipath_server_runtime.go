@@ -28,8 +28,10 @@ func (s *Server) startMultipathAttachDeadlineWatcher(ctx context.Context, sessio
 		case <-timer.C:
 		}
 
-		if sessionState.State() == trustTunnelMultipathSessionActive {
+		select {
+		case <-sessionState.Ready():
 			return
+		default:
 		}
 
 		err := errors.New("trusttunnel multipath attach quorum was not reached before attach deadline").AtInfo()
@@ -48,7 +50,18 @@ func (s *Server) maybeStartMultipathServerSession(ctx context.Context, sessionSt
 	}
 
 	sessionState.startOnce.Do(func() {
-		go s.runMultipathServerSession(ctx, sessionState, dispatcher)
+		sessionCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		go func() {
+			select {
+			case <-sessionState.Closed():
+				cancel()
+			case <-sessionCtx.Done():
+			}
+		}()
+		go func() {
+			defer cancel()
+			s.runMultipathServerSession(sessionCtx, sessionState, dispatcher)
+		}()
 	})
 }
 
@@ -57,16 +70,19 @@ func (s *Server) runMultipathServerSession(ctx context.Context, sessionState *tr
 
 	stream, err := newTrustTunnelMultipathStream(sessionState)
 	if err != nil {
+		errors.LogWarningInner(ctx, err, "trusttunnel multipath server session failed before stream startup session=", sessionState.ID())
 		sessionState.Close(err)
 		return
 	}
 	defer stream.Close()
 
 	if err := s.dispatchConnectSession(ctx, dispatcher, sessionState.target, buf.NewReader(stream), buf.NewWriter(stream), stream); err != nil {
+		errors.LogWarningInner(ctx, err, "trusttunnel multipath server session dispatch ended session=", sessionState.ID())
 		sessionState.Close(err)
 		return
 	}
 
+	errors.LogInfo(ctx, "trusttunnel multipath server session completed session=", sessionState.ID())
 	sessionState.Close(nil)
 }
 
@@ -75,9 +91,5 @@ func (s *Server) waitForMultipathSession(ctx context.Context, sessionState *trus
 		return
 	}
 
-	select {
-	case <-ctx.Done():
-		sessionState.Close(ctx.Err())
-	case <-sessionState.Closed():
-	}
+	<-sessionState.Closed()
 }
