@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/xtls/xray-core/common/errors"
@@ -62,17 +63,21 @@ type trustTunnelMultipathSession struct {
 }
 
 type trustTunnelMultipathChannel struct {
-	id         uint32
-	endpoint   string
-	createdAt  time.Time
-	lastSeenAt time.Time
-	closing    bool
-	stream     io.ReadWriteCloser
-	writeMu    sync.Mutex
+	id          uint32
+	endpoint    string
+	createdAt   time.Time
+	lastSeenAt  time.Time
+	closing     bool
+	stream      io.ReadWriteCloser
+	writeMu     sync.Mutex
+	readFrames  uint64
+	readBytes   uint64
+	writeFrames uint64
+	writeBytes  uint64
 }
 
 const (
-	trustTunnelMultipathPrimaryChannelID = 1
+	trustTunnelMultipathPrimaryChannelID     = 1
 	trustTunnelMultipathDefaultReorderWindow = 1 << 20
 	trustTunnelMultipathDefaultGapTimeout    = 3 * time.Second
 
@@ -82,6 +87,7 @@ const (
 	trustTunnelMultipathAttachProofInvalidText = "trusttunnel multipath attach proof is invalid"
 	trustTunnelMultipathDuplicateChannelText   = "trusttunnel multipath channel already exists"
 	trustTunnelMultipathChannelLimitText       = "trusttunnel multipath channel limit reached"
+	trustTunnelMultipathChannelQuorumLostText  = "trusttunnel multipath channel quorum lost"
 )
 
 func newTrustTunnelMultipathSession(options trustTunnelMultipathSessionOptions) *trustTunnelMultipathSession {
@@ -211,6 +217,49 @@ func (s *trustTunnelMultipathSession) RemoveChannel(channelID uint32) {
 	if uint32(len(s.channels)) < s.minChannels {
 		s.state = trustTunnelMultipathSessionDegraded
 	}
+}
+
+func (s *trustTunnelMultipathSession) HandleChannelFailure(channelID uint32, cause error) error {
+	if s == nil {
+		return cause
+	}
+
+	var channel *trustTunnelMultipathChannel
+	var remaining int
+	var minChannels uint32
+	var strict bool
+
+	s.mu.Lock()
+	channel = s.channels[channelID]
+	if channel != nil {
+		delete(s.channels, channelID)
+		channel.closing = true
+	}
+	remaining = len(s.channels)
+	minChannels = s.minChannels
+	strict = s.strict
+	switch {
+	case remaining == 0:
+		s.state = trustTunnelMultipathSessionOpening
+	case uint32(remaining) < s.minChannels:
+		s.state = trustTunnelMultipathSessionDegraded
+	default:
+		s.state = trustTunnelMultipathSessionActive
+	}
+	s.mu.Unlock()
+
+	if channel != nil && channel.stream != nil {
+		_ = channel.stream.Close()
+	}
+
+	if strict && uint32(remaining) < minChannels {
+		if cause == nil {
+			return errors.New(trustTunnelMultipathChannelQuorumLostText, ": got ", remaining, ", want ", minChannels).AtWarning()
+		}
+		return errors.New(trustTunnelMultipathChannelQuorumLostText, ": got ", remaining, ", want ", minChannels).Base(cause).AtWarning()
+	}
+
+	return nil
 }
 
 func (s *trustTunnelMultipathSession) ActiveChannelCount() int {
@@ -394,6 +443,40 @@ func (s *trustTunnelMultipathSession) GapTimeout() time.Duration {
 		return trustTunnelMultipathDefaultGapTimeout
 	}
 	return s.gapTimeout
+}
+
+func (s *trustTunnelMultipathSession) MinChannels() uint32 {
+	if s == nil {
+		return 0
+	}
+	return s.minChannels
+}
+
+func (s *trustTunnelMultipathSession) Strict() bool {
+	if s == nil {
+		return false
+	}
+	return s.strict
+}
+
+func (c *trustTunnelMultipathChannel) noteRead(payloadLen int) {
+	if c == nil {
+		return
+	}
+	atomic.AddUint64(&c.readFrames, 1)
+	if payloadLen > 0 {
+		atomic.AddUint64(&c.readBytes, uint64(payloadLen))
+	}
+}
+
+func (c *trustTunnelMultipathChannel) noteWrite(payloadLen int) {
+	if c == nil {
+		return
+	}
+	atomic.AddUint64(&c.writeFrames, 1)
+	if payloadLen > 0 {
+		atomic.AddUint64(&c.writeBytes, uint64(payloadLen))
+	}
 }
 
 type trustTunnelMultipathSessionRegistry struct {

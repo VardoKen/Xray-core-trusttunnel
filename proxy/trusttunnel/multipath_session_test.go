@@ -1,6 +1,7 @@
 package trusttunnel
 
 import (
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +68,64 @@ func TestTrustTunnelMultipathSessionTracksChannelLifecycle(t *testing.T) {
 	}
 	if state := session.State(); state != trustTunnelMultipathSessionDegraded {
 		t.Fatalf("state after falling below quorum = %v, want degraded", state)
+	}
+}
+
+func TestTrustTunnelMultipathSessionHandleChannelFailureStrictBelowQuorum(t *testing.T) {
+	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:          "sess-strict",
+		MinChannels: 2,
+		MaxChannels: 2,
+		Target:      xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:  "1.1.1.1:443",
+		Strict:      true,
+	})
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443"}); err != nil {
+		t.Fatalf("AddChannel(primary) error: %v", err)
+	}
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443"}); err != nil {
+		t.Fatalf("AddChannel(secondary) error: %v", err)
+	}
+
+	err := session.HandleChannelFailure(1, io.EOF)
+	if err == nil || !strings.Contains(err.Error(), trustTunnelMultipathChannelQuorumLostText) {
+		t.Fatalf("HandleChannelFailure() error = %v, want %q", err, trustTunnelMultipathChannelQuorumLostText)
+	}
+	if got := session.ActiveChannelCount(); got != 1 {
+		t.Fatalf("ActiveChannelCount() = %d, want 1", got)
+	}
+	if state := session.State(); state != trustTunnelMultipathSessionDegraded {
+		t.Fatalf("state after quorum loss = %v, want degraded", state)
+	}
+}
+
+func TestTrustTunnelMultipathSessionHandleChannelFailureNonStrictKeepsSessionOpen(t *testing.T) {
+	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:          "sess-nonstrict",
+		MinChannels: 2,
+		MaxChannels: 2,
+		Target:      xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:  "1.1.1.1:443",
+		Strict:      false,
+	})
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443"}); err != nil {
+		t.Fatalf("AddChannel(primary) error: %v", err)
+	}
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443"}); err != nil {
+		t.Fatalf("AddChannel(secondary) error: %v", err)
+	}
+
+	if err := session.HandleChannelFailure(1, io.EOF); err != nil {
+		t.Fatalf("HandleChannelFailure() error = %v, want nil", err)
+	}
+	if got := session.ActiveChannelCount(); got != 1 {
+		t.Fatalf("ActiveChannelCount() = %d, want 1", got)
+	}
+	if state := session.State(); state != trustTunnelMultipathSessionDegraded {
+		t.Fatalf("state after non-strict channel loss = %v, want degraded", state)
+	}
+	if session.IsClosed() {
+		t.Fatal("session closed unexpectedly")
 	}
 }
 
