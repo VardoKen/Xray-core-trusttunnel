@@ -3,13 +3,74 @@ package trusttunnel
 import (
 	"bufio"
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xtls/xray-core/common"
+	xnet "github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/transport"
+	"github.com/xtls/xray-core/transport/pipe"
 )
+
+func waitForMultipathSessionInRegistry(t *testing.T, server *Server, sessionID string) *trustTunnelMultipathSession {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if session, ok := server.multipathSessions.Get(sessionID); ok {
+			return session
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("multipath session %q was not stored in registry", sessionID)
+	return nil
+}
+
+func newBlockingMultipathRequest(t *testing.T, host string, authHeader string) (*http.Request, func()) {
+	t.Helper()
+
+	req := newTestConnectRequest(host, authHeader)
+	reader, writer := io.Pipe()
+	req.Body = reader
+	return req, func() {
+		_ = writer.Close()
+	}
+}
+
+func attachBlockingMultipathBody(req *http.Request) func() {
+	reader, writer := io.Pipe()
+	req.Body = reader
+	return func() {
+		_ = writer.Close()
+	}
+}
+
+func newBlockingMultipathDispatcher() (*testDispatcher, func()) {
+	uplinkReader, uplinkWriter := pipe.New(pipe.WithoutSizeLimit())
+	downlinkReader, downlinkWriter := pipe.New(pipe.WithoutSizeLimit())
+
+	dispatcher := &testDispatcher{
+		dispatchFn: func(context.Context, xnet.Destination) (*transport.Link, error) {
+			return &transport.Link{
+				Reader: downlinkReader,
+				Writer: uplinkWriter,
+			}, nil
+		},
+	}
+
+	return dispatcher, func() {
+		_ = uplinkWriter.Close()
+		_ = downlinkWriter.Close()
+		common.Interrupt(uplinkReader)
+		common.Interrupt(downlinkReader)
+	}
+}
 
 func testTrustTunnelMemoryAccount() *MemoryAccount {
 	return &MemoryAccount{
@@ -83,29 +144,26 @@ func TestServeHTTP2MultipathOpenCreatesSession(t *testing.T) {
 	server := newTestTrustTunnelServer(t, &ServerConfig{})
 	dispatcher := &testDispatcher{}
 	recorder := httptest.NewRecorder()
-	req := newTestConnectRequest(trustTunnelMultipathOpenHost, buildBasicAuthValue("u1", "p1"))
+	req, closeReqBody := newBlockingMultipathRequest(t, trustTunnelMultipathOpenHost, buildBasicAuthValue("u1", "p1"))
+	defer closeReqBody()
 	req.Header.Set(trustTunnelMultipathHeaderTarget, "example.com:443")
 	req.Header.Set(trustTunnelMultipathHeaderMinChannels, "2")
 	req.Header.Set(trustTunnelMultipathHeaderMaxChannels, "3")
 	req.Header.Set(trustTunnelMultipathHeaderStrict, "true")
 	req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey, dummyAddr("192.168.1.50:9443")))
 
-	server.serveHTTP2Request(&bufferedConn{}, recorder, req, dispatcher, nil, "")
+	done := make(chan struct{})
+	go func() {
+		server.serveHTTP2Request(&bufferedConn{}, recorder, req, dispatcher, nil, "")
+		close(done)
+	}()
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
-	if dispatcher.dispatchCount != 0 {
-		t.Fatalf("dispatchCount = %d, want 0", dispatcher.dispatchCount)
-	}
+	time.Sleep(20 * time.Millisecond)
 	sessionID := recorder.Header().Get(trustTunnelMultipathHeaderSessionID)
 	if sessionID == "" {
 		t.Fatal("missing multipath session id header")
 	}
-	sessionState, ok := server.multipathSessions.Get(sessionID)
-	if !ok {
-		t.Fatal("multipath session not stored in registry")
-	}
+	sessionState := waitForMultipathSessionInRegistry(t, server, sessionID)
 	if got := sessionState.ActiveChannelCount(); got != 1 {
 		t.Fatalf("ActiveChannelCount() = %d, want 1", got)
 	}
@@ -115,27 +173,44 @@ func TestServeHTTP2MultipathOpenCreatesSession(t *testing.T) {
 	if sessionState.TargetHost() != "example.com:443" {
 		t.Fatalf("TargetHost = %q, want %q", sessionState.TargetHost(), "example.com:443")
 	}
+	if dispatcher.dispatchCount != 0 {
+		t.Fatalf("dispatchCount = %d, want 0", dispatcher.dispatchCount)
+	}
+
+	sessionState.Close(nil)
+	<-done
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
 }
 
 func TestServeHTTP2MultipathAttachAddsSecondaryChannel(t *testing.T) {
 	server := newTestTrustTunnelServer(t, &ServerConfig{})
-	dispatcher := &testDispatcher{}
+	dispatcher, cleanupDispatch := newBlockingMultipathDispatcher()
+	defer cleanupDispatch()
 	now := time.Now()
 
 	openRecorder := httptest.NewRecorder()
-	openReq := newTestConnectRequest(trustTunnelMultipathOpenHost, buildBasicAuthValue("u1", "p1"))
+	openReq, closeOpenBody := newBlockingMultipathRequest(t, trustTunnelMultipathOpenHost, buildBasicAuthValue("u1", "p1"))
+	defer closeOpenBody()
 	openReq.Header.Set(trustTunnelMultipathHeaderTarget, "example.com:443")
 	openReq.Header.Set(trustTunnelMultipathHeaderMinChannels, "2")
 	openReq.Header.Set(trustTunnelMultipathHeaderMaxChannels, "3")
 	openReq = openReq.WithContext(context.WithValue(openReq.Context(), http.LocalAddrContextKey, dummyAddr("192.168.1.50:9443")))
 
-	server.serveHTTP2Request(&bufferedConn{}, openRecorder, openReq, dispatcher, nil, "")
+	openDone := make(chan struct{})
+	go func() {
+		server.serveHTTP2Request(&bufferedConn{}, openRecorder, openReq, dispatcher, nil, "")
+		close(openDone)
+	}()
 
+	time.Sleep(20 * time.Millisecond)
 	sessionID := openRecorder.Header().Get(trustTunnelMultipathHeaderSessionID)
 	attachSecret := openRecorder.Header().Get(trustTunnelMultipathHeaderAttachSecret)
 	if sessionID == "" || attachSecret == "" {
 		t.Fatalf("missing open response headers: sessionID=%q secret=%q", sessionID, attachSecret)
 	}
+	sessionState := waitForMultipathSessionInRegistry(t, server, sessionID)
 
 	attachReq, err := buildTrustTunnelMultipathAttachRequestAt(sessionID, attachSecret, 2, "example.com:443", testTrustTunnelMemoryAccount(), now, "nonce-2")
 	if err != nil {
@@ -143,22 +218,32 @@ func TestServeHTTP2MultipathAttachAddsSecondaryChannel(t *testing.T) {
 	}
 	attachReq.RemoteAddr = "127.0.0.1:54321"
 	attachReq = attachReq.WithContext(context.WithValue(attachReq.Context(), http.LocalAddrContextKey, dummyAddr("192.168.1.51:9443")))
+	closeAttachBody := attachBlockingMultipathBody(attachReq)
+	defer closeAttachBody()
 
 	attachRecorder := httptest.NewRecorder()
-	server.serveHTTP2Request(&bufferedConn{}, attachRecorder, attachReq, dispatcher, nil, "")
+	attachDone := make(chan struct{})
+	go func() {
+		server.serveHTTP2Request(&bufferedConn{}, attachRecorder, attachReq, dispatcher, nil, "")
+		close(attachDone)
+	}()
 
-	if attachRecorder.Code != http.StatusOK {
-		t.Fatalf("attach status = %d, want 200", attachRecorder.Code)
-	}
-	sessionState, ok := server.multipathSessions.Get(sessionID)
-	if !ok {
-		t.Fatal("multipath session not found after attach")
-	}
+	time.Sleep(50 * time.Millisecond)
 	if got := sessionState.ActiveChannelCount(); got != 2 {
 		t.Fatalf("ActiveChannelCount() = %d, want 2", got)
 	}
 	if state := sessionState.State(); state != trustTunnelMultipathSessionActive {
 		t.Fatalf("state = %v, want active", state)
+	}
+	if dispatcher.dispatchCount != 1 {
+		t.Fatalf("dispatchCount = %d, want 1", dispatcher.dispatchCount)
+	}
+
+	sessionState.Close(nil)
+	<-attachDone
+	<-openDone
+	if attachRecorder.Code != http.StatusOK {
+		t.Fatalf("attach status = %d, want 200", attachRecorder.Code)
 	}
 }
 
@@ -168,20 +253,29 @@ func TestServeHTTP2MultipathAttachRejectsInvalidProof(t *testing.T) {
 	now := time.Now()
 
 	openRecorder := httptest.NewRecorder()
-	openReq := newTestConnectRequest(trustTunnelMultipathOpenHost, buildBasicAuthValue("u1", "p1"))
+	openReq, closeOpenBody := newBlockingMultipathRequest(t, trustTunnelMultipathOpenHost, buildBasicAuthValue("u1", "p1"))
+	defer closeOpenBody()
 	openReq.Header.Set(trustTunnelMultipathHeaderTarget, "example.com:443")
 	openReq.Header.Set(trustTunnelMultipathHeaderMinChannels, "2")
 	openReq.Header.Set(trustTunnelMultipathHeaderMaxChannels, "2")
-	server.serveHTTP2Request(&bufferedConn{}, openRecorder, openReq, dispatcher, nil, "")
+	openDone := make(chan struct{})
+	go func() {
+		server.serveHTTP2Request(&bufferedConn{}, openRecorder, openReq, dispatcher, nil, "")
+		close(openDone)
+	}()
 
+	time.Sleep(20 * time.Millisecond)
 	sessionID := openRecorder.Header().Get(trustTunnelMultipathHeaderSessionID)
 	attachSecret := openRecorder.Header().Get(trustTunnelMultipathHeaderAttachSecret)
+	sessionState := waitForMultipathSessionInRegistry(t, server, sessionID)
 	attachReq, err := buildTrustTunnelMultipathAttachRequestAt(sessionID, attachSecret, 2, "example.com:443", testTrustTunnelMemoryAccount(), now, "nonce-3")
 	if err != nil {
 		t.Fatalf("buildTrustTunnelMultipathAttachRequestAt() error: %v", err)
 	}
 	attachReq.Header.Set(trustTunnelMultipathHeaderAttachProof, "broken-proof")
 	attachReq.RemoteAddr = "127.0.0.1:54321"
+	closeAttachBody := attachBlockingMultipathBody(attachReq)
+	defer closeAttachBody()
 
 	attachRecorder := httptest.NewRecorder()
 	server.serveHTTP2Request(&bufferedConn{}, attachRecorder, attachReq, dispatcher, nil, "")
@@ -189,29 +283,36 @@ func TestServeHTTP2MultipathAttachRejectsInvalidProof(t *testing.T) {
 	if attachRecorder.Code != http.StatusForbidden {
 		t.Fatalf("attach status = %d, want 403", attachRecorder.Code)
 	}
-	sessionState, ok := server.multipathSessions.Get(sessionID)
-	if !ok {
-		t.Fatal("multipath session not found after invalid attach")
-	}
 	if got := sessionState.ActiveChannelCount(); got != 1 {
 		t.Fatalf("ActiveChannelCount() = %d, want 1", got)
 	}
+
+	sessionState.Close(nil)
+	<-openDone
 }
 
 func TestServeHTTP2MultipathAttachRejectsDuplicateChannel(t *testing.T) {
 	server := newTestTrustTunnelServer(t, &ServerConfig{})
-	dispatcher := &testDispatcher{}
+	dispatcher, cleanupDispatch := newBlockingMultipathDispatcher()
+	defer cleanupDispatch()
 	now := time.Now()
 
 	openRecorder := httptest.NewRecorder()
-	openReq := newTestConnectRequest(trustTunnelMultipathOpenHost, buildBasicAuthValue("u1", "p1"))
+	openReq, closeOpenBody := newBlockingMultipathRequest(t, trustTunnelMultipathOpenHost, buildBasicAuthValue("u1", "p1"))
+	defer closeOpenBody()
 	openReq.Header.Set(trustTunnelMultipathHeaderTarget, "example.com:443")
 	openReq.Header.Set(trustTunnelMultipathHeaderMinChannels, "2")
 	openReq.Header.Set(trustTunnelMultipathHeaderMaxChannels, "2")
-	server.serveHTTP2Request(&bufferedConn{}, openRecorder, openReq, dispatcher, nil, "")
+	openDone := make(chan struct{})
+	go func() {
+		server.serveHTTP2Request(&bufferedConn{}, openRecorder, openReq, dispatcher, nil, "")
+		close(openDone)
+	}()
 
+	time.Sleep(20 * time.Millisecond)
 	sessionID := openRecorder.Header().Get(trustTunnelMultipathHeaderSessionID)
 	attachSecret := openRecorder.Header().Get(trustTunnelMultipathHeaderAttachSecret)
+	sessionState := waitForMultipathSessionInRegistry(t, server, sessionID)
 	buildAttach := func(nonce string) *http.Request {
 		req, err := buildTrustTunnelMultipathAttachRequestAt(sessionID, attachSecret, 2, "example.com:443", testTrustTunnelMemoryAccount(), now, nonce)
 		if err != nil {
@@ -222,16 +323,37 @@ func TestServeHTTP2MultipathAttachRejectsDuplicateChannel(t *testing.T) {
 	}
 
 	firstRecorder := httptest.NewRecorder()
-	server.serveHTTP2Request(&bufferedConn{}, firstRecorder, buildAttach("nonce-4"), dispatcher, nil, "")
+	firstReq := buildAttach("nonce-4")
+	closeFirstAttachBody := attachBlockingMultipathBody(firstReq)
+	defer closeFirstAttachBody()
+	firstDone := make(chan struct{})
+	go func() {
+		server.serveHTTP2Request(&bufferedConn{}, firstRecorder, firstReq, dispatcher, nil, "")
+		close(firstDone)
+	}()
+	time.Sleep(50 * time.Millisecond)
 	if firstRecorder.Code != http.StatusOK {
 		t.Fatalf("first attach status = %d, want 200", firstRecorder.Code)
 	}
+	if dispatcher.dispatchCount != 1 {
+		t.Fatalf("dispatchCount = %d, want 1", dispatcher.dispatchCount)
+	}
+	if got := sessionState.ActiveChannelCount(); got != 2 {
+		t.Fatalf("ActiveChannelCount() after first attach = %d, want 2", got)
+	}
 
 	secondRecorder := httptest.NewRecorder()
-	server.serveHTTP2Request(&bufferedConn{}, secondRecorder, buildAttach("nonce-5"), dispatcher, nil, "")
+	secondReq := buildAttach("nonce-5")
+	closeSecondAttachBody := attachBlockingMultipathBody(secondReq)
+	defer closeSecondAttachBody()
+	server.serveHTTP2Request(&bufferedConn{}, secondRecorder, secondReq, dispatcher, nil, "")
 	if secondRecorder.Code != http.StatusConflict {
 		t.Fatalf("duplicate attach status = %d, want 409", secondRecorder.Code)
 	}
+
+	sessionState.Close(nil)
+	<-firstDone
+	<-openDone
 }
 
 func TestProcessHTTP1RejectsMultipathPseudoHosts(t *testing.T) {

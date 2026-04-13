@@ -52,7 +52,7 @@ func TestClientProcessRejectsIncompleteICMPLink(t *testing.T) {
 	}
 }
 
-func TestClientProcessRejectsMultipathPayloadUntilFramedDataPathExists(t *testing.T) {
+func TestClientProcessRejectsMultipathWithoutDistinctRuntimePool(t *testing.T) {
 	client := &Client{
 		config: &ClientConfig{
 			Multipath: &MultipathConfig{
@@ -84,7 +84,7 @@ func TestClientProcessRejectsMultipathPayloadUntilFramedDataPathExists(t *testin
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), trustTunnelMultipathPayloadNotReadyText) {
+	if !strings.Contains(err.Error(), "needs at least 2 distinct endpoints") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if dialer.dialCalls != 0 {
@@ -1679,6 +1679,39 @@ func TestTrustTunnelStreamSettingsWithTLSCompatibilityFillsServerNameForExplicit
 	}
 	if tlsConfig.GetAllowInsecure() {
 		t.Fatal("allowInsecure = true, want false")
+	}
+}
+
+func TestTrustTunnelStreamSettingsWithTLSCompatibilityPreservesGenericAllowInsecure(t *testing.T) {
+	streamSettings := &internet.MemoryStreamConfig{
+		SecurityType: "tls",
+		SecuritySettings: &internettls.Config{
+			ServerName:    "vpn.example.com",
+			AllowInsecure: true,
+		},
+	}
+
+	override, changed, handled := trustTunnelStreamSettingsWithTLSCompatibility(streamSettings, &ClientConfig{
+		Hostname:         "vpn.example.com",
+		SkipVerification: false,
+	})
+
+	if !handled {
+		t.Fatal("handled = false, want true")
+	}
+	if changed {
+		t.Fatal("changed = true, want false")
+	}
+	if override != streamSettings {
+		t.Fatal("override pointer changed unexpectedly")
+	}
+
+	tlsConfig := internettls.ConfigFromStreamSettings(override)
+	if tlsConfig == nil {
+		t.Fatal("expected tls config, got nil")
+	}
+	if !tlsConfig.GetAllowInsecure() {
+		t.Fatal("allowInsecure = false, want true")
 	}
 }
 

@@ -2,6 +2,8 @@ package trusttunnel
 
 import (
 	"crypto/hmac"
+	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +31,8 @@ type trustTunnelMultipathSessionOptions struct {
 	Strict        bool
 	AttachTimeout time.Duration
 	AttachSecret  []byte
+	ReorderWindow int
+	GapTimeout    time.Duration
 }
 
 type trustTunnelMultipathSession struct {
@@ -47,6 +51,14 @@ type trustTunnelMultipathSession struct {
 	state      trustTunnelMultipathSessionState
 	channels   map[uint32]*trustTunnelMultipathChannel
 	usedNonces map[string]time.Time
+	readyCh    chan struct{}
+	closedCh   chan struct{}
+	closeErr   error
+	startOnce  sync.Once
+	closeOnce  sync.Once
+
+	reorderWindow int
+	gapTimeout    time.Duration
 }
 
 type trustTunnelMultipathChannel struct {
@@ -55,10 +67,14 @@ type trustTunnelMultipathChannel struct {
 	createdAt  time.Time
 	lastSeenAt time.Time
 	closing    bool
+	stream     io.ReadWriteCloser
+	writeMu    sync.Mutex
 }
 
 const (
 	trustTunnelMultipathPrimaryChannelID = 1
+	trustTunnelMultipathDefaultReorderWindow = 1 << 20
+	trustTunnelMultipathDefaultGapTimeout    = 3 * time.Second
 
 	trustTunnelMultipathAttachReplayText       = "trusttunnel multipath attach replay detected"
 	trustTunnelMultipathAttachExpiredText      = "trusttunnel multipath attach window expired"
@@ -89,6 +105,14 @@ func newTrustTunnelMultipathSession(options trustTunnelMultipathSessionOptions) 
 	if attachTimeout <= 0 {
 		attachTimeout = trustTunnelMultipathDefaultAttachTimeout
 	}
+	reorderWindow := options.ReorderWindow
+	if reorderWindow <= 0 {
+		reorderWindow = trustTunnelMultipathDefaultReorderWindow
+	}
+	gapTimeout := options.GapTimeout
+	if gapTimeout <= 0 {
+		gapTimeout = trustTunnelMultipathDefaultGapTimeout
+	}
 
 	return &trustTunnelMultipathSession{
 		id:             options.ID,
@@ -104,6 +128,10 @@ func newTrustTunnelMultipathSession(options trustTunnelMultipathSessionOptions) 
 		state:          trustTunnelMultipathSessionOpening,
 		channels:       make(map[uint32]*trustTunnelMultipathChannel),
 		usedNonces:     make(map[string]time.Time),
+		readyCh:        make(chan struct{}),
+		closedCh:       make(chan struct{}),
+		reorderWindow:  reorderWindow,
+		gapTimeout:     gapTimeout,
 	}
 }
 
@@ -162,6 +190,7 @@ func (s *trustTunnelMultipathSession) addChannelLocked(channel *trustTunnelMulti
 	s.channels[channel.id] = channel
 	if uint32(len(s.channels)) >= s.minChannels {
 		s.state = trustTunnelMultipathSessionActive
+		s.markReadyLocked()
 	} else {
 		s.state = trustTunnelMultipathSessionOpening
 	}
@@ -252,6 +281,119 @@ func (s *trustTunnelMultipathSession) cleanupUsedNoncesLocked(cutoff time.Time) 
 			delete(s.usedNonces, nonce)
 		}
 	}
+}
+
+func (s *trustTunnelMultipathSession) markReadyLocked() {
+	if s == nil {
+		return
+	}
+	select {
+	case <-s.readyCh:
+	default:
+		close(s.readyCh)
+	}
+}
+
+func (s *trustTunnelMultipathSession) Ready() <-chan struct{} {
+	if s == nil {
+		closed := make(chan struct{})
+		close(closed)
+		return closed
+	}
+	return s.readyCh
+}
+
+func (s *trustTunnelMultipathSession) Closed() <-chan struct{} {
+	if s == nil {
+		closed := make(chan struct{})
+		close(closed)
+		return closed
+	}
+	return s.closedCh
+}
+
+func (s *trustTunnelMultipathSession) Close(err error) {
+	if s == nil {
+		return
+	}
+
+	var channels []*trustTunnelMultipathChannel
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.state = trustTunnelMultipathSessionClosing
+		s.closeErr = err
+		channels = make([]*trustTunnelMultipathChannel, 0, len(s.channels))
+		for _, channel := range s.channels {
+			channels = append(channels, channel)
+		}
+		s.mu.Unlock()
+
+		for _, channel := range channels {
+			if channel == nil || channel.stream == nil {
+				continue
+			}
+			_ = channel.stream.Close()
+		}
+
+		close(s.closedCh)
+	})
+}
+
+func (s *trustTunnelMultipathSession) CloseErr() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.closeErr
+}
+
+func (s *trustTunnelMultipathSession) IsClosed() bool {
+	if s == nil {
+		return true
+	}
+	select {
+	case <-s.closedCh:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *trustTunnelMultipathSession) ChannelSnapshot() []*trustTunnelMultipathChannel {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ids := make([]int, 0, len(s.channels))
+	for channelID := range s.channels {
+		ids = append(ids, int(channelID))
+	}
+	sort.Ints(ids)
+
+	channels := make([]*trustTunnelMultipathChannel, 0, len(ids))
+	for _, channelID := range ids {
+		if channel := s.channels[uint32(channelID)]; channel != nil {
+			channels = append(channels, channel)
+		}
+	}
+	return channels
+}
+
+func (s *trustTunnelMultipathSession) ReorderWindow() int {
+	if s == nil {
+		return trustTunnelMultipathDefaultReorderWindow
+	}
+	return s.reorderWindow
+}
+
+func (s *trustTunnelMultipathSession) GapTimeout() time.Duration {
+	if s == nil {
+		return trustTunnelMultipathDefaultGapTimeout
+	}
+	return s.gapTimeout
 }
 
 type trustTunnelMultipathSessionRegistry struct {

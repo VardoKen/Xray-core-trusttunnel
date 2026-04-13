@@ -830,7 +830,7 @@ func (s *Server) serveHTTPConnectRequest(proto string, ctx context.Context, w ht
 		return
 	}
 
-	if s.serveMultipathControlRequest(proto, ctx, w, req, user, cleanupConn) {
+	if s.serveMultipathControlRequest(proto, ctx, w, req, dispatcher, user, cleanupConn) {
 		return
 	}
 

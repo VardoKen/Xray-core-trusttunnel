@@ -104,10 +104,9 @@ func trustTunnelStreamSettingsWithTLSCompatibility(streamSettings *internet.Memo
 		return override, true, true
 	}
 
-	needAllowInsecure := tlsConfig.GetAllowInsecure()
 	needAuthorityVerify := cfg.GetCertificatePem() != "" && trustTunnelTLSConfigNeedsCompatibilityAuthorityVerify(tlsConfig)
 
-	if !needServerName && !needAllowInsecure && !needAuthorityVerify {
+	if !needServerName && !needAuthorityVerify {
 		return streamSettings, false, true
 	}
 

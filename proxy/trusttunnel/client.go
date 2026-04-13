@@ -24,7 +24,6 @@ import (
 	"github.com/xtls/xray-core/transport/internet"
 	"github.com/xtls/xray-core/transport/internet/stat"
 	xtlstls "github.com/xtls/xray-core/transport/internet/tls"
-	"golang.org/x/net/http2"
 )
 
 func init() {
@@ -306,36 +305,8 @@ func connectHTTP1(rawConn stat.Connection, req *http.Request) (io.ReadWriteClose
 }
 
 func connectHTTP2(rawConn stat.Connection, req *http.Request) (io.ReadWriteCloser, error) {
-	pr, pw := io.Pipe()
-	req.Body = pr
-
-	t := http2.Transport{}
-	h2clientConn, err := t.NewClientConn(rawConn)
-	if err != nil {
-		_ = pr.Close()
-		_ = pw.Close()
-		_ = rawConn.Close()
-		return nil, err
-	}
-
-	resp, err := h2clientConn.RoundTrip(req)
-	if err != nil {
-		_ = pr.Close()
-		_ = pw.Close()
-		_ = rawConn.Close()
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		_ = resp.Body.Close()
-		_ = pr.Close()
-		_ = pw.Close()
-		_ = rawConn.Close()
-		return nil, errors.New("trusttunnel CONNECT failed with status ", resp.StatusCode, ": ", string(body))
-	}
-
-	return newHTTP2Conn(rawConn, pw, resp.Body), nil
+	_, tunnelConn, err := connectHTTP2WithResponse(rawConn, req)
+	return tunnelConn, err
 }
 
 func newHTTP2Conn(c stat.Connection, pipedReqBody *io.PipeWriter, respBody io.ReadCloser) io.ReadWriteCloser {
@@ -557,10 +528,6 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		return err
 	}
 
-	if multipath := c.config.GetMultipath(); multipath != nil && multipath.GetEnabled() {
-		return errors.New(trustTunnelMultipathPayloadNotReadyText).AtError()
-	}
-
 	if ob.Target.Network == xnet.Network_ICMP {
 		return c.processICMP(ctx, link, dialer, ob.Target)
 	}
@@ -580,6 +547,10 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		return err
 	}
 	ctx = updatedCtx
+
+	if multipath := c.config.GetMultipath(); multipath != nil && multipath.GetEnabled() {
+		return c.processMultipathTCP(ctx, link, dialer, ob.Target, attempts, tlsHandledByStreamSettings)
+	}
 
 	tunnelConn, err := c.connectWithEndpointPolicy(ctx, attempts, "endpoint", func(runCtx context.Context, attempt trustTunnelServerAttempt) (io.ReadWriteCloser, error) {
 		server := attempt.server
