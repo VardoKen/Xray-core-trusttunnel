@@ -389,11 +389,10 @@ Validator первой фазы должен fail-fast резать:
 - reorder path уже использует bounded backpressure вместо мгновенного `reorder window exceeded`, если missing gap ещё может закрыться;
 - strict policy при падении active channels ниже `minChannels` уже реализована в runtime и подтверждена unit/scenario тестами;
 - positive Linux live bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248` подтверждает, что после phase-4 hardening payload path остаётся рабочим;
-- negative Linux live bundle `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-092142` подтверждает реальный channel-loss path через `nft reject with tcp reset`, но явный outer-layer marker `trusttunnel multipath channel quorum lost` в live bundle пока ещё не surfaced.
+- negative Linux live bundle `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-204116` подтверждает реальный channel-loss path через `nft reject with tcp reset`, а client runtime в `/root/tt-multipath-phase3/client-error.log` уже surface'ит outer-layer marker `trusttunnel connection ends > proxy/trusttunnel: trusttunnel multipath channel quorum lost`.
 
 Сделать:
 - если понадобится, расширить fairness counters до scheduler-quality telemetry;
-- вынести explicit outer-layer/runtime marker для strict quorum-loss в live bundle, а не только в unit/scenario verdict;
 - не допустить регресса bounded backpressure обратно в мгновенный overflow-fail.
 
 Критерий готовности:
