@@ -1,6 +1,6 @@
 # TrustTunnel Multipath Transport — план R&D
 
-Статус: draft R&D plan
+Статус: current R&D plan
 Дата фиксации: 2026-04-14
 Ветка: `feat/trusttunnel-multipath`  
 Область истины: план новой экспериментальной линии разработки, а не описание уже подтверждённого runtime  
@@ -427,15 +427,26 @@ Validator первой фазы должен fail-fast резать:
 
 ### Фаза 6. Live validation для TCP
 
-Нужны реальные тесты:
+Статус на 2026-04-14:
+- локальная Linux validation уже закрыта для IPv4 `2-of-2`, IPv6 `2-of-2` и IPv6 `4-of-4`, включая positive, negative и rejoin verdict;
+- первый public/external positive verdict уже закрыт на shared prod host `flyingamaranth.aeza.network` через isolated high-port `:9543`;
+- внешние staged-download runs уже подтверждены для IPv6 `8-of-8` и `16-of-16` между lab и публичным multi-IP host;
+- внешние fault-injection / recovery / rejoin и load/CPU на dedicated external host ещё открыты.
+
+Уже подтверждено:
 - server с несколькими IP;
-- минимум 2 simultaneous active channels;
-- forced traffic distribution;
-- kill one channel;
-- restore one channel;
+- один client source address против множества server destination IP;
+- минимум `2` simultaneous active channels и вплоть до `16` simultaneous active channels;
 - long-lived transfer;
 - hash/ordering verification;
-- CPU / throughput measurement.
+- packet/socket-level proof через `ss`, что реально используются разные destination IP.
+
+Остаётся:
+- external `kill one channel`;
+- external `restore one channel`;
+- external negative/rejoin verdict вне shared prod host;
+- external load / CPU measurement;
+- higher-cardinality validation `32+` / `50+`, если это понадобится как отдельный scale target.
 
 Критерий готовности:
 - подтверждённый real-traffic path lab → remote multipath endpoint → internet;
@@ -585,4 +596,5 @@ Multipath должен быть:
 1. Сохранить phase-2 control-path как уже закрытый и live-подтверждённый базовый слой.
 2. Сделать минимальный framed TCP data path для двух channels.
 3. Добавить client-side scheduler/reassembly поверх уже существующего `_mptcp_open` / `_mptcp_attach`.
-4. Поднять первый remote-live стенд с multi-IP payload data-plane и доказать одновременную передачу по обоим IP.
+4. Для dedicated external host закрыть fault-injection / recovery / rejoin после уже подтверждённого external positive verdict.
+5. При необходимости поднять higher-cardinality validation `32+` / `50+` server destination IPv6.

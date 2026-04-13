@@ -170,7 +170,7 @@
 - multipath phase 1, phase 2, phase 3, phase 4, phase 5 и phase 6 уже существуют не только в локальном worktree, но и в Linux live retest на второй VM `192.168.1.25`;
 - validated scope уже включает config model, validator, session/control path, H2/TLS payload data-path, dynamic channel set, bounded reorder backpressure, strict channel-quorum semantics, recovery/rejoin после реального channel-loss и peer-visible outer-layer quorum-loss marker;
 - локальная multi-host валидация теперь закрыта и для IPv6: один client source address может одновременно держать несколько TCP-каналов к нескольким server destination IPv6 внутри одной session-level модели;
-- следующей открытой фазой остаётся уже не quorum-loss surfacing и не локальная IPv4/IPv6 VM-валидация, а external multi-IP validation вне этой локальной Linux VM.
+- следующей открытой фазой остаётся уже не quorum-loss surfacing, не локальная IPv4/IPv6 VM-валидация и не первый external positive verdict, а dedicated external negative / recovery / rejoin validation.
 
 Кодовые точки:
 - `proxy/trusttunnel/config.proto`
@@ -274,7 +274,7 @@
   - `ss-after-rejoin.txt` на server side снова показывает четыре активных канала после восстановления quorum;
 - H1 и H3 pseudo-host path для multipath честно режутся как unsupported;
 - current verdict уже не ограничен control-only phase 2 или initial payload-only phase 3: multi-IP traffic distribution, strict quorum semantics, reorder-window hardening, recovery/rejoin и outer-layer quorum-loss surfacing реально присутствуют в коде и подтверждены тестами;
-- открытым остаётся только public/external multi-IP validation за пределами локальной пары VM.
+- после локальной VM-валидации и внешних positive runs на shared prod host открытым остаётся уже не public/external positive verdict вообще, а только dedicated external negative / recovery / rejoin validation и, при необходимости, higher-cardinality scale validation.
 
 Подтверждённые команды:
 - локально:
@@ -291,9 +291,58 @@
 
 Практический вывод:
 - phase 1, phase 2, phase 3, phase 4, phase 5 и phase 6 уже закрывают config/validator/session/control, payload/runtime verdict, quorum-hardening, recovery/rejoin и outer-layer quorum-loss surfacing для `HTTP/2 over TLS`;
-- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, не первый framed payload path, не recovery/rejoin, не quorum-loss surfacing и не локальная IPv6 VM-валидация, а более жёсткая external multi-IP validation.
+- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, не первый framed payload path, не recovery/rejoin, не quorum-loss surfacing, не локальная IPv6 VM-валидация и не первый external positive verdict, а более жёсткая dedicated external negative / rejoin validation.
 
-### 1.4. Client-Side antiDPI runtime
+### 1.4. Multipath external/public IPv6 positive validation на isolated shared prod host
+
+Подтверждено на 2026-04-14:
+- external multipath positive validation больше не ограничена локальной парой Linux VM: она уже подтверждена на shared prod host `flyingamaranth.aeza.network` через отдельный test directory, отдельный binary, отдельные logs, isolated high-port `:9543` и временные IPv6 aliases из пула `2a12:5940:deef::/48`;
+- существующий prod `443` и процессы `rw-core` не затрагивались; firewall/route fault-injection на этом host сознательно не делались;
+- подтверждены два внешних positive verdict:
+  - `8-of-8` через server bundle `/root/tt-multipath-prod/logs/multipath-ipv6-positive-20260414-011854` и client bundles `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-prod8-20260414-011910`, `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-prod8b-20260414-012103`;
+  - `16-of-16` через server bundle `/root/tt-multipath-prod/logs/multipath-ipv6-positive-20260414-012325` и client bundle `/opt/lab/xray-tt/multipath-prod-ipv6-16/logs/multipath-ipv6-prod16-20260414-012526`.
+
+Preflight:
+- local branch: `feat/trusttunnel-multipath`;
+- local docs-only `HEAD`: `31021dde`;
+- lab repo `HEAD`: `a9b26d8b`;
+- tested runtime code remains at phase-6 code-state `c1932ca6`; local/prod artifacts above `c1932ca6` were docs-only or harness-only;
+- lab runtime binary: `/opt/lab/xray-tt/tmp/xray-tt-multipath-prod`;
+- prod runtime binary: `/root/tt-multipath-prod/xray-tt-multipath-linux`;
+- prod server config: `/root/tt-multipath-prod/multipath_prod_server.json`;
+- lab client configs:
+  - `/opt/lab/xray-tt/multipath-prod-ipv6/client.json` (`8-of-8`);
+  - `/opt/lab/xray-tt/multipath-prod-ipv6-16/client.json` (`16-of-16`);
+- cert/key: `/root/tt-multipath-prod/server.crt`, `/root/tt-multipath-prod/server.key`, ephemeral self-signed cert с `CN/SAN=ttmulti-prod.lab`;
+- client verify mode для этого isolated test instance: `allowInsecure=true`;
+- prod host preflight: `443` occupied existing prod traffic, `rw-core` running; test port `9543` свободен и используется только для isolated multipath instance.
+
+Что именно подтверждено:
+- один lab client source address `2a00:1370:81a2:2918:bd5:c785:b185:6de4` может одновременно держать несколько внешних TCP channels к нескольким публичным server destination IPv6 внутри одной multipath session;
+- `8-of-8` run:
+  - `curl.exitcode = 0`;
+  - `download.expected.sha256` = `download.actual.sha256` = `73102358b5d02cfff650549658448277c2984ebdf6dc689882c373fd435a6cb6`;
+  - lab `ss-9543.txt` фиксирует `8` established channels;
+  - prod `server-error.log` фиксирует `trusttunnel H2 multipath open accepted` и attach до `channel=8`;
+  - destination pool: `2a12:5940:deef::50` ... `2a12:5940:deef::57`;
+- `16-of-16` run:
+  - `curl.exitcode = 0`;
+  - `download.expected.sha256` = `download.actual.sha256` = `6eb649bbf48dbf5d8bbee5238072e4fcfca3b1542fa0fab95a95167f407720cb`;
+  - lab `ss-9543.txt` фиксирует `16` established channels;
+  - prod `server-error.log` фиксирует attach до `channel=16`;
+  - destination pool: `2a12:5940:deef::50` ... `2a12:5940:deef::5f`.
+
+Что сознательно НЕ подтверждалось на shared prod host:
+- external negative/fault-injection path через `nft` / `iptables`;
+- external recovery/rejoin после real channel-loss;
+- external load / CPU matrix на prod host;
+- cardinality выше `16` channels.
+
+Практический вывод:
+- multipath уже не ограничен локальными alias-IP внутри одной приватной сети: текущий runtime держит реальный внешний IPv6 `8-of-8` и `16-of-16` staged-download между lab и публичным multi-IP host;
+- следующий внешний шаг теперь уже не “первый public positive”, а отдельный dedicated external host для fault-injection / rejoin и, при необходимости, higher-cardinality `32+` / `50+` validation.
+
+### 1.5. Client-Side antiDPI runtime
 
 Подтверждено dedicated live smoke на 2026-04-09:
 - preflight code state: `7376ab64`;

@@ -169,8 +169,9 @@ R&D по TrustTunnel + H3 + REALITY завершён техническим ст
 - локальная IPv6 validation больше не ограничена `2-of-2`: client bundle `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-positive-20260414-004247` и rejoin bundle `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-004428` вместе с server bundle `/root/tt-multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-004416` подтверждают `4-of-4` и восстановление `3/4 -> 4/4` на destination IPv6 `fd42:5940:deef::50/51/52/53`.
 
 Что дальше:
-- следующий кодовый шаг уже не `multipath.*` model, не control-path, не первый payload path, не recovery/rejoin, не outer-layer quorum-loss surfacing и не локальная IPv6 VM-валидация, а более жёсткая public/external multi-IP live validation;
-- до закрытия этой фазы не заявлять multipath как стабильный продуктовый runtime-path.
+- следующий кодовый шаг уже не `multipath.*` model, не control-path, не первый payload path, не recovery/rejoin, не outer-layer quorum-loss surfacing, не локальная IPv6 VM-валидация и не первый external positive verdict, а dedicated external fault-injection / recovery / rejoin validation;
+- первый public/external positive verdict уже закрыт на shared prod host `flyingamaranth.aeza.network` через isolated high-port `:9543`: внешние `8-of-8` и `16-of-16` IPv6 staged-download runs между lab и prod завершились с `curl.exitcode = 0`, совпадающим SHA-256, `8/16` established channels на lab и attach до `channel=8/16` на prod server;
+- до закрытия отдельной external negative/rejoin фазы не заявлять multipath как стабильный продуктовый runtime-path.
 
 Полный поэтапный план, guardrails и точки интеграции зафиксированы в `docs/current/multipath-transport-plan.md`.
 
