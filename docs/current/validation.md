@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — подтверждённые проверки и границы тестирования
 
 Статус: current
-Дата фиксации: 2026-04-14
-Коммит состояния: `c1932ca6`
+Дата фиксации: 2026-04-15
+Коммит состояния: `6316788d`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -166,11 +166,11 @@
 
 ### 1.3. Multipath phase 1-6: config / validator / control path / payload runtime / quorum hardening / recovery-rejoin / outer-layer quorum-loss surfacing
 
-Подтверждено на 2026-04-14:
+Подтверждено на 2026-04-15:
 - multipath phase 1, phase 2, phase 3, phase 4, phase 5 и phase 6 уже существуют не только в локальном worktree, но и в Linux live retest на второй VM `192.168.1.25`;
-- validated scope уже включает config model, validator, session/control path, H2/TLS payload data-path, dynamic channel set, bounded reorder backpressure, strict channel-quorum semantics, recovery/rejoin после реального channel-loss и peer-visible outer-layer quorum-loss marker;
+- validated scope уже включает config model, validator, session/control path, H2/TLS payload data-path, dynamic channel set, bounded reorder backpressure, strict channel-quorum semantics, recovery/rejoin после реального channel-loss, request-side half-close, ACK / resend control-path, sender-side in-flight window и peer-visible outer-layer quorum-loss marker;
 - локальная multi-host валидация теперь закрыта и для IPv6: один client source address может одновременно держать несколько TCP-каналов к нескольким server destination IPv6 внутри одной session-level модели;
-- следующей открытой фазой остаётся уже не quorum-loss surfacing, не локальная IPv4/IPv6 VM-валидация и не первый external positive verdict, а dedicated external negative / recovery / rejoin validation.
+- следующей открытой фазой остаётся уже не quorum-loss surfacing, не локальная IPv4/IPv6 VM-валидация, не первый external positive verdict и не baseline external `8-of-8` rejoin, а higher-cardinality external recovery/rejoin и load/CPU validation.
 
 Кодовые точки:
 - `proxy/trusttunnel/config.proto`
@@ -200,12 +200,15 @@
 - runtime layer уже содержит `MultipathSession`, `MultipathChannel`, server-side session registry, attach-secret, attach-deadline, replay-guard, channel-limit validation, ready/close lifecycle, reorder window, gap-timeout, per-channel accounting counters, explicit strict quorum-loss semantics и peer-visible session-closing control-frame;
 - server-side H2 path уже реализует `_mptcp_open` / `_mptcp_attach`, attach-proof, primary session creation, secondary channel attach, payload dispatch после channel quorum и session teardown;
 - client/runtime layer уже реализует payload data-plane: framed stream, round-robin write distribution, writer retry по surviving channels, reorder/reassembly на read-path и bounded backpressure вместо мгновенного `reorder window exceeded`;
+- request-side stream tunnel после EOF теперь делает explicit `CloseWrite()`, чтобы long-lived WAN rejoin не заканчивался зависшим upload-half без финального half-close;
+- reassembler и writer теперь используют peer-visible ACK / resend control-path: при gap receiver может запросить `resend_from`, sender хранит in-flight frames и умеет best-effort retransmit без повторного учёта байт;
+- sender-side in-flight window теперь жёстко ограничен reorder-window размером session, чтобы WAN recovery/rejoin не упирался в новый `reorder window exceeded` быстрее, чем peer успеет закрыть gap;
 - reassembler больше не роняет multipath stream по idle-timeout без реального reorder-gap: timeout теперь срабатывает только при pending gap;
 - attach-deadline watcher больше не закрывает уже установленную multipath session после временной деградации quorum: после первого успешного quorum он ориентируется на `session.Ready()`, а не на текущий `Active()` state;
 - peer channel-loss теперь может быть surfaced с удалённой стороны через control-frame `channel_closed`, после чего peer session деградирует этот channel в своём registry, а не продолжает считать его silently alive;
 - server-side multipath session runtime больше не привязан к request-scoped context отдельного attach-канала: session-dispatch запускается на `context.WithoutCancel(ctx)` и закрывается только через session lifecycle, поэтому потеря attach channel больше не убивает всю session с `context canceled`;
 - live preflight был таким:
-  - local code state: `c1932ca6`;
+  - phase-6 baseline code state: `c1932ca6`, а WAN rejoin hardening подтверждён отдельным текущим code state `6316788d`;
   - local worktree: clean после code-commit;
   - local build path: `C:\Users\Vardo\GPTProject\xray-core-trusttunnel\tmp\xray-tt-multipath-linux-phase6`;
   - runtime host: вторая VM `192.168.1.25`, `root`, Debian 13;
@@ -272,9 +275,14 @@
   - client bundle `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-004428` завершается с `curl.exitcode = 0`, а `download.expected.sha256` и `download.actual.sha256` совпадают;
   - `client-markers.txt` фиксирует `trusttunnel multipath quorum degraded ... got=3 want=4`, затем `trusttunnel multipath quorum restored ... channels=4` и `trusttunnel multipath rejoined endpoint [fd42:5940:deef::53]:9543 ... channel=5`;
   - `ss-after-rejoin.txt` на server side снова показывает четыре активных канала после восстановления quorum;
+- host-to-host IPv6 `8-of-8` recovery/rejoin-run после WAN-hardening дополнительно подтверждает:
+  - client bundle `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-localvm8rejoin-20260415-012238` и server bundle `/root/tt-multipath-ipv6/logs/multipath-ipv6-rejoin-20260415-012237` завершаются с `curl.exitcode = 0`;
+  - `download.expected.sha256` и `download.actual.sha256` совпадают как `7dc0246dec155ee4e23864818b275e4438cba45e0740383d05014242d541bdd7`;
+  - `client-markers.txt` фиксирует `trusttunnel multipath quorum degraded ... got=7 want=8`, затем `trusttunnel multipath quorum restored ... channels=8` и `trusttunnel multipath rejoined endpoint [fd42:5940:deef::57]:9543 ... channel=9`;
+  - `drop.log` фиксирует `drop-mode=nft`, а `ss-after-rejoin.txt` на server side снова показывает восемь активных каналов после восстановления quorum;
 - H1 и H3 pseudo-host path для multipath честно режутся как unsupported;
 - current verdict уже не ограничен control-only phase 2 или initial payload-only phase 3: multi-IP traffic distribution, strict quorum semantics, reorder-window hardening, recovery/rejoin и outer-layer quorum-loss surfacing реально присутствуют в коде и подтверждены тестами;
-- после локальной VM-валидации и внешних positive runs на shared prod host открытым остаётся уже не public/external positive verdict вообще, а только dedicated external negative / recovery / rejoin validation и, при необходимости, higher-cardinality scale validation.
+- после локальной VM-валидации, внешних positive runs и shared-prod `8-of-8` rejoin открытым остаётся уже не baseline public/external recovery verdict вообще, а higher-cardinality external validation: `16+` / `32+` / `50+` rejoin, load/CPU и, при необходимости, более агрессивный fault-injection.
 
 Подтверждённые команды:
 - локально:
@@ -293,20 +301,21 @@
 - phase 1, phase 2, phase 3, phase 4, phase 5 и phase 6 уже закрывают config/validator/session/control, payload/runtime verdict, quorum-hardening, recovery/rejoin и outer-layer quorum-loss surfacing для `HTTP/2 over TLS`;
 - следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, не первый framed payload path, не recovery/rejoin, не quorum-loss surfacing, не локальная IPv6 VM-валидация и не первый external positive verdict, а более жёсткая dedicated external negative / rejoin validation.
 
-### 1.4. Multipath external/public IPv6 positive validation на isolated shared prod host
+### 1.4. Multipath external/public IPv6 positive и `8-of-8` rejoin validation на isolated shared prod host
 
-Подтверждено на 2026-04-14:
+Подтверждено на 2026-04-15:
 - external multipath positive validation больше не ограничена локальной парой Linux VM: она уже подтверждена на shared prod host `flyingamaranth.aeza.network` через отдельный test directory, отдельный binary, отдельные logs, isolated high-port `:9543` и временные IPv6 aliases из пула `2a12:5940:deef::/48`;
-- существующий prod `443` и процессы `rw-core` не затрагивались; firewall/route fault-injection на этом host сознательно не делались;
-- подтверждены два внешних positive verdict:
+- существующий prod `443` и процессы `rw-core` не затрагивались; multipath test instance жил только на `:9543`, а временные IPv6 aliases `::50` ... `::5f` после прогона были сняты;
+- подтверждены три внешних verdict:
   - `8-of-8` через server bundle `/root/tt-multipath-prod/logs/multipath-ipv6-positive-20260414-011854` и client bundles `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-prod8-20260414-011910`, `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-prod8b-20260414-012103`;
-  - `16-of-16` через server bundle `/root/tt-multipath-prod/logs/multipath-ipv6-positive-20260414-012325` и client bundle `/opt/lab/xray-tt/multipath-prod-ipv6-16/logs/multipath-ipv6-prod16-20260414-012526`.
+  - `16-of-16` через server bundle `/root/tt-multipath-prod/logs/multipath-ipv6-positive-20260414-012325` и client bundle `/opt/lab/xray-tt/multipath-prod-ipv6-16/logs/multipath-ipv6-prod16-20260414-012526`;
+  - `8-of-8` rejoin через server bundle `/root/tt-multipath-prod/logs/multipath-ipv6-rejoin-20260415-012434` и client bundle `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-prod8rejoinfix-20260415-012434`.
 
 Preflight:
 - local branch: `feat/trusttunnel-multipath`;
-- local docs-only `HEAD`: `31021dde`;
-- lab repo `HEAD`: `a9b26d8b`;
-- tested runtime code remains at phase-6 code-state `c1932ca6`; local/prod artifacts above `c1932ca6` were docs-only or harness-only;
+- local code state: `6316788d`;
+- lab repo `HEAD`: `6316788d`;
+- tested runtime code for the rejoin rerun is the same `6316788d`, а не более старый phase-6 baseline;
 - lab runtime binary: `/opt/lab/xray-tt/tmp/xray-tt-multipath-prod`;
 - prod runtime binary: `/root/tt-multipath-prod/xray-tt-multipath-linux`;
 - prod server config: `/root/tt-multipath-prod/multipath_prod_server.json`;
@@ -331,16 +340,23 @@ Preflight:
   - lab `ss-9543.txt` фиксирует `16` established channels;
   - prod `server-error.log` фиксирует attach до `channel=16`;
   - destination pool: `2a12:5940:deef::50` ... `2a12:5940:deef::5f`.
+- `8-of-8` rejoin run:
+  - `curl.exitcode = 0`;
+  - `download.expected.sha256` = `download.actual.sha256` = `7dc0246dec155ee4e23864818b275e4438cba45e0740383d05014242d541bdd7`;
+  - client log фиксирует `trusttunnel multipath quorum degraded ... got=7 want=8`, затем `trusttunnel multipath quorum restored ... channels=8` и `trusttunnel multipath rejoined endpoint [2a12:5940:deef::57]:9543 ... channel=9`;
+  - prod `drop.log` фиксирует `drop-mode=nft` и `drop-removed=1`;
+  - prod `ss-after-rejoin.txt` снова показывает восемь активных каналов, включая восстановившийся `::57`;
+  - prod `server-error.log` фиксирует `trusttunnel multipath quorum degraded`, затем `trusttunnel multipath quorum restored`, без финального `reorder gap timed out` или `reorder window exceeded`.
 
 Что сознательно НЕ подтверждалось на shared prod host:
-- external negative/fault-injection path через `nft` / `iptables`;
-- external recovery/rejoin после real channel-loss;
+- higher-cardinality recovery/rejoin выше `8-of-8`;
 - external load / CPU matrix на prod host;
-- cardinality выше `16` channels.
+- cardinality выше `16` channels;
+- более агрессивный multi-channel fault-injection сверх single-channel drop.
 
 Практический вывод:
-- multipath уже не ограничен локальными alias-IP внутри одной приватной сети: текущий runtime держит реальный внешний IPv6 `8-of-8` и `16-of-16` staged-download между lab и публичным multi-IP host;
-- следующий внешний шаг теперь уже не “первый public positive”, а отдельный dedicated external host для fault-injection / rejoin и, при необходимости, higher-cardinality `32+` / `50+` validation.
+- multipath уже не ограничен локальными alias-IP внутри одной приватной сети: текущий runtime держит реальный внешний IPv6 `8-of-8` / `16-of-16` staged-download и shared-prod `8-of-8` rejoin между lab и публичным multi-IP host;
+- следующий внешний шаг теперь уже не “первый public positive” и не baseline external rejoin, а higher-cardinality `16+` / `32+` / `50+` recovery-rejoin и отдельная load/CPU validation.
 
 ### 1.5. Client-Side antiDPI runtime
 

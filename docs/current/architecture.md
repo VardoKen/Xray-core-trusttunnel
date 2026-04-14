@@ -1,8 +1,8 @@
 # TrustTunnel / Xray-Core — архитектура и runtime-path
 
 Статус: current
-Дата фиксации: 2026-04-14
-Коммит состояния: `c1932ca6`
+Дата фиксации: 2026-04-15
+Коммит состояния: `6316788d`
 Ветка: `feat/trusttunnel-multipath`
 Область истины: карта кода, реальные runtime-path, активные и декларативные поля конфигурации
 Не использовать для: исторического описания этапов и промежуточных тупиковых веток
@@ -165,7 +165,7 @@
 - UDP CONNECT на official authority `_udp2`; server-side reserved-host matcher сохраняет backward-compat на `_udp2` и legacy `_udp2:0`
 - ICMP CONNECT на `_icmp:0` для H2 и H3
 - common outbound features `proxySettings`, `mux`, `sendThrough=origin` и `targetStrategy useipv4` проходят через тот же generic Xray outbound layer и не требуют TrustTunnel-specific routing surface
-- experimental `multipath.*` config surface уже существует вместе с `_mptcp_open` / `_mptcp_attach` control path, H2/TLS framed payload runtime, phase-5 recovery/rejoin path и phase-6 outer-layer quorum-loss surfacing; current code уже держит dynamic channel snapshot, per-channel accounting, bounded reorder backpressure, explicit strict quorum-loss semantics, peer `channel_closed` / `session_closing` control-frame и detached session runtime через `context.WithoutCancel(...)`, а live bundles `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248`, `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749`, `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-204116`, `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-positive-20260414-002036`, `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-gap-20260414-002600` и `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-002736` подтверждают working multi-IP payload path, strict quorum-loss и rejoin как на IPv4 alias IP `192.168.1.50/51`, так и на IPv6 destination IP `fd42:5940:deef::50/51` при одном client source address `fd42:5940:deef::19`; открытой фазой остаётся уже только external multi-IP validation
+- experimental `multipath.*` config surface уже существует вместе с `_mptcp_open` / `_mptcp_attach` control path, H2/TLS framed payload runtime, phase-5 recovery/rejoin path и phase-6 outer-layer quorum-loss surfacing; current code уже держит dynamic channel snapshot, per-channel accounting, bounded reorder backpressure, explicit strict quorum-loss semantics, request-side half-close, peer `channel_closed` / `session_closing` control-frame, ACK / resend control-path, sender-side in-flight window и detached session runtime через `context.WithoutCancel(...)`, а live bundles `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248`, `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749`, `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-204116`, `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-positive-20260414-002036`, `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-localvm8rejoin-20260415-012238` и `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-prod8rejoinfix-20260415-012434` подтверждают working multi-IP payload path, strict quorum-loss и rejoin как на IPv4 alias IP `192.168.1.50/51`, так и на IPv6 destination IP `fd42:5940:deef::50/51/52/53/54/55/56/57` и `2a12:5940:deef::50` ... `::57` при одном client source address; открытыми остаются уже только higher-cardinality external recovery/load задачи
 
 ### 4.3. Поля outbound, реально участвующие в runtime
 
@@ -190,7 +190,7 @@ Experimental multipath surface:
 - positive live rejoin bundle `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749` подтверждает восстановление quorum и успешный rejoin без `unknown session` / `context canceled`;
 - host-to-host IPv6 bundles `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-positive-20260414-002036`, `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-gap-20260414-002600` и `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-002736` подтверждают ту же модель уже на двух реальных Linux host: один client source address `fd42:5940:deef::19`, два server destination IPv6 `fd42:5940:deef::50/51`, strict quorum-loss и успешный rejoin `channel=3`;
 - те же Linux host уже подтверждают и `N>2`: bundles `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-positive-20260414-004247` и `/opt/lab/xray-tt/multipath-ipv6/logs/multipath-ipv6-rejoin-20260414-004428` показывают `4-of-4` на destination IPv6 `fd42:5940:deef::50/51/52/53`, а после временного drop одного канала quorum восстанавливается `3/4 -> 4/4` через attach `channel=5`;
-- external multi-IP validation ещё не закрыта.
+- shared-prod external `8-of-8` rejoin уже закрыт через bundle `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-prod8rejoinfix-20260415-012434`; оставшимися открытыми задачами остаются higher-cardinality external rejoin и load/CPU.
 
 ### 4.3.1. Generic TLS surface на поддержанном H2/TLS path
 

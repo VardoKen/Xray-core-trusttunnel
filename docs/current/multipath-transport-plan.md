@@ -1,7 +1,7 @@
 # TrustTunnel Multipath Transport — план R&D
 
 Статус: current R&D plan
-Дата фиксации: 2026-04-14
+Дата фиксации: 2026-04-15
 Ветка: `feat/trusttunnel-multipath`  
 Область истины: план новой экспериментальной линии разработки, а не описание уже подтверждённого runtime  
 Не использовать для: утверждений вида «multipath уже реализован» или «multipath уже interoperable»
@@ -427,11 +427,12 @@ Validator первой фазы должен fail-fast резать:
 
 ### Фаза 6. Live validation для TCP
 
-Статус на 2026-04-14:
+Статус на 2026-04-15:
 - локальная Linux validation уже закрыта для IPv4 `2-of-2`, IPv6 `2-of-2` и IPv6 `4-of-4`, включая positive, negative и rejoin verdict;
 - первый public/external positive verdict уже закрыт на shared prod host `flyingamaranth.aeza.network` через isolated high-port `:9543`;
 - внешние staged-download runs уже подтверждены для IPv6 `8-of-8` и `16-of-16` между lab и публичным multi-IP host;
-- внешние fault-injection / recovery / rejoin и load/CPU на dedicated external host ещё открыты.
+- shared-prod external `8-of-8` recovery/rejoin тоже уже подтверждён;
+- higher-cardinality external recovery/rejoin и load/CPU на dedicated external host ещё открыты.
 
 Уже подтверждено:
 - server с несколькими IP;
@@ -442,9 +443,9 @@ Validator первой фазы должен fail-fast резать:
 - packet/socket-level proof через `ss`, что реально используются разные destination IP.
 
 Остаётся:
-- external `kill one channel`;
-- external `restore one channel`;
-- external negative/rejoin verdict вне shared prod host;
+- higher-cardinality external `kill one channel`;
+- higher-cardinality external `restore one channel`;
+- external `16+` / `32+` / `50+` rejoin verdict;
 - external load / CPU measurement;
 - higher-cardinality validation `32+` / `50+`, если это понадобится как отдельный scale target.
 
