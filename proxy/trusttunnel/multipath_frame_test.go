@@ -79,6 +79,77 @@ func TestTrustTunnelMultipathStreamWritesRoundRobinAcrossChannels(t *testing.T) 
 	}
 }
 
+func TestTrustTunnelMultipathStreamCloseWriteSendsFIN(t *testing.T) {
+	channel1Client, channel1Server := net.Pipe()
+	channel2Client, channel2Server := net.Pipe()
+	defer channel1Server.Close()
+	defer channel2Server.Close()
+
+	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:          "sess-closewrite",
+		Target:      xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:  "1.1.1.1:443",
+		MinChannels: 2,
+		MaxChannels: 2,
+	})
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443", stream: channel1Client}); err != nil {
+		t.Fatalf("AddChannel(primary) error: %v", err)
+	}
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443", stream: channel2Client}); err != nil {
+		t.Fatalf("AddChannel(secondary) error: %v", err)
+	}
+
+	stream, err := newTrustTunnelMultipathStream(session)
+	if err != nil {
+		t.Fatalf("newTrustTunnelMultipathStream() error: %v", err)
+	}
+	defer stream.Close()
+
+	frameCh1 := make(chan *trustTunnelMultipathFrame, 1)
+	frameCh2 := make(chan *trustTunnelMultipathFrame, 1)
+	go func() {
+		frame, err := trustTunnelReadMultipathFrame(channel1Server)
+		if err != nil {
+			frameCh1 <- nil
+			return
+		}
+		frameCh1 <- frame
+	}()
+	go func() {
+		frame, err := trustTunnelReadMultipathFrame(channel2Server)
+		if err != nil {
+			frameCh2 <- nil
+			return
+		}
+		frameCh2 <- frame
+	}()
+
+	if err := stream.CloseWrite(); err != nil {
+		t.Fatalf("CloseWrite() error: %v", err)
+	}
+
+	readFrame := func(ch <-chan *trustTunnelMultipathFrame) *trustTunnelMultipathFrame {
+		select {
+		case frame := <-ch:
+			return frame
+		case <-time.After(200 * time.Millisecond):
+			return nil
+		}
+	}
+
+	frame1 := readFrame(frameCh1)
+	frame2 := readFrame(frameCh2)
+	finCount := 0
+	for _, frame := range []*trustTunnelMultipathFrame{frame1, frame2} {
+		if frame != nil && frame.Flags&trustTunnelMultipathFrameFlagFIN != 0 {
+			finCount++
+		}
+	}
+	if finCount != 1 {
+		t.Fatalf("CloseWrite() sent FIN on %d channels, want 1", finCount)
+	}
+}
+
 func TestTrustTunnelMultipathStreamReassemblesOutOfOrderFrames(t *testing.T) {
 	channel1Client, channel1Server := net.Pipe()
 	channel2Client, channel2Server := net.Pipe()
@@ -150,6 +221,77 @@ func TestTrustTunnelMultipathReassemblerGapTimeout(t *testing.T) {
 	}
 	if time.Since(start) < 20*time.Millisecond {
 		t.Fatalf("gap timeout fired too early: %v", time.Since(start))
+	}
+}
+
+func TestTrustTunnelMultipathReassemblerRequestsResendBeforeTimingOut(t *testing.T) {
+	reassembler := newTrustTunnelMultipathFrameReassembler(1024, 25*time.Millisecond)
+	reassembler.onGap = func(nextSeq uint64) bool {
+		if nextSeq != 0 {
+			t.Fatalf("onGap(nextSeq) = %d, want 0", nextSeq)
+		}
+		go func() {
+			time.Sleep(5 * time.Millisecond)
+			_ = reassembler.PushFrame(&trustTunnelMultipathFrame{
+				Seq:     0,
+				Payload: []byte("alpha"),
+			})
+			_ = reassembler.PushFrame(&trustTunnelMultipathFrame{
+				Seq:   2,
+				Flags: trustTunnelMultipathFrameFlagFIN,
+			})
+		}()
+		return true
+	}
+	if err := reassembler.PushFrame(&trustTunnelMultipathFrame{
+		Seq:     1,
+		Payload: []byte("beta"),
+	}); err != nil {
+		t.Fatalf("PushFrame(seq1) error: %v", err)
+	}
+
+	payload, err := io.ReadAll(reassemblerReader{reassembler: reassembler})
+	if err != nil {
+		t.Fatalf("ReadAll() error: %v", err)
+	}
+	if string(payload) != "alphabeta" {
+		t.Fatalf("payload = %q, want %q", string(payload), "alphabeta")
+	}
+}
+
+func TestTrustTunnelMultipathReassemblerIgnoresDuplicateRetransmitFrame(t *testing.T) {
+	reassembler := newTrustTunnelMultipathFrameReassembler(1024, 200*time.Millisecond)
+	if err := reassembler.PushFrame(&trustTunnelMultipathFrame{
+		Seq:     1,
+		Payload: []byte("beta"),
+	}); err != nil {
+		t.Fatalf("PushFrame(seq1) error: %v", err)
+	}
+	if err := reassembler.PushFrame(&trustTunnelMultipathFrame{
+		Seq:     0,
+		Payload: []byte("alpha"),
+	}); err != nil {
+		t.Fatalf("PushFrame(seq0) error: %v", err)
+	}
+	if err := reassembler.PushFrame(&trustTunnelMultipathFrame{
+		Seq:     1,
+		Payload: []byte("beta"),
+	}); err != nil {
+		t.Fatalf("duplicate PushFrame(seq1) error: %v", err)
+	}
+	if err := reassembler.PushFrame(&trustTunnelMultipathFrame{
+		Seq:   2,
+		Flags: trustTunnelMultipathFrameFlagFIN,
+	}); err != nil {
+		t.Fatalf("PushFrame(fin) error: %v", err)
+	}
+
+	payload, err := io.ReadAll(reassemblerReader{reassembler: reassembler})
+	if err != nil {
+		t.Fatalf("ReadAll() error: %v", err)
+	}
+	if string(payload) != "alphabeta" {
+		t.Fatalf("payload = %q, want %q", string(payload), "alphabeta")
 	}
 }
 
@@ -238,6 +380,112 @@ func TestTrustTunnelMultipathReassemblerBackpressuresUntilGapCloses(t *testing.T
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("PushFrame(seq2) did not unblock after gap closed")
+	}
+}
+
+func TestTrustTunnelMultipathReassemblerBackpressureRequestsResendBeforeWindowExceeded(t *testing.T) {
+	reassembler := newTrustTunnelMultipathFrameReassembler(4, 200*time.Millisecond)
+	reassembler.onGap = func(nextSeq uint64) bool {
+		if nextSeq != 0 {
+			t.Fatalf("onGap(nextSeq) = %d, want 0", nextSeq)
+		}
+		go func() {
+			time.Sleep(5 * time.Millisecond)
+			_ = reassembler.PushFrame(&trustTunnelMultipathFrame{
+				Seq:     0,
+				Payload: []byte("aaaa"),
+			})
+			buf := make([]byte, 4)
+			_, _ = reassembler.Read(buf)
+			_, _ = reassembler.Read(buf)
+		}()
+		return true
+	}
+	if err := reassembler.PushFrame(&trustTunnelMultipathFrame{
+		Seq:     1,
+		Payload: []byte("bbbb"),
+	}); err != nil {
+		t.Fatalf("PushFrame(seq1) error: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- reassembler.PushFrame(&trustTunnelMultipathFrame{
+			Seq:     2,
+			Payload: []byte("cccc"),
+		})
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("PushFrame(seq2) error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("PushFrame(seq2) did not complete after resend request")
+	}
+}
+
+func TestTrustTunnelMultipathFrameWriterRetransmitFromResendsBufferedFrames(t *testing.T) {
+	stream1 := &recordingMultipathStream{}
+	stream2 := &recordingMultipathStream{}
+
+	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:          "sess-retransmit",
+		Target:      xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:  "1.1.1.1:443",
+		MinChannels: 2,
+		MaxChannels: 2,
+		Strict:      true,
+	})
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443", stream: stream1}); err != nil {
+		t.Fatalf("AddChannel(channel1) error: %v", err)
+	}
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443", stream: stream2}); err != nil {
+		t.Fatalf("AddChannel(channel2) error: %v", err)
+	}
+
+	writer := newTrustTunnelMultipathFrameWriter(session)
+	writer.maxPayload = 5
+	if _, err := writer.Write([]byte("alphabeta")); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+	writer.Ack(1)
+
+	readFrames := func(data []byte) []*trustTunnelMultipathFrame {
+		reader := bytes.NewReader(data)
+		frames := make([]*trustTunnelMultipathFrame, 0, 2)
+		for reader.Len() > 0 {
+			frame, err := trustTunnelReadMultipathFrame(reader)
+			if err != nil {
+				t.Fatalf("trustTunnelReadMultipathFrame() error: %v", err)
+			}
+			frames = append(frames, frame)
+		}
+		return frames
+	}
+
+	frames1 := readFrames(stream1.Bytes())
+	frames2 := readFrames(stream2.Bytes())
+	if len(frames1) != 1 || len(frames2) != 1 {
+		t.Fatalf("initial frame counts = (%d, %d), want (1, 1)", len(frames1), len(frames2))
+	}
+	frame1 := frames1[0]
+	frame2 := frames2[0]
+	if frame1.Seq != 0 || frame2.Seq != 1 {
+		t.Fatalf("initial seqs = (%d, %d), want (0, 1)", frame1.Seq, frame2.Seq)
+	}
+
+	if err := writer.RetransmitFrom(1); err != nil {
+		t.Fatalf("RetransmitFrom() error: %v", err)
+	}
+
+	frames1 = readFrames(stream1.Bytes())
+	if len(frames1) != 2 {
+		t.Fatalf("stream1 frame count after retransmit = %d, want 2", len(frames1))
+	}
+	if frames1[1].Seq != 1 {
+		t.Fatalf("replayed seq = %d, want 1", frames1[1].Seq)
 	}
 }
 
@@ -635,6 +883,97 @@ func TestTrustTunnelMultipathControlSessionClosingSurfacesPeerMarker(t *testing.
 	}
 	if !session.IsClosed() {
 		t.Fatal("session.IsClosed() = false, want true")
+	}
+}
+
+func TestTrustTunnelMultipathSessionCloseSendsNormalPeerClose(t *testing.T) {
+	stream1 := &recordingMultipathStream{}
+	stream2 := &recordingMultipathStream{}
+
+	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:          "sess-normal-close",
+		Target:      xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:  "1.1.1.1:443",
+		MinChannels: 2,
+		MaxChannels: 2,
+		Strict:      true,
+	})
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443", stream: stream1}); err != nil {
+		t.Fatalf("AddChannel(channel1) error: %v", err)
+	}
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443", stream: stream2}); err != nil {
+		t.Fatalf("AddChannel(channel2) error: %v", err)
+	}
+
+	session.Close(nil)
+
+	frame1, err := trustTunnelReadMultipathFrame(bytes.NewReader(stream1.Bytes()))
+	if err != nil {
+		t.Fatalf("trustTunnelReadMultipathFrame(channel1) error: %v", err)
+	}
+	frame2, err := trustTunnelReadMultipathFrame(bytes.NewReader(stream2.Bytes()))
+	if err != nil {
+		t.Fatalf("trustTunnelReadMultipathFrame(channel2) error: %v", err)
+	}
+
+	for i, frame := range []*trustTunnelMultipathFrame{frame1, frame2} {
+		if frame.Flags&trustTunnelMultipathFrameFlagControl == 0 {
+			t.Fatalf("frame%d is not control", i+1)
+		}
+		if len(frame.Payload) != 2 {
+			t.Fatalf("frame%d payload len = %d, want 2", i+1, len(frame.Payload))
+		}
+		if frame.Payload[0] != trustTunnelMultipathControlSessionClosing {
+			t.Fatalf("frame%d control type = %d, want %d", i+1, frame.Payload[0], trustTunnelMultipathControlSessionClosing)
+		}
+		if frame.Payload[1] != trustTunnelMultipathControlCloseReasonNormal {
+			t.Fatalf("frame%d close reason = %d, want %d", i+1, frame.Payload[1], trustTunnelMultipathControlCloseReasonNormal)
+		}
+	}
+}
+
+func TestTrustTunnelMultipathControlSessionClosingNormalEndsWithEOF(t *testing.T) {
+	channel1Client, channel1Server := net.Pipe()
+	channel2Client, channel2Server := net.Pipe()
+	defer channel1Server.Close()
+	defer channel2Server.Close()
+
+	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:            "sess-peer-close-normal",
+		Target:        xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:    "1.1.1.1:443",
+		MinChannels:   2,
+		MaxChannels:   2,
+		Strict:        true,
+		AttachTimeout: 500 * time.Millisecond,
+	})
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443", stream: channel1Client}); err != nil {
+		t.Fatalf("AddChannel(channel1) error: %v", err)
+	}
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443", stream: channel2Client}); err != nil {
+		t.Fatalf("AddChannel(channel2) error: %v", err)
+	}
+
+	stream, err := newTrustTunnelMultipathStream(session)
+	if err != nil {
+		t.Fatalf("newTrustTunnelMultipathStream() error: %v", err)
+	}
+	defer stream.Close()
+
+	go func() {
+		_ = trustTunnelWriteMultipathFrame(channel1Server, trustTunnelMultipathSessionClosingControlFrame(trustTunnelMultipathControlCloseReasonNormal))
+	}()
+
+	buf := make([]byte, 32)
+	_, err = stream.Read(buf)
+	if err != io.EOF {
+		t.Fatalf("stream.Read() error = %v, want EOF", err)
+	}
+	if !session.IsClosed() {
+		t.Fatal("session.IsClosed() = false, want true")
+	}
+	if closeErr := session.CloseErr(); closeErr != io.EOF {
+		t.Fatalf("session.CloseErr() = %v, want EOF", closeErr)
 	}
 }
 

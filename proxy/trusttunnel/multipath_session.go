@@ -438,6 +438,7 @@ func (s *trustTunnelMultipathSession) close(err error, notifyPeer bool) {
 	}
 
 	var channels []*trustTunnelMultipathChannel
+	closeReason := -1
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.state = trustTunnelMultipathSessionClosing
@@ -449,8 +450,16 @@ func (s *trustTunnelMultipathSession) close(err error, notifyPeer bool) {
 		s.notifyUpdatedLocked()
 		s.mu.Unlock()
 
-		if notifyPeer && isTrustTunnelMultipathQuorumLostError(err) {
-			trustTunnelWriteMultipathSessionClosingBestEffort(channels, trustTunnelMultipathControlCloseReasonQuorumLost)
+		if notifyPeer {
+			switch {
+			case isTrustTunnelMultipathQuorumLostError(err):
+				closeReason = int(trustTunnelMultipathControlCloseReasonQuorumLost)
+			case err == nil || err == io.EOF:
+				closeReason = int(trustTunnelMultipathControlCloseReasonNormal)
+			}
+		}
+		if closeReason >= 0 {
+			trustTunnelWriteMultipathSessionClosingBestEffort(channels, uint8(closeReason))
 		}
 
 		for _, channel := range channels {

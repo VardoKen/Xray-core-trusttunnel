@@ -351,6 +351,16 @@ func runTrustTunnelStreamTunnel(ctx context.Context, link *transport.Link, tunne
 
 		err := buf.Copy(link.Reader, buf.NewWriter(tunnelConn))
 		if err == nil {
+			if halfCloser, ok := tunnelConn.(interface{ CloseWrite() error }); ok {
+				if closeErr := halfCloser.CloseWrite(); closeErr != nil {
+					select {
+					case <-responseClosed:
+						return nil
+					default:
+					}
+					return closeErr
+				}
+			}
 			return nil
 		}
 
