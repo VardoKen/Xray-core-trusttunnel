@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-15
-Коммит состояния: `6316788d`
+Коммит состояния: `b280ad5d`
 Область истины: рабочие сценарии, правила написания конфигов, эксплуатационные ограничения
 Не использовать для: исторической хронологии и глубокой карты кода
 
@@ -222,10 +222,12 @@ Experimental phase-6 surface:
 Практическая граница:
 - `multipath.*` уже существует в config model и validator и больше не ограничивается одним skeleton-only verdict;
 - текущая фаза уже включает `HTTP/2 over TLS` payload path: session/channel registry, `_mptcp_open`, `_mptcp_attach`, attach-proof, server-side quorum wait, framed payload layer, dynamic writer retry по surviving channels, bounded reorder backpressure, request-side half-close, ACK / resend control-path, sender-side in-flight window, explicit strict quorum-loss semantics, peer-visible session-closing marker и recovery/rejoin;
+- multipath остаётся строго opt-in: без `multipath.enabled=true` outbound по-прежнему идёт по обычному single-path TrustTunnel CONNECT path; это отдельно подтверждено live через `/opt/lab/xray-tt/compat-ipv4/logs/multipath-ipv4-single-20260415-034757` и `/root/tt-multipath-ipv4/logs/multipath-ipv4-positive-20260415-034747`;
 - authoritative positive Linux multi-IP live payload run на второй VM `192.168.1.25` подтверждён через bundle `/root/tt-multipath-phase3/logs/multipath-phase3-live-20260413-092248` с `4 MiB` download/upload и одновременными TCP connections на `192.168.1.50` и `192.168.1.51`;
+- локальная IPv4 multi-host validation теперь тоже закрыта на `8-of-8`: bundles `/opt/lab/xray-tt/multipath-ipv4/logs/multipath-ipv4-positive-20260415-035212`, `/opt/lab/xray-tt/multipath-ipv4/logs/multipath-ipv4-rejoin-20260415-035247`, `/root/tt-multipath-ipv4/logs/multipath-ipv4-positive-20260415-035205` и `/root/tt-multipath-ipv4/logs/multipath-ipv4-rejoin-20260415-035235` подтверждают и normal payload path, и recovery/rejoin на `192.168.1.50` ... `192.168.1.57`;
 - separate negative live run через bundle `/root/tt-multipath-phase3/logs/multipath-phase3-gap-20260413-204116` уже подтверждает channel-loss path по `nft reject with tcp reset` на одном alias IP и даёт outer-layer marker `trusttunnel connection ends > proxy/trusttunnel: trusttunnel multipath channel quorum lost` на client runtime;
 - separate live rejoin run через bundle `/root/tt-multipath-phase3/logs/multipath-phase5-rejoin-20260413-194749` подтверждает восстановление quorum после channel-loss, повторное наличие двух `ESTAB` каналов и целостный `download.bin` hash;
-- отдельная shared-prod external validation между разными host уже закрыта для `8-of-8` positive, `16-of-16` positive и `8-of-8` rejoin, но higher-cardinality recovery/rejoin и load/CPU всё ещё открыты, поэтому `multipath.*` пока остаётся experimental R&D surface, а не продуктовым режимом.
+- отдельная shared-prod external validation между разными host уже закрыта для `8-of-8` positive, `16-of-16` positive и `8-of-8` rejoin; свежий rerun `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-positive-20260415-035505` и `/root/tt-multipath-prod/logs/multipath-ipv6-positive-20260415-035455` дополнительно подтверждает, что close-lifecycle hardening не даёт ложных post-completion quorum-loss markers, но higher-cardinality recovery/rejoin и load/CPU всё ещё открыты, поэтому `multipath.*` пока остаётся experimental R&D surface, а не продуктовым режимом.
 
 ### 3.2. Минимальные правила для H2 outbound
 

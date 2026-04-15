@@ -11,6 +11,7 @@ English version: [README.md](README.md)
 - HTTP/2 over TLS
 - HTTP/2 over REALITY
 - HTTP/3 over TLS
+- Experimental multipath на `HTTP/2 over TLS`, который включается только через `multipath.enabled`
 - `transport: "auto"` с выбором HTTP/3-first и fallback на HTTP/2
 - упорядоченные outbound-списки `servers[]` и доменные server-address с runtime-разворачиванием в resolved IP endpoint, delayed race между первыми двумя ready endpoint, последовательным fallback после неуспешной raced-пары, предпочтением последнего успешного endpoint, коротким cooldown после pre-establishment fail и active recovery probing охлаждённых endpoint через `_check`
 - лимиты входящих соединений по клиентам с отдельными счётчиками для H1/H2 и H3
@@ -31,6 +32,7 @@ English version: [README.md](README.md)
 - рекомендуемые примеры, которые показывают более безопасный вариант для реального использования
 - точное объяснение того, что такое `client_random` rules и как их писать
 - примеры политики лимитов для входящих соединений по клиентам
+- описание текущей experimental multipath surface и прямое правило, что обычный single-path TrustTunnel не меняется, пока не включён `multipath.enabled`
 
 ## Неподдержанные комбинации
 

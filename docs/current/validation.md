@@ -2,7 +2,7 @@
 
 Статус: current
 Дата фиксации: 2026-04-15
-Коммит состояния: `6316788d`
+Коммит состояния: `b280ad5d`
 Область истины: подтверждённые тесты, preflight, критерии pass/fail, тестовые границы
 Не использовать для: общей архитектуры и долгосрочного roadmap
 
@@ -299,7 +299,49 @@
 
 Практический вывод:
 - phase 1, phase 2, phase 3, phase 4, phase 5 и phase 6 уже закрывают config/validator/session/control, payload/runtime verdict, quorum-hardening, recovery/rejoin и outer-layer quorum-loss surfacing для `HTTP/2 over TLS`;
-- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, не первый framed payload path, не recovery/rejoin, не quorum-loss surfacing, не локальная IPv6 VM-валидация и не первый external positive verdict, а более жёсткая dedicated external negative / rejoin validation.
+- локальная IPv4 multi-host validation и explicit ordinary single-path compatibility теперь тоже подтверждены live, поэтому multipath больше не остаётся “только IPv6/LAN proof”;
+- следующий шаг теперь действительно уже не `_mptcp_open` / `_mptcp_attach`, не первый framed payload path, не recovery/rejoin, не quorum-loss surfacing, не локальная IPv6 VM-валидация и не первый external positive verdict, а более жёсткая higher-cardinality external recovery/rejoin и load/CPU validation.
+
+### 1.4a. Multipath local IPv4 validation и ordinary single-path compatibility
+
+Подтверждено на 2026-04-15:
+- local code state: `b280ad5d`;
+- lab runtime binary: `/opt/lab/xray-tt/tmp/xray-tt-multipath-prod`;
+- local IPv4 server runtime binary: `/root/tt-multipath-ipv4/xray-tt`;
+- local IPv4 client configs:
+  - `/opt/lab/xray-tt/multipath-ipv4/client.json` (`8-of-8` multipath positive/rejoin);
+  - `/opt/lab/xray-tt/compat-ipv4/client.json` (ordinary single-path compatibility);
+- local IPv4 server config: `/root/tt-multipath-ipv4/server.json`;
+- cert/key: `/root/tt-multipath-ipv4/server.crt`, `/root/tt-multipath-ipv4/server.key`, ephemeral self-signed cert с `CN/SAN=ttmulti4.lab`;
+- authoritative local IPv4 positive bundles:
+  - client `/opt/lab/xray-tt/multipath-ipv4/logs/multipath-ipv4-positive-20260415-035212`;
+  - server `/root/tt-multipath-ipv4/logs/multipath-ipv4-positive-20260415-035205`;
+- authoritative local IPv4 rejoin bundles:
+  - client `/opt/lab/xray-tt/multipath-ipv4/logs/multipath-ipv4-rejoin-20260415-035247`;
+  - server `/root/tt-multipath-ipv4/logs/multipath-ipv4-rejoin-20260415-035235`;
+- authoritative ordinary single-path compatibility bundles:
+  - client `/opt/lab/xray-tt/compat-ipv4/logs/multipath-ipv4-single-20260415-034757`;
+  - server `/root/tt-multipath-ipv4/logs/multipath-ipv4-positive-20260415-034747`.
+
+Что именно подтверждено:
+- local IPv4 `8-of-8` positive run:
+  - один client source address `192.168.1.19` держит восемь destination IPv4 `192.168.1.50` ... `192.168.1.57`;
+  - `curl.exitcode = 0`;
+  - `download.expected.sha256` = `download.actual.sha256` = `79cf58c41ad3d94d7b41c668dfb378899d2cc70b6a28736122c1331626476731`;
+  - server log фиксирует `trusttunnel H2 multipath open accepted` и attach до `channel=8`;
+  - после close-lifecycle hardening ложные post-completion `quorum degraded` / `failed to notify peer about lost channel` markers на client side больше не воспроизводятся;
+- local IPv4 `8-of-8` rejoin run:
+  - `drop.log` фиксирует `drop-mode=nft` и `drop-removed=1`;
+  - `curl.exitcode = 0`;
+  - `download.expected.sha256` = `download.actual.sha256` = `79cf58c41ad3d94d7b41c668dfb378899d2cc70b6a28736122c1331626476731`;
+  - client log фиксирует `trusttunnel multipath quorum degraded ... got=7 want=8`, затем `trusttunnel multipath quorum restored ... channels=8` и `trusttunnel multipath rejoined endpoint 192.168.1.57:9543 ... channel=9`;
+  - server log фиксирует attach до `channel=8`, затем rejoin attach `channel=9`;
+- ordinary single-path compatibility run:
+  - тот же server-side H2/TLS path работает без `multipath.*`;
+  - `curl.exitcode = 0`;
+  - `download.expected.sha256` = `download.actual.sha256` = `79cf58c41ad3d94d7b41c668dfb378899d2cc70b6a28736122c1331626476731`;
+  - server log содержит `trusttunnel H2 CONNECT accepted for tcp:127.0.0.1:18080`;
+  - multipath markers отсутствуют, что подтверждает opt-in семантику: multipath включается только при `multipath.enabled=true`, а обычный runtime path не меняется.
 
 ### 1.4. Multipath external/public IPv6 positive и `8-of-8` rejoin validation на isolated shared prod host
 
@@ -313,9 +355,10 @@
 
 Preflight:
 - local branch: `feat/trusttunnel-multipath`;
-- local code state: `6316788d`;
-- lab repo `HEAD`: `6316788d`;
-- tested runtime code for the rejoin rerun is the same `6316788d`, а не более старый phase-6 baseline;
+- initial external matrix code state: `6316788d`;
+- fresh close-lifecycle smoke code state: `b280ad5d`;
+- lab repo `HEAD` for the fresh smoke: `b280ad5d`;
+- tested runtime code for the original rejoin rerun is the same `6316788d`, а не более старый phase-6 baseline;
 - lab runtime binary: `/opt/lab/xray-tt/tmp/xray-tt-multipath-prod`;
 - prod runtime binary: `/root/tt-multipath-prod/xray-tt-multipath-linux`;
 - prod server config: `/root/tt-multipath-prod/multipath_prod_server.json`;
@@ -347,6 +390,13 @@ Preflight:
   - prod `drop.log` фиксирует `drop-mode=nft` и `drop-removed=1`;
   - prod `ss-after-rejoin.txt` снова показывает восемь активных каналов, включая восстановившийся `::57`;
   - prod `server-error.log` фиксирует `trusttunnel multipath quorum degraded`, затем `trusttunnel multipath quorum restored`, без финального `reorder gap timed out` или `reorder window exceeded`.
+- fresh `8-of-8` positive smoke на code state `b280ad5d`:
+  - client bundle `/opt/lab/xray-tt/multipath-prod-ipv6/logs/multipath-ipv6-positive-20260415-035505`;
+  - server bundle `/root/tt-multipath-prod/logs/multipath-ipv6-positive-20260415-035455`;
+  - `curl.exitcode = 0`;
+  - `download.actual.sha256` = `79cf58c41ad3d94d7b41c668dfb378899d2cc70b6a28736122c1331626476731`;
+  - prod `server-error.log` фиксирует attach до `channel=8`;
+  - client runtime больше не воспроизводит ложные close-time `quorum degraded` markers после успешного завершения staged-download.
 
 Что сознательно НЕ подтверждалось на shared prod host:
 - higher-cardinality recovery/rejoin выше `8-of-8`;

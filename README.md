@@ -11,6 +11,7 @@ The goal of the fork is straightforward: keep TrustTunnel usable as a maintained
 - HTTP/2 over TLS
 - HTTP/2 over REALITY
 - HTTP/3 over TLS
+- Experimental multipath over `HTTP/2 over TLS`, enabled explicitly through `multipath.enabled`
 - `transport: "auto"` with HTTP/3-first selection and HTTP/2 fallback
 - Ordered outbound `servers[]` lists and domain-valued server addresses with runtime expansion into resolved IP endpoints, delayed race between the first two ready endpoints, sequential fallback after unsuccessful raced attempts, last-successful endpoint preference, short cooldown after pre-establishment failure, and active recovery probing of cooling endpoints via `_check`
 - Per-client inbound connection limits with separate H1/H2 and H3 counters
@@ -31,6 +32,7 @@ The configuration guide includes:
 - recommended examples, which show the safer default for real deployments
 - a precise explanation of `client_random` rules and how to write them
 - inbound limit-policy examples for per-client H1/H2 and H3 connection limits
+- the current experimental multipath scope and the rule that ordinary single-path TrustTunnel remains unchanged unless `multipath.enabled` is set
 
 ## Unsupported combinations
 

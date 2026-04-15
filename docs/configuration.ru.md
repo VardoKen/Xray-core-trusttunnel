@@ -274,6 +274,34 @@ Tracked example:
 - [../testing/trusttunnel/client_h2_servers_fallback.json](../testing/trusttunnel/client_h2_servers_fallback.json)
 - [../testing/trusttunnel/client_h2_resolved_domain.json](../testing/trusttunnel/client_h2_resolved_domain.json)
 
+### 4.5a. Experimental multipath outbound
+
+Multipath сейчас остаётся experimental outbound-режимом.
+
+Его нужно использовать только как явное расширение обычного TrustTunnel outbound:
+
+```json
+"multipath": {
+  "enabled": true,
+  "minChannels": 8,
+  "maxChannels": 8,
+  "scheduler": "round_robin",
+  "attachTimeoutSecs": 8,
+  "reorderWindowBytes": 4194304,
+  "reorderGapTimeoutMs": 3000,
+  "strict": true
+}
+```
+
+Правила:
+
+- это строго opt-in режим; если секция `multipath` отсутствует или `enabled` равно `false`, клиент использует обычный single-path TrustTunnel runtime
+- текущий подтверждённый scope: только `HTTP/2 over TLS`
+- текущий подтверждённый payload path: только TCP CONNECT
+- использовать только вместе с явным multi-endpoint пулом `servers[]`
+- пока не считать подтверждёнными `HTTP/2 over REALITY`, `HTTP/3`, `transport: "auto"`, UDP и ICMP
+- текущая валидация уже включает локальные multi-host прогоны по IPv4, локальные multi-host прогоны по IPv6 и внешний IPv6 multipath на публичном multi-IP host
+
 ### 4.6. UDP outbound
 
 Нужно задать:
