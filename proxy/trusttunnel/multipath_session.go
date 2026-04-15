@@ -256,6 +256,19 @@ func (s *trustTunnelMultipathSession) HandleChannelFailure(channelID uint32, cau
 	var sessionWasReady bool
 
 	s.mu.Lock()
+	if s.state == trustTunnelMultipathSessionClosing {
+		channel = s.channels[channelID]
+		if channel != nil {
+			delete(s.channels, channelID)
+			channel.closing = true
+		}
+		s.mu.Unlock()
+
+		if channel != nil && channel.stream != nil {
+			_ = channel.stream.Close()
+		}
+		return nil
+	}
 	sessionWasReady = s.readyReachedLocked()
 	channel = s.channels[channelID]
 	if channel != nil {

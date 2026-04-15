@@ -283,7 +283,7 @@ func (s *trustTunnelMultipathStream) runChannelReader(channel *trustTunnelMultip
 				if closeErr := s.session.HandleChannelFailure(channel.id, channelErr); closeErr != nil {
 					errors.LogWarningInner(context.Background(), closeErr, "trusttunnel multipath stream closing after channel failure")
 					s.close(closeErr)
-				} else if s.send != nil {
+				} else if s.send != nil && s.session.State() != trustTunnelMultipathSessionClosing {
 					s.send.NotifyChannelClosed(channel.id)
 				}
 			}

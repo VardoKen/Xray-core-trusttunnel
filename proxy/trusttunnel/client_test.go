@@ -23,6 +23,32 @@ import (
 	"github.com/xtls/xray-core/transport/pipe"
 )
 
+func trustTunnelTestClientServerEndpoint(port xnet.Port, username, password string) *protocol.ServerEndpoint {
+	return &protocol.ServerEndpoint{
+		Address: xnet.NewIPOrDomain(xnet.LocalHostIP),
+		Port:    uint32(port),
+		User: &protocol.User{
+			Email: "tt-client-test",
+			Account: serial.ToTypedMessage(&Account{
+				Username: username,
+				Password: password,
+			}),
+		},
+	}
+}
+
+func trustTunnelTestClientServerSpec(port xnet.Port, username, password string) *protocol.ServerSpec {
+	return protocol.NewServerSpec(
+		xnet.TCPDestination(xnet.LocalHostIP, port),
+		&protocol.MemoryUser{
+			Account: &MemoryAccount{
+				Username: username,
+				Password: password,
+			},
+		},
+	)
+}
+
 func TestClientProcessRejectsIncompleteICMPLink(t *testing.T) {
 	client := &Client{
 		config: &ClientConfig{},
@@ -89,6 +115,44 @@ func TestClientProcessRejectsMultipathWithoutDistinctRuntimePool(t *testing.T) {
 	}
 	if dialer.dialCalls != 0 {
 		t.Fatalf("dialCalls = %d, want 0", dialer.dialCalls)
+	}
+}
+
+func TestClientProcessWithoutEnabledMultipathUsesOrdinaryConnectPath(t *testing.T) {
+	client := &Client{
+		config: &ClientConfig{
+			Servers: []*protocol.ServerEndpoint{
+				trustTunnelTestClientServerEndpoint(9443, "u1", "p1"),
+				trustTunnelTestClientServerEndpoint(9444, "u1", "p1"),
+			},
+			Transport: TransportProtocol_HTTP2,
+			Hostname:  "localhost",
+		},
+		server: trustTunnelTestClientServerSpec(9443, "u1", "p1"),
+	}
+
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{
+		{
+			Target: xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		},
+	})
+	dialer := &fakeTrustTunnelDialerWithStreamSettings{
+		streamSettings: &internet.MemoryStreamConfig{
+			SecurityType:     "tls",
+			SecuritySettings: &internettls.Config{},
+		},
+		err: io.EOF,
+	}
+
+	err := client.Process(ctx, &transport.Link{}, dialer)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if strings.Contains(err.Error(), "multipath") {
+		t.Fatalf("unexpected multipath error: %v", err)
+	}
+	if dialer.dialCalls == 0 {
+		t.Fatal("dialCalls = 0, want ordinary connect path to dial at least once")
 	}
 }
 

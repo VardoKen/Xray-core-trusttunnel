@@ -138,6 +138,35 @@ func TestTrustTunnelMultipathSessionHandleChannelFailureNonStrictKeepsSessionOpe
 	}
 }
 
+func TestTrustTunnelMultipathSessionHandleChannelFailureDuringCloseIsIgnored(t *testing.T) {
+	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
+		ID:          "sess-closing",
+		MinChannels: 2,
+		MaxChannels: 2,
+		Target:      xnet.TCPDestination(xnet.ParseAddress("1.1.1.1"), xnet.Port(443)),
+		TargetHost:  "1.1.1.1:443",
+		Strict:      true,
+	})
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 1, endpoint: "192.168.1.50:9443"}); err != nil {
+		t.Fatalf("AddChannel(primary) error: %v", err)
+	}
+	if err := session.AddChannel(&trustTunnelMultipathChannel{id: 2, endpoint: "192.168.1.51:9443"}); err != nil {
+		t.Fatalf("AddChannel(secondary) error: %v", err)
+	}
+
+	session.close(nil, false)
+
+	if err := session.HandleChannelFailure(1, io.EOF); err != nil {
+		t.Fatalf("HandleChannelFailure() during close error = %v, want nil", err)
+	}
+	if state := session.State(); state != trustTunnelMultipathSessionClosing {
+		t.Fatalf("state after close-time failure = %v, want closing", state)
+	}
+	if err := session.CloseErr(); err != nil {
+		t.Fatalf("CloseErr() = %v, want nil", err)
+	}
+}
+
 func TestTrustTunnelMultipathSessionRegistryLifecycle(t *testing.T) {
 	registry := newTrustTunnelMultipathSessionRegistry()
 	session := newTrustTunnelMultipathSession(trustTunnelMultipathSessionOptions{
