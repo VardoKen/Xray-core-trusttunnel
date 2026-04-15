@@ -20,6 +20,25 @@ English version: [README.md](README.md)
 - ICMP-туннелирование через `_icmp`
 - Путь health-check через `_check`
 
+## Experimental multipath
+
+В этом форке есть и experimental-расширение TrustTunnel Multipath.
+
+Текущий опубликованный scope:
+
+- это только outbound-расширение поверх `HTTP/2 over TLS`
+- один client source address открывает несколько одновременных каналов к нескольким server destination IP внутри одной логической TrustTunnel-сессии
+- серверная сторона остаётся на обычном TrustTunnel H2/TLS inbound path; отдельного публичного server-side блока `multipath` сейчас нет
+- текущий подтверждённый payload path: только TCP CONNECT
+- режим строго opt-in и включается только через `settings.multipath.enabled`
+- если секция `multipath` отсутствует или `enabled` равно `false`, клиент продолжает использовать обычный single-path TrustTunnel runtime
+
+Подробное описание конфигов и tracked-примеры:
+
+- [docs/configuration.ru.md#45a-experimental-multipath-outbound](docs/configuration.ru.md#45a-experimental-multipath-outbound)
+- [testing/trusttunnel/client_h2_multipath_minimal.json](testing/trusttunnel/client_h2_multipath_minimal.json)
+- [testing/trusttunnel/client_h2_multipath_recommended.json](testing/trusttunnel/client_h2_multipath_recommended.json)
+
 ## `clientRandom`
 
 `clientRandom` не обязателен для того, чтобы вообще установить каждое TrustTunnel-соединение, но для реальных deployment-сценариев это рекомендуемый вариант по умолчанию.

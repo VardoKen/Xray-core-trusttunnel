@@ -1,0 +1,66 @@
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-multipath-out",
+      "protocol": "trusttunnel",
+      "settings": {
+        "servers": [
+          { "address": "tt-a.example.com", "port": 9443 },
+          { "address": "tt-b.example.com", "port": 9443 },
+          { "address": "tt-c.example.com", "port": 9443 },
+          { "address": "tt-d.example.com", "port": 9443 }
+        ],
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.example.com",
+        "transport": "http2",
+        "clientRandom": "deadbeef",
+        "hasIpv6": true,
+        "skipVerification": false,
+        "certificatePemFile": "/path/to/trust-anchor.pem",
+        "udp": false,
+        "multipath": {
+          "enabled": true,
+          "minChannels": 4,
+          "maxChannels": 4,
+          "scheduler": "round_robin",
+          "attachTimeoutSecs": 8,
+          "reorderWindowBytes": 4194304,
+          "reorderGapTimeoutMs": 3000,
+          "strict": true
+        }
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.example.com",
+          "allowInsecure": false,
+          "alpn": ["h2"]
+        }
+      }
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["socks-in"],
+        "outboundTag": "tt-multipath-out"
+      }
+    ]
+  }
+}

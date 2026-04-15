@@ -20,6 +20,25 @@ The goal of the fork is straightforward: keep TrustTunnel usable as a maintained
 - ICMP tunneling via `_icmp`
 - Health-check path via `_check`
 
+## Experimental multipath
+
+This fork also carries an experimental TrustTunnel multipath extension.
+
+Current published scope:
+
+- it is an outbound-only extension on top of `HTTP/2 over TLS`
+- one client source address opens multiple simultaneous channels to multiple server destination IPs inside one logical TrustTunnel session
+- the server side stays on the ordinary TrustTunnel H2/TLS inbound path; there is no separate public server-side `multipath` config block
+- current validated payload path is TCP CONNECT
+- it is strictly opt-in through `settings.multipath.enabled`
+- if `multipath` is omitted or `enabled` is `false`, the client keeps using the ordinary single-path TrustTunnel runtime
+
+Detailed config reference and example configs:
+
+- [docs/configuration.md#45a-experimental-multipath-outbound](docs/configuration.md#45a-experimental-multipath-outbound)
+- [testing/trusttunnel/client_h2_multipath_minimal.json](testing/trusttunnel/client_h2_multipath_minimal.json)
+- [testing/trusttunnel/client_h2_multipath_recommended.json](testing/trusttunnel/client_h2_multipath_recommended.json)
+
 ## `clientRandom`
 
 `clientRandom` is not required to make every TrustTunnel connection work, but it is the recommended default for real deployments.

@@ -293,14 +293,172 @@ Multipath сейчас остаётся experimental outbound-режимом.
 }
 ```
 
-Правила:
+Правила совместимости:
 
 - это строго opt-in режим; если секция `multipath` отсутствует или `enabled` равно `false`, клиент использует обычный single-path TrustTunnel runtime
 - текущий подтверждённый scope: только `HTTP/2 over TLS`
 - текущий подтверждённый payload path: только TCP CONNECT
-- использовать только вместе с явным multi-endpoint пулом `servers[]`
+- текущий validator/runtime требует `transport: "http2"`, `streamSettings.network: "tcp"`, `streamSettings.security: "tls"` и `udp: false`
+- использовать нужно либо с явным multi-endpoint пулом `servers[]`, либо с domain-valued `address`, который на client init разворачивается в достаточное количество разных IP
+- для предсказуемого поведения лучше использовать явный `servers[]`, а не один домен
+- серверная сторона остаётся обычным H2/TLS inbound-конфигом TrustTunnel; отдельного публичного server-side блока `multipath` сейчас нет
+- все destination IP, которые использует один multipath-клиент, должны приходить на один и тот же TrustTunnel server instance и, соответственно, на один multipath session registry
 - пока не считать подтверждёнными `HTTP/2 over REALITY`, `HTTP/3`, `transport: "auto"`, UDP и ICMP
 - текущая валидация уже включает локальные multi-host прогоны по IPv4, локальные multi-host прогоны по IPv6 и внешний IPv6 multipath на публичном multi-IP host
+
+Минимальный совместимый клиентский конфиг:
+
+```json
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-multipath-out",
+      "protocol": "trusttunnel",
+      "settings": {
+        "servers": [
+          { "address": "tt-a.example.com", "port": 9443 },
+          { "address": "tt-b.example.com", "port": 9443 }
+        ],
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.example.com",
+        "transport": "http2",
+        "udp": false,
+        "multipath": {
+          "enabled": true,
+          "minChannels": 2,
+          "maxChannels": 2
+        }
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.example.com",
+          "alpn": ["h2"]
+        }
+      }
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["socks-in"],
+        "outboundTag": "tt-multipath-out"
+      }
+    ]
+  }
+}
+```
+
+Рекомендуемый совместимый клиентский конфиг:
+
+```json
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-multipath-out",
+      "protocol": "trusttunnel",
+      "settings": {
+        "servers": [
+          { "address": "tt-a.example.com", "port": 9443 },
+          { "address": "tt-b.example.com", "port": 9443 },
+          { "address": "tt-c.example.com", "port": 9443 },
+          { "address": "tt-d.example.com", "port": 9443 }
+        ],
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.example.com",
+        "transport": "http2",
+        "clientRandom": "deadbeef",
+        "hasIpv6": true,
+        "skipVerification": false,
+        "certificatePemFile": "/path/to/trust-anchor.pem",
+        "udp": false,
+        "multipath": {
+          "enabled": true,
+          "minChannels": 4,
+          "maxChannels": 4,
+          "scheduler": "round_robin",
+          "attachTimeoutSecs": 8,
+          "reorderWindowBytes": 4194304,
+          "reorderGapTimeoutMs": 3000,
+          "strict": true
+        }
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.example.com",
+          "allowInsecure": false,
+          "alpn": ["h2"]
+        }
+      }
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["socks-in"],
+        "outboundTag": "tt-multipath-out"
+      }
+    ]
+  }
+}
+```
+
+Справочник multipath-полей:
+
+| Поле | Тип | Допустимые значения | Значение по умолчанию | Что делает | Примечание |
+| --- | --- | --- | --- | --- | --- |
+| `enabled` | boolean | `true`, `false` | `false`, если поле отсутствует | Включает или выключает multipath-runtime | Если `false` или поле отсутствует, outbound остаётся обычным single-path |
+| `minChannels` | integer | `>= 2` | `2`, если задан `0` или поле отсутствует | Минимальный quorum активных каналов для старта и восстановления | После runtime-resolution клиент должен иметь хотя бы столько разных endpoint |
+| `maxChannels` | integer | `>= minChannels` | `minChannels`, если задан `0` или поле отсутствует | Жёсткий верхний предел одновременно зарегистрированных каналов в одной сессии | Держи равным `minChannels`, если тебе не нужны запасные каналы сверх quorum |
+| `scheduler` | string | `round_robin`, `round-robin` или пусто | `round_robin` | Политика выбора канала на write-side | Текущий runtime принимает только round-robin |
+| `attachTimeoutSecs` | integer | `> 0` или поле отсутствует | `5` секунд | Дедлайн начального attach-quorum и grace-window для strict-режима | Этот же timeout используется как окно для recovery/rejoin |
+| `reorderWindowBytes` | integer | `> 0` или поле отсутствует | `1048576` | Максимальный буфер out-of-order payload до overflow | Увеличение помогает на WAN-jitter и большем числе каналов, но ест память |
+| `reorderGapTimeoutMs` | integer | `> 0` или поле отсутствует | `3000` миллисекунд | Сколько reassembly ждёт пропущенный frame перед gap-timeout | Слишком маленькое значение делает WAN rejoin хрупким, слишком большое замедляет фиксацию отказа |
+| `strict` | boolean | `true`, `false` или поле отсутствует | `true`, если multipath включён, а поле отсутствует | Определяет, должна ли сессия умереть, если число активных каналов остаётся ниже `minChannels` дольше grace-window | Текущая live-валидация проводилась на `strict=true`; `strict=false` реализован и покрыт unit-тестами, но пока не входит в опубликованную live-matrix |
+
+Практическое правило:
+
+- совместимый клиентский конфиг должен одновременно удовлетворять и обычным правилам TrustTunnel H2/TLS, и multipath-ограничениям выше
+- самый короткий предсказуемый путь к совместимому конфигу — явный `servers[]`, `transport: "http2"` и TLS с ALPN `h2`
+- если нужен текущий опубликованный совместимый default-вариант, стартуй с recommended-конфига выше и затем замени адреса, credentials, certificate material и порты на свои
+
+Tracked examples:
+
+- минимальный: [../testing/trusttunnel/client_h2_multipath_minimal.json](../testing/trusttunnel/client_h2_multipath_minimal.json)
+- рекомендуемый: [../testing/trusttunnel/client_h2_multipath_recommended.json](../testing/trusttunnel/client_h2_multipath_recommended.json)
 
 ### 4.6. UDP outbound
 
@@ -407,6 +565,7 @@ Tracked rule example:
 | `hostname` | string | Да | Логическое имя хоста TrustTunnel | Для REALITY должно совпадать с `realitySettings.serverName` |
 | `transport` | string | Да | Выбор транспорта | `http2`, `http3` или `auto` |
 | `udp` | boolean | Нет | Включает UDP mux path | Использовать IP-назначения |
+| `multipath` | object | Нет | Включает experimental multipath runtime | См. раздел 4.5a; текущий подтверждённый scope: `HTTP/2 over TLS` и TCP CONNECT |
 | `skipVerification` | boolean | Нет | Разрешает insecure certificate verification behavior | Не смешивать двусмысленно с generic verify settings |
 | `certificatePem` | string | Нет | Inline trusted PEM certificate | Только для TLS-path |
 | `certificatePemFile` | string | Нет | Путь к trusted PEM certificate file | Только для TLS-path |

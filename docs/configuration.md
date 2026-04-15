@@ -293,14 +293,172 @@ Use it only as an explicit extension of the ordinary TrustTunnel outbound:
 }
 ```
 
-Rules:
+Compatibility rules:
 
 - it is opt-in only; if `multipath` is omitted or `enabled` is `false`, the client uses the ordinary single-path TrustTunnel runtime
 - current validated scope is `HTTP/2 over TLS` only
-- current validated payload path is TCP CONNECT
-- use it with an explicit multi-endpoint `servers[]` pool
+- current validated payload path is TCP CONNECT only
+- the current validator/runtime requires `transport: "http2"`, `streamSettings.network: "tcp"`, `streamSettings.security: "tls"`, and `udp: false`
+- use it with an explicit multi-endpoint `servers[]` pool, or with a domain-valued `address` that resolves to enough distinct IPs at client startup
+- for predictable behavior, prefer explicit `servers[]` over a single domain-valued `address`
+- the ordinary H2/TLS inbound config remains compatible; there is no dedicated server-side `multipath` JSON block
+- all destination IPs used by one multipath client must terminate on the same TrustTunnel server instance and therefore share one multipath session registry
 - do not treat it as validated for `HTTP/2 over REALITY`, `HTTP/3`, `transport: "auto"`, UDP, or ICMP
 - current validation already covers local IPv4 multi-host runs, local IPv6 multi-host runs, and external IPv6 runs on a public multi-IP host
+
+Minimal compatible client config:
+
+```json
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-multipath-out",
+      "protocol": "trusttunnel",
+      "settings": {
+        "servers": [
+          { "address": "tt-a.example.com", "port": 9443 },
+          { "address": "tt-b.example.com", "port": 9443 }
+        ],
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.example.com",
+        "transport": "http2",
+        "udp": false,
+        "multipath": {
+          "enabled": true,
+          "minChannels": 2,
+          "maxChannels": 2
+        }
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.example.com",
+          "alpn": ["h2"]
+        }
+      }
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["socks-in"],
+        "outboundTag": "tt-multipath-out"
+      }
+    ]
+  }
+}
+```
+
+Recommended compatible client config:
+
+```json
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "tt-multipath-out",
+      "protocol": "trusttunnel",
+      "settings": {
+        "servers": [
+          { "address": "tt-a.example.com", "port": 9443 },
+          { "address": "tt-b.example.com", "port": 9443 },
+          { "address": "tt-c.example.com", "port": 9443 },
+          { "address": "tt-d.example.com", "port": 9443 }
+        ],
+        "username": "u1",
+        "password": "p1",
+        "hostname": "vpn.example.com",
+        "transport": "http2",
+        "clientRandom": "deadbeef",
+        "hasIpv6": true,
+        "skipVerification": false,
+        "certificatePemFile": "/path/to/trust-anchor.pem",
+        "udp": false,
+        "multipath": {
+          "enabled": true,
+          "minChannels": 4,
+          "maxChannels": 4,
+          "scheduler": "round_robin",
+          "attachTimeoutSecs": 8,
+          "reorderWindowBytes": 4194304,
+          "reorderGapTimeoutMs": 3000,
+          "strict": true
+        }
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "vpn.example.com",
+          "allowInsecure": false,
+          "alpn": ["h2"]
+        }
+      }
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["socks-in"],
+        "outboundTag": "tt-multipath-out"
+      }
+    ]
+  }
+}
+```
+
+Multipath field reference:
+
+| Field | Type | Allowed values | Default | Meaning | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `enabled` | boolean | `true`, `false` | `false` when omitted | Turns multipath runtime on or off | If `false` or omitted, outbound stays ordinary single-path |
+| `minChannels` | integer | `>= 2` | `2` when set to `0` or omitted | Minimum active channel quorum required for startup and recovery | After runtime resolution, the client must have at least this many distinct endpoints |
+| `maxChannels` | integer | `>= minChannels` | `minChannels` when set to `0` or omitted | Hard upper bound for concurrently registered channels in one session | Keep it equal to `minChannels` unless you intentionally want spare channels above quorum |
+| `scheduler` | string | `round_robin`, `round-robin`, or omitted | `round_robin` | Write-side channel scheduling policy | Current runtime accepts only round-robin scheduling |
+| `attachTimeoutSecs` | integer | `> 0` or omitted | `5` seconds | Initial attach deadline and strict-mode quorum-loss grace window | The same timeout is reused as the rejoin grace period |
+| `reorderWindowBytes` | integer | `> 0` or omitted | `1048576` | Maximum buffered out-of-order payload before overflow | Increase this for larger WAN jitter or more channels; larger values use more memory |
+| `reorderGapTimeoutMs` | integer | `> 0` or omitted | `3000` milliseconds | How long reassembly waits for a missing frame before aborting the gap | Too small makes WAN rejoin fragile; too large delays failure reporting |
+| `strict` | boolean | `true`, `false`, or omitted | `true` when multipath is enabled and the field is omitted | Controls whether the session must die after quorum stays below `minChannels` past the grace window | Current live validation is on `strict=true`; `strict=false` is implemented and unit-tested but not part of the published live matrix yet |
+
+Practical guidance:
+
+- a compatible client config must satisfy both the ordinary TrustTunnel H2/TLS rules and the multipath-specific rules above
+- the shortest predictable way to do that is explicit `servers[]` plus `transport: "http2"` plus TLS with ALPN `h2`
+- if you want the current published, compatible default, start from the recommended config above and then replace addresses, credentials, certificate material, and ports with your own values
+
+Tracked examples:
+
+- minimal: [../testing/trusttunnel/client_h2_multipath_minimal.json](../testing/trusttunnel/client_h2_multipath_minimal.json)
+- recommended: [../testing/trusttunnel/client_h2_multipath_recommended.json](../testing/trusttunnel/client_h2_multipath_recommended.json)
 
 ### 4.6. UDP outbound
 
@@ -407,6 +565,7 @@ Tracked rule example:
 | `hostname` | string | Yes | Logical TrustTunnel host name | For REALITY, match `realitySettings.serverName` |
 | `transport` | string | Yes | Transport selection | `http2`, `http3`, or `auto` |
 | `udp` | boolean | No | Enables UDP mux path | Use IP targets |
+| `multipath` | object | No | Enables the experimental multipath runtime | See Section 4.5a; current validated scope is `HTTP/2 over TLS` plus TCP CONNECT |
 | `skipVerification` | boolean | No | Allows insecure certificate verification behavior | Do not combine ambiguously with generic verify settings |
 | `certificatePem` | string | No | Inline trusted PEM certificate | TLS path only |
 | `certificatePemFile` | string | No | Path to trusted PEM certificate file | TLS path only |
